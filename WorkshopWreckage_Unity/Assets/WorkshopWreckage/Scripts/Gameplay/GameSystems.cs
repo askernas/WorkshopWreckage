@@ -27,10 +27,14 @@ namespace WorkshopWreckage
             return Result.Ok;
         }
 
-        public Result Deposit(string box, int id)
+        /// <summary>Who made the deposit currently being reported ("player" or "robot:&lt;name&gt;").</summary>
+        public string lastDepositor = "player";
+
+        public Result Deposit(string box, int id, string by = "player")
         {
             var r = Check(box, id);
             if (r != Result.Ok) return r;
+            lastDepositor = by;
             if (!contents.TryGetValue(box, out var l)) contents[box] = l = new List<int>();
             l.Add(id);
             if (placement != null) world.instances[id].transform = placement(box, id, l.Count - 1);

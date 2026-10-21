@@ -241,7 +241,7 @@ namespace WorkshopWreckage
             MakeButton(m, "Load Game", () => ShowSub("load"));
             MakeButton(m, "Settings", () => ShowSub("settings"));
             MakeButton(m, "Quit", Application.Quit);
-            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel/1-9 select · Tab inventory · F5/F9 quick save/load · F3 stats", 14, Muted, 40);
+            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel/1-9 select · R send Retrobot · T Retrobot follow/stay · Tab log · F5/F9 save/load", 14, Muted, 40);
             Para(m, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20);
 
             var p = Screen("pause", 460);
@@ -509,7 +509,7 @@ namespace WorkshopWreckage
             _level.text = pr == null ? "" : $"Level {pr.level}  ·  {pr.XpIntoLevel:N0}/{(pr.level >= pr.maxLevel ? pr.XpIntoLevel : pr.XpForLevel(pr.level)):N0} XP" + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
             _progress.text = $"Workshop restored  {p.OverallPercent:0.0}%   ({p.sortedTotal} / {_g.world.Count} sorted)";
             int z = _g.layout.ZoneAt(_g.player.transform.position);
-            _zone.text = $"{_g.layout.zones[z].name}  —  {p.ZonePercent(z):0}% restored";
+            _zone.text = $"{_g.layout.zones[z].name}  —  {p.ZonePercent(z):0}% restored" + (_g.retrobot != null ? "     " + _g.retrobot.Describe() : "");
             UpdateHeld();
             if (Keyboard.current != null && Keyboard.current.f3Key.wasPressedThisFrame)
                 _debug.transform.parent.gameObject.SetActive(!_debug.transform.parent.gameObject.activeSelf);

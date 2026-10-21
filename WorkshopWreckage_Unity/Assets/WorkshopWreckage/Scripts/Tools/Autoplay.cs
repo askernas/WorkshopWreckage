@@ -137,6 +137,9 @@ namespace WorkshopWreckage
             Check("save/load restores identical state", snap == after, $"{snap.GetHashCode()} vs {after.GetHashCode()}");
             File.Delete(SaveSystem.PathOf("autotest"));
 
+            // 6. Retrobot: assembly from 5 parts, activation, autonomous sorting
+            yield return RetrobotChecks();
+
             g.PlaceCamera("0.6,1.65,3.6,0,-18");
             g.hud.SetHudVisible(true);
             yield return g.Capture(Path.Combine(outDir, "04_hud_overview.png"), 10);
@@ -146,6 +149,97 @@ namespace WorkshopWreckage
         }
 
         IEnumerator Frames(int n) { for (int i = 0; i < n; i++) yield return null; }
+
+        /// <summary>Frames Retrobot from the front-side, trying other angles until the
+        /// camera has a clear line of sight and is not inside furniture or walls.</summary>
+        void LookAtRobot(float dist, float height, float side)
+        {
+            var r = g.retrobot.transform;
+            var at = r.position + Vector3.up * 0.15f;
+            float a0 = Mathf.Atan2(side, dist) * Mathf.Rad2Deg;
+            float d = new Vector2(side, dist).magnitude;
+            var lo = g.layout.roomMin; var hi = g.layout.roomMax;
+            foreach (var da in new[] { 0f, 25f, -25f, 50f, -50f, 80f, -80f, 120f, -120f, 180f })
+            {
+                foreach (var dd in new[] { d, d * 0.75f, d * 0.55f })
+                {
+                    var dir = Quaternion.AngleAxis(a0 + da, Vector3.up) * r.forward;
+                    var eye = at + dir * dd + Vector3.up * (height - 0.15f);
+                    bool inside = eye.x > lo.x + 0.3f && eye.x < hi.x - 0.3f && -eye.z > lo.z + 0.3f && -eye.z < hi.z - 0.3f;
+                    if (!inside || Physics.Linecast(eye, at + Vector3.up * 0.2f, 1 << Layers.Env) || Physics.CheckSphere(eye, 0.25f, 1 << Layers.Env)) continue;
+                    LookFrom(eye, at);
+                    return;
+                }
+            }
+            LookFrom(at + r.forward * dist + Vector3.up * (height - 0.15f), at);
+        }
+
+        IEnumerator RetrobotChecks()
+        {
+            var rb = g.retrobot;
+            var parts = g.db.RobotPartIds(Retrobot.Id).SelectMany(d => g.world.IdsOf(d)).ToList();
+            Check("Retrobot has 5 assembly parts", parts.Count == 5, $"{parts.Count} parts");
+            Check("Retrobot inactive before assembly", !rb.Active, rb.Describe());
+            for (int k = 0; k < parts.Count; k++)
+            {
+                int id = parts[k];
+                if (g.world.instances[id].state == ItemState.InWorld)
+                {
+                    g.index.Remove(id);
+                    g.world.SetState(id, ItemState.Carried, "player");
+                    g.inventory.Add(id);
+                }
+                g.interaction.DepositStation(id);
+                yield return Frames(2);
+                if (k == 2)
+                {
+                    Check("Retrobot stays inactive while parts are missing", !rb.Active, rb.Describe());
+                    LookAtRobot(0.75f, 0.5f, 0.25f);
+                    yield return g.Capture(Path.Combine(outDir, "05_retrobot_partial.png"), 4);
+                }
+            }
+            float t0 = Time.realtimeSinceStartup;
+            while (!rb.Active && Time.realtimeSinceStartup - t0 < 10) { LookAtRobot(0.75f, 0.5f, 0.2f); yield return null; }
+            Check("Retrobot activates when all 5 parts are installed", rb.Active, rb.Describe());
+            LookAtRobot(0.7f, 0.45f, 0.15f);
+            yield return g.Capture(Path.Combine(outDir, "06_retrobot_online.png"), 3);
+
+            // let him work on his own (sped up), photographing a pick-up and a carry
+            int sortedBefore = g.progress.sortedTotal, robotBefore = g.telemetry.sortedRobot;
+            Time.timeScale = 3;
+            bool shotPick = false, shotCarry = false, shotWalk = false;
+            t0 = Time.realtimeSinceStartup;
+            Time.timeScale = 4;
+            while ((rb.delivered < 2 || rb.delivered + rb.staged < 4) && Time.realtimeSinceStartup - t0 < 180)
+            {
+                if (!shotWalk && rb.StepName == "ToItem" && rb.carriedId < 0) { shotWalk = true; Time.timeScale = 1; LookAtRobot(0.9f, 0.5f, 0.6f); yield return g.Capture(Path.Combine(outDir, "07_retrobot_walking.png"), 1); Time.timeScale = 3; }
+                if (!shotPick && rb.StepName == "Picking") { shotPick = true; Time.timeScale = 1; yield return new WaitForSeconds(0.35f); LookAtRobot(0.7f, 0.4f, 0.5f); yield return g.Capture(Path.Combine(outDir, "08_retrobot_bending.png"), 1); Time.timeScale = 3; }
+                if (!shotCarry && rb.StepName == "ToDest" && rb.carriedId >= 0) { shotCarry = true; Time.timeScale = 1; yield return new WaitForSeconds(0.4f); LookAtRobot(0.8f, 0.45f, 0.45f); yield return g.Capture(Path.Combine(outDir, "09_retrobot_carrying.png"), 1); Time.timeScale = 3; }
+                yield return null;
+            }
+            Time.timeScale = 1;
+            int sortedNow = g.progress.sortedTotal - sortedBefore;
+            Check("Retrobot sorts parts on his own, one at a time", rb.delivered >= 2 && sortedNow == rb.delivered, $"{rb.delivered} stored, {rb.staged} piled below high destinations, {sortedNow} newly sorted");
+            Check("parts for destinations above his reach are piled in front of them, still unsorted",
+                  rb.staged == 0 || rb.IsPiledBelowDestination(rb.lastStagedId), rb.staged == 0 ? "none needed yet" : $"part {rb.lastStagedId} waits below {g.world.DefOf(rb.lastStagedId).storageBox}");
+            Check("robot sorting is recorded as robot-assisted", g.telemetry.sortedRobot - robotBefore == rb.delivered, $"{g.telemetry.sortedRobot - robotBefore} robot sorts");
+
+            // size reference: seen from the player's eye height (1.65 m) while he walks
+            var sizeShots = new (string name, float dist, float side)[]
+            {
+                ("10_size_eye_level_2m", 1.9f, 0.6f), ("11_size_eye_level_4m", 3.6f, 1.2f),
+                ("12_walking_profile", 0.4f, 2.4f), ("13_walking_from_behind", -2.6f, 0.8f), ("14_size_at_your_feet", 0.9f, 0.3f),
+            };
+            foreach (var (name, dist, side) in sizeShots)
+            {
+                t0 = Time.realtimeSinceStartup;
+                while (rb.Speed < rb.WalkSpeed * 0.8f && Time.realtimeSinceStartup - t0 < 30) yield return null;
+                yield return new WaitForSeconds(0.25f);
+                LookAtRobot(dist, PlayerController.Eye, side);
+                yield return g.Capture(Path.Combine(outDir, name + ".png"), 1);
+                yield return new WaitForSeconds(1.2f);
+            }
+        }
 
         void Check(string name, bool ok, string detail)
         {

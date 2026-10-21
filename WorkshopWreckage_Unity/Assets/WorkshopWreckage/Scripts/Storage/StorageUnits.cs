@@ -135,6 +135,16 @@ namespace WorkshopWreckage
         }
 
         public Matrix4x4 DestWorld(string destId) => transform.localToWorldMatrix * _destLocal[destId];
+
+        /// <summary>World point where a destination is filled: the drawer front for
+        /// drawers, the destination centre otherwise.</summary>
+        public Vector3 DestPoint(Dictionary<string, object> dest)
+        {
+            var id = Json.Str(dest, "id");
+            if (_destLocal.ContainsKey(id)) return DestWorld(id).GetColumn(3);
+            int slot = Json.Int(dest, "row") * cols + Json.Int(dest, "col");
+            return transform.TransformPoint(Batch.G(FrontCenterG(slot)));
+        }
         public static Vector3 Inner(Dictionary<string, object> d) => new((float)Json.Num(d, "width"), (float)Json.Num(d, "height"), (float)Json.Num(d, "depth"));
 
         // ------------------------------------------------------------ drawer cabinet

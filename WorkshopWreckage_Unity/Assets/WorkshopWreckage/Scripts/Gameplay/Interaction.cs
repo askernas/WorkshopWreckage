@@ -352,7 +352,7 @@ namespace WorkshopWreckage
             if (r != StorageSystem.Result.Ok) { Feedback?.Invoke(Storage.ResultText(r, def.storageBox, id), false); return; }
             Inv.Remove(id);
             Storage.Deposit(def.storageBox, id);
-            game.repairBay.Refresh();
+            game.repairBay.Refresh(true);
             Sfx.Play(Storage.Stored(def.storageBox).Count == game.db.BoxCapacity(def.storageBox) ? "complete" : "drop_drawer", game.repairBay.transform.position);
             Feedback?.Invoke("Robot part placed: " + def.displayName, true);
         }
@@ -459,7 +459,7 @@ namespace WorkshopWreckage
             done?.Invoke();
         }
 
-        void SettleNeighbours(Matrix4x4 removed, ItemDefinition removedDef)
+        public void SettleNeighbours(Matrix4x4 removed, ItemDefinition removedDef)
         {
             float rRemoved = HeldView.Radius(removedDef);
             float drop = ItemDatabase.Extents(removedDef)[2] * 0.8f;
@@ -679,8 +679,14 @@ namespace WorkshopWreckage
             tgo.AddComponent<StorageTarget>().station = true;
         }
 
-        public void Refresh()
+        /// <summary>Bench-local (Godot space) x of a robot's mat.</summary>
+        public static float MatX(int i) => -Bench.x / 2 + Bench.x / Robots.Length * (i + 0.5f);
+
+        /// <summary>animate: true when the player just installed a part (plays the
+        /// activation sequence if it completed a robot).</summary>
+        public void Refresh(bool animate = false)
         {
+            _game.retrobot?.RefreshAssembly(animate);
             for (int i = 0; i < Robots.Length; i++)
             {
                 var robot = Robots[i];
@@ -689,6 +695,7 @@ namespace WorkshopWreckage
                 _labels.Set(i, robot.ToUpper(), "", $"{ids.Count}/{total}", true);
                 var holder = _mats[robot];
                 foreach (Transform c in holder) Destroy(c.gameObject);
+                if (robot == Retrobot.Id && _game.retrobot != null) continue;   // installed on the robot itself
                 for (int k = 0; k < ids.Count; k++)
                 {
                     var def = _game.world.DefOf(ids[k]);

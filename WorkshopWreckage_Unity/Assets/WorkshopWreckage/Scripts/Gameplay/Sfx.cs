@@ -38,6 +38,8 @@ namespace WorkshopWreckage
             _clips["settle"] = Rattle(2, 0.15f);
             _clips["drop_floor"] = Rattle(3, 0.25f);
             _clips["save"] = Chime(new[] { 659.25f, 987.77f }, 0.4f);
+            _clips["robot_boot"] = Sweep(1.4f, 90, 620, 0.55f);
+            _clips["servo"] = Sweep(0.16f, 320, 520, 0.3f);
             for (int k = 0; k < 12; k++) _2d.Add(gameObject.AddComponent<AudioSource>());
             for (int k = 0; k < 10; k++)
             {
@@ -135,6 +137,24 @@ namespace WorkshopWreckage
                 s[i] = Mathf.Sin(2 * Mathf.PI * f * t) * Mathf.Exp(-t * 30) * 0.8f + Rnd() * Mathf.Exp(-t * 120) * 0.4f;
             }
             return Make("thunk", s);
+        }
+
+        /// <summary>Motor spin-up: a rising tone with a gritty square overtone.</summary>
+        static AudioClip Sweep(float dur, float f0, float f1, float amp)
+        {
+            int n = (int)(dur * Rate);
+            var s = new float[n];
+            float ph = 0;
+            for (int i = 0; i < n; i++)
+            {
+                float t = (float)i / Rate, u = t / dur;
+                float f = Mathf.Lerp(f0, f1, u * u * (3 - 2 * u));
+                ph += 2 * Mathf.PI * f / Rate;
+                float env = Mathf.Min(1, t * 40) * Mathf.Min(1, (dur - t) * 12);
+                float sq = Mathf.Sin(ph * 0.5f) > 0 ? 1 : -1;
+                s[i] = (Mathf.Sin(ph) * 0.6f + sq * 0.12f + Mathf.Sin(ph * 3.01f) * 0.1f) * env * amp;
+            }
+            return Make("sweep" + f0, s);
         }
 
         static AudioClip Buzz(float dur)

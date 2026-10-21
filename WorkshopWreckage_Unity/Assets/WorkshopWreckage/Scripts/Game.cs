@@ -30,6 +30,7 @@ namespace WorkshopWreckage
         public Interaction interaction;
         public Hud hud;
         public RepairBay repairBay;
+        public Retrobot retrobot;
         public readonly Dictionary<string, StorageUnit> units = new();
         public int itemCount = -1;   // -1 = the preset's full population
         public string presetId = "standard";
@@ -180,6 +181,7 @@ namespace WorkshopWreckage
             }
             renderer.Build(world);
             index = new ItemSpatialIndex(world);
+            SpawnRetrobot();
             repairBay.Refresh();
             foreach (var u in units.Values) { u.labelProvider = LabelFor; u.RefreshLabels(); }
             interaction.ResetState();
@@ -212,6 +214,19 @@ namespace WorkshopWreckage
                 player.SetView(layout.spawnYaw, -12 * Mathf.Deg2Rad);
             }
             return true;
+        }
+
+        /// <summary>Retrobot stands in front of his mat at the repair bay; parts the
+        /// player installs appear on him, missing ones are ghosted.</summary>
+        void SpawnRetrobot()
+        {
+            if (retrobot != null) Destroy(retrobot.gameObject);
+            retrobot = new GameObject("Retrobot").AddComponent<Retrobot>();
+            retrobot.transform.SetParent(transform, false);
+            var bay = repairBay.transform;
+            var home = bay.TransformPoint(Batch.G(RepairBay.MatX(0), 0, 0.9f));
+            var front = Vector3.ProjectOnPlane(bay.TransformDirection(Batch.G(0, 0, 1)), Vector3.up);
+            retrobot.Init(this, new Vector3(home.x, 0, home.z), Quaternion.LookRotation(front));
         }
 
         // ---------------------------------------------------------------- progression
@@ -247,7 +262,7 @@ namespace WorkshopWreckage
             // XP is earned only for meaningful, non-repeatable progress (see progression.json)
             storage.Deposited += (box, id) =>
             {
-                bool robot = world.instances[id].owner.StartsWith("robot");
+                bool robot = storage.lastDepositor.StartsWith("robot");
                 progression.OnSorted(id, robot);
                 telemetry.Sorted(robot, playTime, progress.sortedTotal);
             };
@@ -421,6 +436,16 @@ namespace WorkshopWreckage
             }
             else if (kb.tabKey.wasPressedThisFrame && (state == "play" || state == "inventory")) SetState(state == "play" ? "inventory" : "play");
             else if (kb.f5Key.wasPressedThisFrame && state == "play") SaveGame("quick");
+            else if (kb.rKey.wasPressedThisFrame && state == "play" && !interaction.inspecting)
+            {
+                if (interaction.targetType == "item")
+                {
+                    var msg = retrobot.CommandFocus(world.instances[interaction.targetItem].defId);
+                    hud.OnFeedback(msg, msg.StartsWith("Retrobot: on it"));
+                }
+                else hud.OnFeedback(retrobot.Active ? "Aim at a part, then press R to send Retrobot for it" : retrobot.Describe(), false);
+            }
+            else if (kb.tKey.wasPressedThisFrame && state == "play") retrobot.ToggleFollow();
             else if (kb.f9Key.wasPressedThisFrame && (state == "play" || state == "paused")) LoadGame("quick");
             if (state == "play" && Cursor.lockState != CursorLockMode.Locked && Mouse.current.leftButton.wasPressedThisFrame) Cursor.lockState = CursorLockMode.Locked;
         }

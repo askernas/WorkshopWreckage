@@ -1,0 +1,25 @@
+{
+	"version": 1,
+	"note": "Robot abilities (design brief §13). Assembly parts are the robot's items in robot_parts.json; a robot activates when every part is installed at its repair-bay station. Distances/heights in metres, speeds in m/s, times in seconds. Player walk speed is 3.0, eye height 1.62.",
+	"robots": {
+		"retrobot": {
+			"name": "Retrobot",
+			"height": 0.3,
+			"capacity": 1,
+			"item_types": 1,
+			"autonomous": true,
+			"walk_speed": 0.7,
+			"turn_speed_deg": 260,
+			"reach": 0.32,
+			"reach_height": 0.35,
+			"max_item_size": 0.33,
+			"heap_step_height": 0.18,
+			"pick_time": 1.1,
+			"deposit_time": 0.9,
+			"follow_distance": 1.1,
+			"radius": 0.12,
+			"comment": "He picks up only parts lying no higher than reach_height and no larger than max_item_size (≈ his own size). Destinations above reach_height get the part dropped in a small pile on the floor in front of them (still unsorted) — a later robot (Hoverbot) handles high storage.",
+			"personality": "Earnest, enthusiastic, slightly clumsy. Picks up one part at a time, already knows where it belongs, and chugs it there."
+		}
+	}
+}

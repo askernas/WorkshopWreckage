@@ -114,6 +114,7 @@ namespace WorkshopWreckage
             lamps.Add(new Vector3(-1.8f, 3, north + 0.9f));
             lamps.Add(new Vector3(1.8f, 3, north + 0.9f));
             lamps.Add(new Vector3(0.9f, 3, -0.75f));
+            lamps.Add(new Vector3(repairBayPos.x + 0.4f, 2.7f, repairBayPos.z - 1.3f));   // over the repair bay and Retrobot
             for (float x = west + 4f; x < east - 2f; x += 6.5f)
                 for (float z = north + 5f; z < south - 1.5f; z += 5.5f)
                     if (Mathf.Abs(x - 0.9f) > 2.5f || Mathf.Abs(z + 0.75f) > 2.5f) lamps.Add(new Vector3(x, 3, z));
