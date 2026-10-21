@@ -42,6 +42,25 @@ namespace WorkshopWreckage
             yield return null;
             float yawRight = g.player.Yaw;
             Check("Q turns left, E turns right", yawLeft > yaw0 + 0.1f && yawRight < yawLeft - 0.2f, $"yaw {yaw0:0.00} -> {yawLeft:0.00} (Q) -> {yawRight:0.00} (E)");
+
+            // 0b. walking into a heap: the player climbs onto the parts instead of passing through
+            {
+                var hs = g.layout.piles.First(p => p.kind == "heap" && p.surface == 0);
+                var hc = Shared.Pos(hs.center.x, 0, hs.center.y);
+                var start = hc + new Vector3(1.6f, 0, 0.4f);
+                g.player.Teleport(start);
+                var d = hc - start;
+                g.player.SetView(Mathf.Atan2(-d.x, d.z), -0.3f);
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState(UnityEngine.InputSystem.Key.W));
+                float maxY = 0;
+                for (float t = 0; t < 0.9f; t += Time.deltaTime) { maxY = Mathf.Max(maxY, g.player.transform.position.y); yield return null; }
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState());
+                yield return Frames(3);
+                var pp = g.player.transform.position;
+                float under = g.debris.Under(pp, 0.16f);
+                Check("player walks over parts, not through them", maxY > 0.05f && pp.y >= under - 0.05f, $"rose to {maxY:0.00} m; feet {pp.y:0.00} m over parts {under:0.00} m");
+                yield return g.Capture(Path.Combine(outDir, "00b_standing_on_parts.png"), 2);
+            }
             g.player.enabled = false;
 
             // 1. pick individual items from a heap by aiming at them
@@ -139,6 +158,8 @@ namespace WorkshopWreckage
 
             // 6. Retrobot: assembly from 5 parts, activation, autonomous sorting
             yield return RetrobotChecks();
+            // 7. the other four robots, all working together
+            yield return AllRobotsChecks();
 
             g.PlaceCamera("0.6,1.65,3.6,0,-18");
             g.hud.SetHudVisible(true);
@@ -152,9 +173,11 @@ namespace WorkshopWreckage
 
         /// <summary>Frames Retrobot from the front-side, trying other angles until the
         /// camera has a clear line of sight and is not inside furniture or walls.</summary>
-        void LookAtRobot(float dist, float height, float side)
+        void LookAtRobot(float dist, float height, float side) => LookAtRobot(g.retrobot, dist, height, side);
+
+        void LookAtRobot(Robot robot, float dist, float height, float side)
         {
-            var r = g.retrobot.transform;
+            var r = robot.transform;
             var at = r.position + Vector3.up * 0.15f;
             float a0 = Mathf.Atan2(side, dist) * Mathf.Rad2Deg;
             float d = new Vector2(side, dist).magnitude;
@@ -174,10 +197,80 @@ namespace WorkshopWreckage
             LookFrom(at + r.forward * dist + Vector3.up * (height - 0.15f), at);
         }
 
+        IEnumerator AllRobotsChecks()
+        {
+            var others = g.robots.Where(r => r.id != "retrobot").ToList();
+            Check("five robots at toy scale", g.robots.Count == 5 && g.robots.All(r => r.Height <= 0.31f), string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Height:0.00} m")));
+            // half-built: ghosts show what is missing
+            foreach (var r in others)
+            {
+                var ids = g.db.RobotPartIds(r.id).SelectMany(d => g.world.IdsOf(d)).ToList();
+                foreach (var id in ids.Take(ids.Count / 2)) Install(id);
+            }
+            g.repairBay.Refresh();
+            var bay = g.repairBay.transform;
+            var mid = (g.robots[0].home + g.robots[4].home) * 0.5f;
+            var front = Vector3.ProjectOnPlane(bay.TransformDirection(Batch.G(0, 0, 1)), Vector3.up).normalized;
+            LookFrom(mid + front * 1.6f + Vector3.up * 0.9f, mid + Vector3.up * 0.12f);
+            yield return g.Capture(Path.Combine(outDir, "15_robots_half_built.png"), 3);
+            foreach (var r in others)
+                foreach (var id in g.db.RobotPartIds(r.id).SelectMany(d => g.world.IdsOf(d))) Install(id);
+            g.repairBay.Refresh(true);
+            float t0 = Time.realtimeSinceStartup;
+            while (others.Any(r => !r.Active) && Time.realtimeSinceStartup - t0 < 15) yield return null;
+            Check("all robots activate once their parts are installed", others.All(r => r.Active), string.Join(", ", others.Select(r => r.Describe())));
+            // size line-up: everyone at the repair bay, seen from eye height
+            var saved = g.robots.ToDictionary(r => r, r => (r.transform.position, r.transform.rotation));
+            foreach (var r in g.robots) { r.enabled = false; r.transform.SetPositionAndRotation(r.home + Vector3.up * (r.id == "hoverbot" ? 0.25f : 0), r.homeRot); }
+            LookFrom(mid + front * 1.5f + Vector3.up * (PlayerController.Eye - 0.0f), mid + Vector3.up * 0.1f);
+            yield return g.Capture(Path.Combine(outDir, "16_robots_lineup_eye_level.png"), 3);
+            LookFrom(mid + front * 0.85f + Vector3.up * 0.35f, mid + Vector3.up * 0.14f);
+            yield return g.Capture(Path.Combine(outDir, "17_robots_lineup_close.png"), 3);
+            foreach (var r in g.robots) { r.transform.SetPositionAndRotation(saved[r].Item1, saved[r].Item2); r.enabled = true; }
+
+            var before = g.robots.ToDictionary(r => r.id, r => (r.delivered, r.staged));
+            Time.timeScale = 4;
+            bool[] shot = new bool[5];
+            bool doubleHeld = false;
+            t0 = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - t0 < 90 && g.robots.Any(r => r.delivered + r.staged - before[r.id].delivered - before[r.id].staged < 2))
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    var r = g.robots[i];
+                    if (!shot[i] && r.carried.Count > 0 && r.Speed > r.WalkSpeed * 0.6f)
+                    {
+                        shot[i] = true;
+                        Time.timeScale = 1;
+                        LookAtRobot(r, r.id == "hoverbot" ? 1.4f : 0.8f, r.id == "hoverbot" ? 0.5f : 0.45f, 0.45f);
+                        yield return g.Capture(Path.Combine(outDir, $"18_{r.id}_working.png"), 1);
+                        Time.timeScale = 4;
+                    }
+                }
+                var held = g.robots.SelectMany(r => r.carried).ToList();
+                if (held.Count != held.Distinct().Count()) doubleHeld = true;
+                yield return null;
+            }
+            Time.timeScale = 1;
+            foreach (var r in others)
+                Check($"{r.displayName} gathers and delivers on its own", r.delivered + r.staged > before[r.id].delivered + before[r.id].staged,
+                      $"{r.delivered - before[r.id].delivered} stored, {r.staged - before[r.id].staged} piled, {r.Describe()}");
+            var hover = g.robots.First(r => r.id == "hoverbot");
+            Check("no part is ever held by two robots", !doubleHeld && g.world.instances.Where(i => i.state == ItemState.Carried && i.owner.StartsWith("robot:")).All(i => g.robots.Count(r => r.carried.Contains(i.id)) == 1), "");
+            Check("Hoverbot stores into destinations the small robots can't reach", hover.delivered > before["hoverbot"].delivered, $"{hover.delivered - before["hoverbot"].delivered} stored by Hoverbot");
+        }
+
+        void Install(int id)
+        {
+            if (g.world.instances[id].state == ItemState.Stored) return;
+            if (g.world.instances[id].state == ItemState.InWorld) { g.index.Remove(id); g.world.SetState(id, ItemState.Carried, "player"); }
+            g.storage.Deposit(g.world.DefOf(id).storageBox, id);
+        }
+
         IEnumerator RetrobotChecks()
         {
             var rb = g.retrobot;
-            var parts = g.db.RobotPartIds(Retrobot.Id).SelectMany(d => g.world.IdsOf(d)).ToList();
+            var parts = g.db.RobotPartIds("retrobot").SelectMany(d => g.world.IdsOf(d)).ToList();
             Check("Retrobot has 5 assembly parts", parts.Count == 5, $"{parts.Count} parts");
             Check("Retrobot inactive before assembly", !rb.Active, rb.Describe());
             for (int k = 0; k < parts.Count; k++)
@@ -212,9 +305,9 @@ namespace WorkshopWreckage
             Time.timeScale = 4;
             while ((rb.delivered < 2 || rb.delivered + rb.staged < 4) && Time.realtimeSinceStartup - t0 < 180)
             {
-                if (!shotWalk && rb.StepName == "ToItem" && rb.carriedId < 0) { shotWalk = true; Time.timeScale = 1; LookAtRobot(0.9f, 0.5f, 0.6f); yield return g.Capture(Path.Combine(outDir, "07_retrobot_walking.png"), 1); Time.timeScale = 3; }
+                if (!shotWalk && rb.StepName == "ToItem" && rb.carried.Count == 0) { shotWalk = true; Time.timeScale = 1; LookAtRobot(0.9f, 0.5f, 0.6f); yield return g.Capture(Path.Combine(outDir, "07_retrobot_walking.png"), 1); Time.timeScale = 3; }
                 if (!shotPick && rb.StepName == "Picking") { shotPick = true; Time.timeScale = 1; yield return new WaitForSeconds(0.35f); LookAtRobot(0.7f, 0.4f, 0.5f); yield return g.Capture(Path.Combine(outDir, "08_retrobot_bending.png"), 1); Time.timeScale = 3; }
-                if (!shotCarry && rb.StepName == "ToDest" && rb.carriedId >= 0) { shotCarry = true; Time.timeScale = 1; yield return new WaitForSeconds(0.4f); LookAtRobot(0.8f, 0.45f, 0.45f); yield return g.Capture(Path.Combine(outDir, "09_retrobot_carrying.png"), 1); Time.timeScale = 3; }
+                if (!shotCarry && rb.StepName == "ToDest" && rb.carried.Count > 0) { shotCarry = true; Time.timeScale = 1; yield return new WaitForSeconds(0.4f); LookAtRobot(0.8f, 0.45f, 0.45f); yield return g.Capture(Path.Combine(outDir, "09_retrobot_carrying.png"), 1); Time.timeScale = 3; }
                 yield return null;
             }
             Time.timeScale = 1;

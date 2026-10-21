@@ -686,16 +686,16 @@ namespace WorkshopWreckage
         /// activation sequence if it completed a robot).</summary>
         public void Refresh(bool animate = false)
         {
-            _game.retrobot?.RefreshAssembly(animate);
+            foreach (var r in _game.robots) r.RefreshAssembly(animate);
             for (int i = 0; i < Robots.Length; i++)
             {
                 var robot = Robots[i];
                 var ids = _game.storage.Stored("RS-" + robot);
                 int total = _game.db.RobotPartIds(robot).Count;
-                _labels.Set(i, robot.ToUpper(), "", $"{ids.Count}/{total}", true);
+                _labels.Set(i, $"{ids.Count}/{total}", robot.ToUpper(), ids.Count == total ? "READY" : "parts", true);
                 var holder = _mats[robot];
                 foreach (Transform c in holder) Destroy(c.gameObject);
-                if (robot == Retrobot.Id && _game.retrobot != null) continue;   // installed on the robot itself
+                if (_game.robots.Exists(r => r.id == robot)) continue;   // installed on the robot itself
                 for (int k = 0; k < ids.Count; k++)
                 {
                     var def = _game.world.DefOf(ids[k]);

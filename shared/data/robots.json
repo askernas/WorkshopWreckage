@@ -1,25 +1,41 @@
 {
-	"version": 1,
-	"note": "Robot abilities (design brief §13). Assembly parts are the robot's items in robot_parts.json; a robot activates when every part is installed at its repair-bay station. Distances/heights in metres, speeds in m/s, times in seconds. Player walk speed is 3.0, eye height 1.62.",
+	"version": 2,
+	"note": "Robot abilities (design brief §13-16). All robots are toys at Retrobot's scale (~30 cm). Assembly parts are each robot's items in robot_parts.json; a robot activates when every part is installed at its repair-bay station. Distances/heights in metres, speeds in m/s, times in seconds. Player: walk 3.0 m/s, eye height 1.62 m. reach_height: highest a part may lie for the robot to pick it up, and highest destination it can store into; lower robots pile parts in front of destinations above their reach (still unsorted) for Hoverbot. max_item_size: largest part (longest side) it can lift. heap_step_height: parts lying higher than this are obstacles (it walks around heaps).",
 	"robots": {
 		"retrobot": {
-			"name": "Retrobot",
-			"height": 0.3,
-			"capacity": 1,
-			"item_types": 1,
-			"autonomous": true,
-			"walk_speed": 0.7,
-			"turn_speed_deg": 260,
-			"reach": 0.32,
-			"reach_height": 0.35,
-			"max_item_size": 0.33,
-			"heap_step_height": 0.18,
-			"pick_time": 1.1,
-			"deposit_time": 0.9,
-			"follow_distance": 1.1,
-			"radius": 0.12,
-			"comment": "He picks up only parts lying no higher than reach_height and no larger than max_item_size (≈ his own size). Destinations above reach_height get the part dropped in a small pile on the floor in front of them (still unsorted) — a later robot (Hoverbot) handles high storage.",
-			"personality": "Earnest, enthusiastic, slightly clumsy. Picks up one part at a time, already knows where it belongs, and chugs it there."
+			"name": "Retrobot", "locomotion": "biped", "height": 0.3,
+			"capacity": 1, "item_types": 1, "walk_speed": 0.7, "turn_speed_deg": 260,
+			"reach": 0.32, "reach_height": 0.35, "max_item_size": 0.33, "heap_step_height": 0.18,
+			"pick_time": 1.1, "deposit_time": 0.9, "follow_distance": 1.1, "radius": 0.12,
+			"personality": "Earnest, enthusiastic, slightly clumsy. One part at a time, always knows where it belongs."
+		},
+		"unibot": {
+			"name": "Unibot", "locomotion": "wheel", "height": 0.29,
+			"capacity": 5, "item_types": 2, "walk_speed": 1.6, "turn_speed_deg": 300,
+			"reach": 0.3, "reach_height": 0.35, "max_item_size": 0.28, "heap_step_height": 0.12, "gather_radius": 3.5,
+			"pick_time": 0.8, "deposit_time": 0.7, "follow_distance": 1.2, "radius": 0.11,
+			"personality": "Energetic, slightly nervous, constantly balancing. A fast courier."
+		},
+		"spiderbot": {
+			"name": "Spiderbot", "locomotion": "hexapod", "height": 0.24,
+			"capacity": 8, "item_types": 4, "walk_speed": 0.85, "turn_speed_deg": 220,
+			"reach": 0.34, "reach_height": 0.45, "max_item_size": 0.3, "heap_step_height": 0.55, "gather_radius": 2.5,
+			"pick_time": 0.9, "deposit_time": 0.8, "follow_distance": 1.0, "radius": 0.13,
+			"personality": "Curious, methodical, precise. Clambers over heaps and under furniture."
+		},
+		"caterpillarbot": {
+			"name": "Caterpillarbot", "locomotion": "tracks", "height": 0.3,
+			"capacity": 60, "item_types": 6, "walk_speed": 0.45, "turn_speed_deg": 70,
+			"reach": 0.36, "reach_height": 0.4, "max_item_size": 0.4, "heap_step_height": 0.16, "gather_radius": 2.0,
+			"pick_time": 0.9, "deposit_time": 1.2, "follow_distance": 1.4, "radius": 0.2,
+			"personality": "Slow, determined, dependable. Hauls big loads in three cargo boxes."
+		},
+		"hoverbot": {
+			"name": "Hoverbot", "locomotion": "hover", "height": 0.3,
+			"capacity": 12, "item_types": 8, "walk_speed": 1.3, "turn_speed_deg": 280,
+			"reach": 0.2, "reach_height": 2.5, "max_item_size": 0.35, "gather_radius": 2.5, "cruise_altitude": 2.95,
+			"pick_time": 0.8, "deposit_time": 0.8, "follow_distance": 1.3, "radius": 0.14,
+			"personality": "Curious, enthusiastic, slightly overactive. Reaches the high shelves and stores the piles the small robots leave."
 		}
 	}
 }

@@ -61,7 +61,11 @@ namespace WorkshopWreckage
             return new Rect((float)cx / cols, 1f - (float)(cy + 1) / rows, 1f / cols, 1f / rows);
         }
 
-        public void Redraw() => Render(_cam, texture);
+        public void Redraw()
+        {
+            Canvas.ForceUpdateCanvases();   // text set this frame must be laid out before rendering
+            Render(_cam, texture);
+        }
 
         // ------------------------------------------------------------------ helpers
 

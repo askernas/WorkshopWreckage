@@ -19,6 +19,10 @@ namespace WorkshopWreckage
         Vector3 _vel;
         float _yaw, _pitch, _bob, _stepAcc, _eye = Eye;
         public System.Action stepped;
+        public DebrisField debris;                       // loose parts underfoot: walk over them
+        const float StepUp = 0.35f, MaxSlope = 1.2f;     // step onto ~16 cm at once, climb slopes up to ~50°; steeper piles block
+        float _stepSmooth;
+        bool _grounded;
 
         /// <summary>Godot-convention yaw/pitch in radians (yaw 0 = look along Godot -Z).</summary>
         public float Yaw => _yaw;
@@ -95,26 +99,52 @@ namespace WorkshopWreckage
                 _yaw += turn * TurnSpeed * Time.deltaTime;
                 crouch = kb.leftCtrlKey.isPressed || kb.cKey.isPressed;
                 sprint = kb.leftShiftKey.isPressed && !crouch;
-                if (kb.spaceKey.wasPressedThisFrame && _cc.isGrounded) _vel.y = 3.2f;
+                if (kb.spaceKey.wasPressedThisFrame && _grounded) _vel.y = 3.2f;
             }
             Apply();
             float speed = crouch ? CrouchSpeed : sprint ? Sprint : Walk;
             var target = wish * speed;
             _vel.x = Mathf.MoveTowards(_vel.x, target.x, Accel * Time.deltaTime * speed);
             _vel.z = Mathf.MoveTowards(_vel.z, target.z, Accel * Time.deltaTime * speed);
-            if (_cc.isGrounded && _vel.y < 0) _vel.y = -0.5f;
+            if (_grounded && _vel.y < 0) _vel.y = -0.5f;
             _vel.y -= Gravity * Time.deltaTime;
-            _cc.Move(_vel * Time.deltaTime);
+            var delta = _vel * Time.deltaTime;
+            _cc.Move(delta);
+            _grounded = _cc.isGrounded;
+            if (debris != null)
+            {
+                // ride up onto the parts underfoot; too tall a pile blocks like a wall
+                var p = transform.position;
+                float ground = debris.Under(p, 0.16f);
+                if (p.y < ground - 0.003f)
+                {
+                    float rise = ground - p.y;
+                    float horiz = new Vector2(delta.x, delta.z).magnitude;
+                    if (rise > StepUp + horiz * MaxSlope)
+                    {
+                        _cc.Move(new Vector3(-delta.x, 0, -delta.z));
+                        _vel.x = _vel.z = 0;
+                    }
+                    else
+                    {
+                        _cc.Move(Vector3.up * rise);
+                        _stepSmooth -= rise;            // the camera eases up instead of popping
+                        if (_vel.y < 0) _vel.y = 0;
+                    }
+                }
+                if (transform.position.y <= ground + 0.03f) _grounded = true;
+            }
+            _stepSmooth = Mathf.Lerp(_stepSmooth, 0, Mathf.Min(1, Time.deltaTime * 10));
             _eye = Mathf.Lerp(_eye, crouch ? EyeCrouch : Eye, Mathf.Min(1, Time.deltaTime * 10));
             float h = new Vector2(_vel.x, _vel.z).magnitude;
-            if (_cc.isGrounded && h > 0.3f)
+            if (_grounded && h > 0.3f)
             {
                 _bob += Time.deltaTime * h * 2.4f;
                 _stepAcc += Time.deltaTime * h;
                 if (_stepAcc > 0.75f) { _stepAcc = 0; stepped?.Invoke(); }
             }
             else _bob = Mathf.Lerp(_bob, Mathf.Round(_bob / Mathf.PI) * Mathf.PI, Mathf.Min(1, Time.deltaTime * 6));
-            head.localPosition = new Vector3(Mathf.Cos(_bob * 0.5f) * 0.012f, _eye + Mathf.Abs(Mathf.Sin(_bob)) * 0.025f, 0);
+            head.localPosition = new Vector3(Mathf.Cos(_bob * 0.5f) * 0.012f, _eye + _stepSmooth + Mathf.Abs(Mathf.Sin(_bob)) * 0.025f, 0);
         }
     }
 }

@@ -30,7 +30,10 @@ namespace WorkshopWreckage
         public Interaction interaction;
         public Hud hud;
         public RepairBay repairBay;
-        public Retrobot retrobot;
+        public readonly List<Robot> robots = new();
+        public Robot retrobot => robots.Find(r => r.id == "retrobot");
+        public readonly HashSet<int> robotReserved = new();   // parts a robot is on its way to: no one else takes them
+        public DebrisField debris;
         public readonly Dictionary<string, StorageUnit> units = new();
         public int itemCount = -1;   // -1 = the preset's full population
         public string presetId = "standard";
@@ -181,7 +184,9 @@ namespace WorkshopWreckage
             }
             renderer.Build(world);
             index = new ItemSpatialIndex(world);
-            SpawnRetrobot();
+            debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
+            player.debris = debris;
+            SpawnRobots();
             repairBay.Refresh();
             foreach (var u in units.Values) { u.labelProvider = LabelFor; u.RefreshLabels(); }
             interaction.ResetState();
@@ -216,17 +221,58 @@ namespace WorkshopWreckage
             return true;
         }
 
-        /// <summary>Retrobot stands in front of his mat at the repair bay; parts the
-        /// player installs appear on him, missing ones are ghosted.</summary>
-        void SpawnRetrobot()
+        /// <summary>Unity-XZ footprints of storage units, benches and other furniture:
+        /// parts lying there rest on furniture, not on the floor.</summary>
+        List<Rect> FurnitureFootprints()
         {
-            if (retrobot != null) Destroy(retrobot.gameObject);
-            retrobot = new GameObject("Retrobot").AddComponent<Retrobot>();
-            retrobot.transform.SetParent(transform, false);
+            var rects = new List<Rect>(layout.floorBlockers);
+            foreach (var f in layout.furniture)
+            {
+                if (Json.Str(f, "type") != "bench") continue;
+                var p = WorkshopLayout.V(f["pos"]); var s = WorkshopLayout.V(f["size"]);
+                rects.Add(new Rect(p.x - s.x / 2, p.z - s.z / 2, s.x, s.z));
+            }
+            return rects.Select(r => new Rect(r.xMin, -r.yMax, r.width, r.height)).ToList();   // Godot z -> Unity z
+        }
+
+        /// <summary>Each robot stands in front of its mat at the repair bay; parts the
+        /// player installs appear on it, missing ones are ghosted.</summary>
+        void SpawnRobots()
+        {
+            foreach (var r in robots) if (r != null) Destroy(r.gameObject);
+            robots.Clear();
+            robotReserved.Clear();
+            var cfg = Robot.AllConfig();
             var bay = repairBay.transform;
-            var home = bay.TransformPoint(Batch.G(RepairBay.MatX(0), 0, 0.9f));
             var front = Vector3.ProjectOnPlane(bay.TransformDirection(Batch.G(0, 0, 1)), Vector3.up);
-            retrobot.Init(this, new Vector3(home.x, 0, home.z), Quaternion.LookRotation(front));
+            for (int i = 0; i < RepairBay.Robots.Length; i++)
+            {
+                var id = RepairBay.Robots[i];
+                if (!cfg.ContainsKey(id)) continue;
+                var r = new GameObject("Robot_" + id).AddComponent<Robot>();
+                r.transform.SetParent(transform, false);
+                var home = bay.TransformPoint(Batch.G(RepairBay.MatX(i), 0, id == "caterpillarbot" ? 1.05f : 0.85f));
+                r.Init(this, id, new Vector3(home.x, 0, home.z), Quaternion.LookRotation(front));
+                robots.Add(r);
+            }
+        }
+
+        /// <summary>The active robot closest to the player (commands go to it).</summary>
+        public Robot NearestActiveRobot()
+        {
+            var p = player.transform.position;
+            return robots.Where(r => r.Active).OrderBy(r => (r.transform.position - p).sqrMagnitude).FirstOrDefault();
+        }
+
+        /// <summary>The storage unit whose footprint contains a world point, if any.</summary>
+        public StorageUnit UnitAt(Vector3 p)
+        {
+            foreach (var u in units.Values)
+            {
+                var l = u.transform.InverseTransformPoint(p);
+                if (Mathf.Abs(l.x) < u.size.x * 0.5f + 0.05f && Mathf.Abs(l.z) < u.size.z * 0.5f + 0.05f) return u;
+            }
+            return null;
         }
 
         // ---------------------------------------------------------------- progression
@@ -438,14 +484,16 @@ namespace WorkshopWreckage
             else if (kb.f5Key.wasPressedThisFrame && state == "play") SaveGame("quick");
             else if (kb.rKey.wasPressedThisFrame && state == "play" && !interaction.inspecting)
             {
-                if (interaction.targetType == "item")
+                var rb = NearestActiveRobot();
+                if (rb == null) hud.OnFeedback("No robot is running yet: install all of a robot's parts at the repair bay", false);
+                else if (interaction.targetType == "item")
                 {
-                    var msg = retrobot.CommandFocus(world.instances[interaction.targetItem].defId);
-                    hud.OnFeedback(msg, msg.StartsWith("Retrobot: on it"));
+                    var msg = rb.CommandFocus(world.instances[interaction.targetItem].defId);
+                    hud.OnFeedback(msg, msg.Contains(": on it"));
                 }
-                else hud.OnFeedback(retrobot.Active ? "Aim at a part, then press R to send Retrobot for it" : retrobot.Describe(), false);
+                else hud.OnFeedback($"Aim at a part, then press R to send {rb.displayName} for it", false);
             }
-            else if (kb.tKey.wasPressedThisFrame && state == "play") retrobot.ToggleFollow();
+            else if (kb.tKey.wasPressedThisFrame && state == "play") NearestActiveRobot()?.ToggleFollow();
             else if (kb.f9Key.wasPressedThisFrame && (state == "play" || state == "paused")) LoadGame("quick");
             if (state == "play" && Cursor.lockState != CursorLockMode.Locked && Mouse.current.leftButton.wasPressedThisFrame) Cursor.lockState = CursorLockMode.Locked;
         }
