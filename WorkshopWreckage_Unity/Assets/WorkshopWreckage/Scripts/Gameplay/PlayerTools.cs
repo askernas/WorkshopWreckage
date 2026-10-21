@@ -72,8 +72,12 @@ namespace WorkshopWreckage
             return !Physics.Raycast(from, d / len, len - 0.05f, 1 << Layers.Env);
         }
 
-        /// <summary>Moves a part into the inventory with a flying animation.</summary>
-        bool Take(int id, float flyTime)
+        readonly List<(Matrix4x4 from, ItemDefinition def)> _toSettle = new();
+
+        /// <summary>Moves a part into the inventory with a flying animation. In a batch
+        /// (settleNow = false) the parts around it settle only after the whole batch
+        /// has been taken — settling parts are busy and would otherwise be skipped.</summary>
+        bool Take(int id, float flyTime, bool settleNow = true)
         {
             if (!Takeable(id) || Inv.IsFull) return false;
             var inst = g.world.instances[id];
@@ -82,9 +86,15 @@ namespace WorkshopWreckage
             g.index.Remove(id);
             g.world.SetState(id, ItemState.Carried, "player");
             Inv.Add(id);
-            g.interaction.SettleNeighbours(from, def);
+            if (settleNow) g.interaction.SettleNeighbours(from, def); else _toSettle.Add((from, def));
             g.interaction.StartFly(def, from, g.held.HandWorld(), flyTime);
             return true;
+        }
+
+        void SettleBatch()
+        {
+            foreach (var (from, def) in _toSettle) g.interaction.SettleNeighbours(from, def);
+            _toSettle.Clear();
         }
 
         void Update()
@@ -96,6 +106,7 @@ namespace WorkshopWreckage
             else _magnetTaken = 0;
             if (kb.vKey.wasPressedThisFrame) Scan();
             if (kb.xKey.wasPressedThisFrame) Supermagnet();
+            if (kb.nKey.wasPressedThisFrame) AreaSweep();
         }
 
         void LateUpdate() => DrawScan();
@@ -115,7 +126,8 @@ namespace WorkshopWreckage
             int taken = 0;
             foreach (var o in g.index.QuerySphere(p, r).Where(o => o != id && g.world.instances[o].defId == def)
                          .OrderBy(o => (g.world.instances[o].Position - p).sqrMagnitude).Take(n - 1).ToList())
-                if (Take(o, 0.18f + taken * 0.04f)) taken++;
+                if (Take(o, 0.18f + taken * 0.04f, false)) taken++;
+            SettleBatch();
             if (taken > 0) g.telemetry?.SkillUsed("bulk_pickup");
             return taken;
         }
@@ -237,15 +249,44 @@ namespace WorkshopWreckage
             return ids.Count;
         }
 
+        // ---------------------------------------------------------------- area sweep
+
+        /// <summary>N: every unsorted part lying around you (any kind) comes to your
+        /// hands, nearest first, up to the sweep limit and free inventory space.</summary>
+        public int AreaSweep()
+        {
+            float r = (float)P.Effect("area_collect_radius_m");
+            if (r <= 0) { g.hud.OnFeedback("You need the Area Sweep skill (Esc → Skills)", false); return 0; }
+            if (Time.time < _sweepReady) { g.hud.OnFeedback($"Area Sweep recharging ({_sweepReady - Time.time:0} s)", false); return 0; }
+            int max = Mathf.Min((int)P.Effect("area_collect_max_items"), Inv.capacity - Inv.Count);
+            if (max <= 0) { g.hud.OnFeedback("Area Sweep: your hands are full", false); return 0; }
+            var me = g.player.transform.position + Vector3.up * 0.5f;
+            var ids = g.index.QuerySphere(me, r).Where(Takeable).Where(i => LineOfSight(Hand, g.world.instances[i].Position))
+                .OrderBy(i => (g.world.instances[i].Position - me).sqrMagnitude).Take(max).ToList();
+            if (ids.Count == 0) { g.hud.OnFeedback("Area Sweep: nothing loose around you", false); return 0; }
+            StartCoroutine(Pull(ids));
+            _sweepReady = Time.time + 8;
+            Sfx.Play("supermagnet", Hand, -4, 0);
+            g.hud.OnFeedback($"Area Sweep: {ids.Count} parts", true);
+            g.telemetry?.SkillUsed("area_collection");
+            return ids.Count;
+        }
+
+        float _sweepReady;
+
+        /// <summary>All parts change hands at once (nothing can grab them in between);
+        /// only the flights are staggered for the effect.</summary>
         IEnumerator Pull(List<int> ids)
         {
             var hand = Hand;
+            int k = 0;
             foreach (var id in ids)
             {
                 float dist = (g.world.instances[id].Position - hand).magnitude;
-                Take(id, Mathf.Lerp(0.25f, 0.7f, dist / 6f));
-                yield return new WaitForSeconds(0.05f);
+                Take(id, Mathf.Lerp(0.25f, 0.7f, dist / 6f) + 0.04f * k++, false);
             }
+            SettleBatch();
+            yield break;
         }
     }
 }

@@ -120,13 +120,14 @@ namespace WorkshopWreckage
                 {
                     float rise = ground - p.y;
                     float horiz = new Vector2(delta.x, delta.z).magnitude;
-                    if (rise > StepUp + horiz * MaxSlope)
+                    if (rise > StepUp + horiz * MaxSlope && horiz > 0.0005f)
                     {
                         _cc.Move(new Vector3(-delta.x, 0, -delta.z));
                         _vel.x = _vel.z = 0;
                     }
                     else
                     {
+                        if (horiz <= 0.0005f) rise = Mathf.Min(rise, Time.deltaTime * 2.5f);   // standing inside parts (teleport/load): pop up onto them
                         _cc.Move(Vector3.up * rise);
                         _stepSmooth -= rise;            // the camera eases up instead of popping
                         if (_vel.y < 0) _vel.y = 0;

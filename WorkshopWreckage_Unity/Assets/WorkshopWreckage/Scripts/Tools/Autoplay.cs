@@ -57,8 +57,14 @@ namespace WorkshopWreckage
                 UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState());
                 yield return Frames(3);
                 var pp = g.player.transform.position;
-                float under = g.debris.Under(pp, 0.16f);
-                Check("player walks over parts, not through them", maxY > 0.05f && pp.y >= under - 0.05f, $"rose to {maxY:0.00} m; feet {pp.y:0.00} m over parts {under:0.00} m");
+                float under = g.debris.At(pp);
+                bool climbed = maxY > 0.05f;
+                // a steep heap face blocks like furniture; either way the feet are never inside the parts
+                g.player.Teleport(hc);
+                yield return new WaitForSeconds(1.0f);
+                var top = g.player.transform.position;
+                Check("player walks over parts, not through them", pp.y >= under - 0.05f && top.y >= g.debris.At(top) - 0.05f && top.y > 0.05f,
+                      $"{(climbed ? $"climbed to {maxY:0.00} m" : "blocked by a steep face")}; on the heap: feet {top.y:0.00} m over parts {g.debris.At(top):0.00} m");
                 yield return g.Capture(Path.Combine(outDir, "00b_standing_on_parts.png"), 2);
             }
             g.player.enabled = false;
@@ -327,6 +333,41 @@ namespace WorkshopWreckage
             }
             else Check("Magnetic glove pulls magnetic parts only", false, "no magnetic part found");
             foreach (var r in g.robots) r.enabled = true;
+
+            // Area Sweep: everything loose around you, up to the limit
+            var heap = g.layout.piles.Where(p => p.kind == "heap" && p.surface == 0).Skip(1).First();
+            var hc = Shared.Pos(heap.center.x, 0, heap.center.y);
+            g.player.Teleport(hc + new Vector3(1.0f, 0, 0));
+            g.player.SetView(Mathf.Atan2(1.0f, 0), -0.7f);
+            yield return Frames(3);
+            int b0 = g.inventory.Count;
+            int swept = g.tools.AreaSweep();
+            yield return new WaitForSeconds(2.5f);
+            Check("Area Sweep collects the loose parts around you", swept > 0 && g.inventory.Count - b0 == swept, $"{swept} parts swept, inventory +{g.inventory.Count - b0} (capacity {g.inventory.capacity}, now {g.inventory.Count})");
+
+            // Automatic Storage Delivery: a robot fetches the player's load and stores it
+            var handed = g.inventory.items.ToList();
+            string hm = g.RobotHandover();
+            Time.timeScale = 4;
+            float t1 = Time.realtimeSinceStartup;
+            bool Delivered(int i) => g.world.instances[i].state == ItemState.Stored || g.world.instances[i].state == ItemState.InWorld;   // stored, or piled below a high destination
+            while (Time.realtimeSinceStartup - t1 < 60 && !(g.inventory.Count < handed.Count && handed.Any(Delivered))) yield return null;
+            Time.timeScale = 1;
+            int storedByRobot = handed.Count(i => g.world.instances[i].state == ItemState.Stored);
+            Check("Automatic Storage Delivery: a robot takes your parts and delivers them", g.inventory.Count < handed.Count && handed.Any(Delivered),
+                  $"{hm}; {handed.Count - g.inventory.Count} taken, {storedByRobot} stored, {handed.Count(i => g.world.instances[i].state == ItemState.InWorld)} piled so far");
+
+            // Task Coordination: a robot works only inside its zone
+            var zr = g.robots.First(r => r.id == "spiderbot");
+            zr.AssignZone(hc);
+            Time.timeScale = 4;
+            t1 = Time.realtimeSinceStartup;
+            int firstTarget = -1;
+            while (Time.realtimeSinceStartup - t1 < 30 && firstTarget < 0) { if (zr.targetId >= 0) firstTarget = zr.targetId; yield return null; }
+            Time.timeScale = 1;
+            float dz = firstTarget >= 0 ? new Vector2(g.world.instances[firstTarget].Position.x - hc.x, g.world.instances[firstTarget].Position.z - hc.z).magnitude : -1;
+            Check("Task Coordination: an assigned robot works only in its zone", firstTarget >= 0 && dz <= zr.zoneRadius, $"target {dz:0.0} m from the zone centre (radius {zr.zoneRadius})");
+            zr.AssignZone(null);
         }
 
         void Install(int id)

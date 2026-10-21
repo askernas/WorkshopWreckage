@@ -269,6 +269,50 @@ namespace WorkshopWreckage
             return robots.Where(r => r.Active).OrderBy(r => (r.transform.position - p).sqrMagnitude).FirstOrDefault();
         }
 
+        /// <summary>H (Automatic Storage Delivery): the nearest free robot comes over,
+        /// takes what you carry and stores it.</summary>
+        public string RobotHandover()
+        {
+            string msg;
+            if (!progression.Has("auto_delivery")) msg = "You need the Automatic Storage Delivery skill (Esc → Skills)";
+            else if (inventory.Count == 0) msg = "You aren't carrying anything";
+            else
+            {
+                var p = player.transform.position;
+                // prefer a free robot; otherwise the nearest one comes right after its delivery
+                var r = robots.Where(x => x.Active && !x.handoverPending).OrderBy(x => x.Free ? 0 : 1).ThenBy(x => x.carried.Count).ThenBy(x => (x.transform.position - p).sqrMagnitude).FirstOrDefault();
+                msg = r != null && r.RequestHandover() ? (r.Free ? $"{r.displayName} is coming for your parts" : $"{r.displayName} is coming for your parts after its delivery") : "No robot is running yet";
+            }
+            hud.OnFeedback(msg, msg.Contains("coming"));
+            return msg;
+        }
+
+        /// <summary>J (Task Coordination): the nearest robot works only around the point
+        /// you aim at; J again on the same spot releases it. Limited by command slots.</summary>
+        public string RobotZone()
+        {
+            string msg;
+            int slots = (int)progression.Effect("robot_command_slots");
+            var cam = player.cam.transform;
+            if (slots <= 0) msg = "You need the Robot Task Coordination skill (Esc → Skills)";
+            else if (!Physics.Raycast(cam.position, cam.forward, out var hit, 30f, 1 << Layers.Env)) msg = "Aim at the floor where the robot should work";
+            else
+            {
+                var p = new Vector3(hit.point.x, 0, hit.point.z);
+                var zoned = robots.FirstOrDefault(r => r.zoneCenter.HasValue && (r.zoneCenter.Value - p).magnitude < 1.5f);
+                if (zoned != null) { zoned.AssignZone(null); msg = $"{zoned.displayName} works the whole workshop again"; }
+                else if (robots.Count(r => r.zoneCenter.HasValue) >= slots) msg = $"All {slots} command slot{(slots == 1 ? "" : "s")} in use (J on a zone to release it)";
+                else
+                {
+                    var r = robots.Where(x => x.Active && !x.zoneCenter.HasValue).OrderBy(x => (x.transform.position - p).sqrMagnitude).FirstOrDefault();
+                    if (r == null) msg = "No free robot to assign";
+                    else { r.AssignZone(p); msg = $"{r.displayName} now works within {r.zoneRadius:0} m of this spot"; telemetry?.SkillUsed("robot_coordination"); }
+                }
+            }
+            hud.OnFeedback(msg, msg.Contains("now works") || msg.Contains("again"));
+            return msg;
+        }
+
         /// <summary>The storage unit whose footprint contains a world point, if any.</summary>
         public StorageUnit UnitAt(Vector3 p)
         {
@@ -499,6 +543,8 @@ namespace WorkshopWreckage
                 else hud.OnFeedback($"Aim at a part, then press R to send {rb.displayName} for it", false);
             }
             else if (kb.tKey.wasPressedThisFrame && state == "play") NearestActiveRobot()?.ToggleFollow();
+            else if (kb.hKey.wasPressedThisFrame && state == "play") RobotHandover();
+            else if (kb.jKey.wasPressedThisFrame && state == "play") RobotZone();
             else if (kb.f9Key.wasPressedThisFrame && (state == "play" || state == "paused")) LoadGame("quick");
             if (state == "play" && Cursor.lockState != CursorLockMode.Locked && Mouse.current.leftButton.wasPressedThisFrame) Cursor.lockState = CursorLockMode.Locked;
         }

@@ -241,7 +241,7 @@ namespace WorkshopWreckage
             MakeButton(m, "Load Game", () => ShowSub("load"));
             MakeButton(m, "Settings", () => ShowSub("settings"));
             MakeButton(m, "Quit", Application.Quit);
-            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel/1-9 select · B magnet · V scan · X supermagnet · R send robot · T robot follow/work · Tab log · F5/F9 save/load", 14, Muted, 40);
+            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel/1-9 select · B magnet · V scan · X supermagnet · N sweep · R/T/H/J robots · Tab log · F5/F9 save/load", 14, Muted, 40);
             Para(m, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20);
 
             var p = Screen("pause", 460);

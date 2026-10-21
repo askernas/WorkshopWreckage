@@ -47,10 +47,10 @@
 		{"id": "scanner_1", "name": "Parts Scanner", "group": "scanning", "unlock_level": 3, "cost": 1, "requires": [], "effects": {"scan_radius_m": 4.0, "scan_highlights_destination": 1}, "status": "active"},
 		{"id": "scanner_2", "name": "Advanced Scanning", "group": "scanning", "unlock_level": 13, "cost": 1, "requires": ["scanner_1"], "effects": {"scan_radius_m": 8.0, "scan_shows_remaining": 1}, "status": "active"},
 		{"id": "supermagnet", "name": "Supermagnet — Exact Match", "group": "magnet", "unlock_level": 18, "cost": 3, "requires": ["magnet_2"], "effects": {"supermagnet": 1}, "status": "active"},
-		{"id": "robot_coordination", "name": "Robot Task Coordination", "group": "robots", "unlock_level": 8, "cost": 1, "requires": [], "effects": {"robot_command_slots": 1}, "status": "planned"},
-		{"id": "robot_coordination_2", "name": "Shift Planner", "group": "robots", "unlock_level": 16, "cost": 2, "requires": ["robot_coordination"], "effects": {"robot_command_slots": 2, "robot_speed": 0.2}, "status": "planned"},
-		{"id": "auto_delivery", "name": "Automatic Storage Delivery", "group": "automation", "unlock_level": 20, "cost": 3, "requires": ["robot_coordination"], "effects": {"auto_delivery": 1}, "status": "planned"},
-		{"id": "area_collection", "name": "Area Sweep", "group": "automation", "unlock_level": 22, "cost": 3, "requires": ["bulk_pickup", "magnet_2"], "effects": {"area_collect_radius_m": 2.5, "area_collect_max_items": 40}, "status": "planned"}
+		{"id": "robot_coordination", "name": "Robot Task Coordination", "group": "robots", "unlock_level": 8, "cost": 1, "requires": [], "effects": {"robot_command_slots": 1}, "status": "active"},
+		{"id": "robot_coordination_2", "name": "Shift Planner", "group": "robots", "unlock_level": 16, "cost": 2, "requires": ["robot_coordination"], "effects": {"robot_command_slots": 2, "robot_speed": 0.2}, "status": "active"},
+		{"id": "auto_delivery", "name": "Automatic Storage Delivery", "group": "automation", "unlock_level": 20, "cost": 3, "requires": ["robot_coordination"], "effects": {"auto_delivery": 1}, "status": "active"},
+		{"id": "area_collection", "name": "Area Sweep", "group": "automation", "unlock_level": 22, "cost": 3, "requires": ["bulk_pickup", "magnet_2"], "effects": {"area_collect_radius_m": 2.5, "area_collect_max_items": 40}, "status": "active"}
 	],
 	"supermagnet": {
 		"radius_m": 6.0,

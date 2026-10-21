@@ -19,7 +19,7 @@ namespace WorkshopWreckage
     public class Robot : MonoBehaviour
     {
         public enum Mode { Assembling, Activating, Working, Following }
-        enum Step { Choose, ToItem, Picking, ToDest, Depositing }
+        enum Step { Choose, ToItem, Picking, ToDest, Depositing, ToPlayer }
 
         public string id, displayName, locomotion;
         public string Owner => "robot:" + id;
@@ -31,6 +31,8 @@ namespace WorkshopWreckage
         public string status = "";
         public int delivered, staged, lastStagedId = -1;
         public Vector3 home;
+        public Vector3? zoneCenter;                    // assigned work zone (Task Coordination skill)
+        public float zoneRadius = 3f;
         public Quaternion homeRot;
 
         Game g;
@@ -56,6 +58,7 @@ namespace WorkshopWreckage
         public string StepName => _step.ToString();
         public float Speed => _speedNow;
         public float WalkSpeed => _walk;
+        float Walk => _walk * (1f + (float)(g.progression?.Effect("robot_speed") ?? 0));   // Shift Planner
         public float Height => _height;
         public int StationCapacity => g.db.BoxCapacity("RS-" + id);
 
@@ -198,6 +201,56 @@ namespace WorkshopWreckage
             return $"{displayName}: on it — {g.db.Get(defId).displayName}";
         }
 
+        /// <summary>Automatic Storage Delivery: the robot comes over, takes what the
+        /// player carries (up to its capacity) and stores it.</summary>
+        public bool RequestHandover()
+        {
+            if (!Active) return false;
+            mode = Mode.Working;
+            if (carried.Count > 0 || _step == Step.Picking || _step == Step.Depositing) { handoverPending = true; return true; }   // after the current delivery
+            Release();
+            _step = Step.ToPlayer;
+            _path = null;
+            return true;
+        }
+
+        public bool handoverPending;
+
+        public bool Free => Active && carried.Count == 0 && _step != Step.Picking && _step != Step.Depositing && _step != Step.ToPlayer;
+
+        void TakeFromPlayer()
+        {
+            int took = 0;
+            foreach (var itemId in g.inventory.items.ToList())
+            {
+                if (carried.Count >= _capacity) break;
+                g.inventory.Remove(itemId);
+                g.world.SetState(itemId, ItemState.Carried, Owner);
+                carried.Add(itemId);
+                ShowCarried(itemId);
+                took++;
+            }
+            _path = null;
+            _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
+            Sfx.Play("pickup", transform.position + Vector3.up * 0.3f, -4);
+            g.hud.Toast(took > 0 ? $"{displayName} takes {took} part{(took == 1 ? "" : "s")} to storage" : $"{displayName}: nothing to carry");
+            g.telemetry?.SkillUsed("auto_delivery");
+        }
+
+        /// <summary>Task Coordination: restrict work to a zone (null clears it).</summary>
+        public void AssignZone(Vector3? center)
+        {
+            zoneCenter = center;
+            _unreachable.Clear();
+            if (_step == Step.ToItem && targetId >= 0 && center.HasValue && Flat(g.world.instances[targetId].Position - center.Value).magnitude > zoneRadius)
+            {
+                Release();
+                _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
+                _path = null;
+            }
+            mode = Mode.Working;
+        }
+
         public void ToggleFollow()
         {
             if (!Active) return;
@@ -273,9 +326,11 @@ namespace WorkshopWreckage
                 return;
             }
             if (_step == Step.ToDest && _stepT > 60f) { DropCarried($"{displayName} got stuck and set its load down"); return; }
+            if (_step == Step.ToPlayer && _stepT > 40f) { _step = Step.Choose; return; }
             switch (_step)
             {
                 case Step.Choose:
+                    if (handoverPending && carried.Count == 0) { handoverPending = false; _step = Step.ToPlayer; _path = null; break; }
                     Brake(dt);
                     if (Flies) HoverHold(dt, Mathf.Max(0.6f, _altitude));
                     _idleT -= dt;
@@ -288,6 +343,23 @@ namespace WorkshopWreckage
                     bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : (Flat(ip - transform.position).magnitude <= _reach * 0.75f || (Steer(dt) && Flat(ip - transform.position).magnitude <= _reach + 0.1f));
                     if (arrived) { _step = Step.Picking; StartCoroutine(PickUp(targetId)); }
                     else if (!Flies && _pathIdx >= _path.Count) { _unreachable.Add(targetId); Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; }
+                    break;
+                }
+                case Step.ToPlayer:
+                {
+                    var pp = g.player.transform.position;
+                    if (Flat(pp - transform.position).magnitude < 0.9f) { TakeFromPlayer(); break; }
+                    if (Flies) { FlyTo(pp - Flat(pp - transform.position).normalized * 0.6f + Vector3.up * 0.9f, dt, false); break; }
+                    _repathT -= dt;
+                    if (_path == null || _repathT <= 0)
+                    {
+                        _repathT = 0.5f;
+                        var goal = _nav.NearestFree(pp - Flat(pp - transform.position).normalized * 0.5f, 1.0f);
+                        _path = goal.HasValue ? _nav.Path(transform.position, goal.Value) : null;
+                        _pathIdx = 0;
+                        if (_path == null) { _step = Step.Choose; g.hud.Toast($"{displayName} can't get to you"); }
+                    }
+                    if (_path != null) Steer(dt);
                     break;
                 }
                 case Step.ToDest:
@@ -351,6 +423,7 @@ namespace WorkshopWreckage
         bool Pickable(ItemInstance i)
         {
             if (i.state != ItemState.InWorld || i.Position.y > _maxPickH || _unreachable.Contains(i.id) || g.robotReserved.Contains(i.id)) return false;
+            if (zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
             var def = g.db.Get(i.defId);
             if (def.IsRobotPart || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;
             if (ReachableDest(def.storageBox)) return true;
@@ -581,7 +654,7 @@ namespace WorkshopWreckage
             float facing = Vector3.Dot(transform.forward, to.normalized);
             // tracked and wheeled robots turn on the spot before driving off
             float align = locomotion == "tracks" ? Mathf.Clamp01((facing - 0.7f) * 3.3f) : Mathf.Clamp01(facing * 1.4f);
-            float target = _walk * align * Mathf.Clamp01(to.magnitude * 2.5f + (_pathIdx < _path.Count - 1 ? 1 : 0));
+            float target = Walk * align * Mathf.Clamp01(to.magnitude * 2.5f + (_pathIdx < _path.Count - 1 ? 1 : 0));
             _speedNow = Mathf.MoveTowards(_speedNow, target, dt * (locomotion == "wheel" ? 4f : 2.5f));
             transform.position += transform.forward * (_speedNow * dt);
             return false;
@@ -600,7 +673,7 @@ namespace WorkshopWreckage
             float climb = Mathf.MoveTowards(p.y, wantY, dt * 1.1f);
             bool high = Mathf.Abs(p.y - wantY) < 0.25f || dist < 0.8f;
             float target01 = high ? Mathf.Clamp01(dist * 1.5f) : 0.15f;
-            _speedNow = Mathf.MoveTowards(_speedNow, _walk * target01, dt * 2f);
+            _speedNow = Mathf.MoveTowards(_speedNow, Walk * target01, dt * 2f);
             if (dist > 0.02f)
             {
                 FaceTowards(target, dt);
@@ -682,13 +755,15 @@ namespace WorkshopWreckage
                 case Mode.Activating: return $"{displayName}: starting up…";
                 case Mode.Following: return carried.Count > 0 ? $"{displayName}: delivering, then following" : $"{displayName}: following you";
             }
+            if (_step == Step.ToPlayer) return $"{displayName}: coming to take your parts";
+            string zone = zoneCenter.HasValue ? " (zone)" : "";
             return _step switch
             {
                 Step.ToItem => carried.Count > 0 ? $"{displayName}: collecting ({carried.Count}/{_capacity})" : $"{displayName}: fetching a part",
                 Step.Picking => $"{displayName}: picking up",
                 Step.ToDest or Step.Depositing => $"{displayName}: delivering {carried.Count}",
                 _ => status == "" ? $"{displayName}: looking for parts" : $"{displayName}: {status}",
-            };
+            } + zone;
         }
     }
 }
