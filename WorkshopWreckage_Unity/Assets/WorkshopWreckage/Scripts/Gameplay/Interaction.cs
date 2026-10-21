@@ -135,13 +135,15 @@ namespace WorkshopWreckage
             var hits = Physics.RaycastAll(o, dir, Reach, Layers.AimMask, QueryTriggerInteraction.Collide);
             Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
             RaycastHit? hit = null;
+            float envT = Reach;
             foreach (var h in hits)
             {
                 if (h.collider.GetComponent<AimPassThrough>() != null || h.collider.transform.parent?.GetComponent<AimPassThrough>() != null) continue;
-                hit = h;
-                break;
+                hit ??= h;
+                // only solid geometry hides items: destination volumes must not, or
+                // unsorted parts lying on shelves and pallets could never be aimed at
+                if (h.collider.gameObject.layer == Layers.Env) { envT = h.distance; break; }
             }
-            float envT = hit.HasValue ? hit.Value.distance : Reach;
             var (pid, _) = game.index.Pick(o, dir, envT + 0.03f, busy);
             targetType = "none";
             targetItem = -1;

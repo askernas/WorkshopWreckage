@@ -56,39 +56,5 @@ namespace WorkshopWreckage
             TransformChanged?.Invoke(inst);
         }
 
-        /// <summary>Loads the reference layout exported by the Godot generator
-        /// (shared/generated/world_SEED_N.json): identical piles in both engines.</summary>
-        public static ItemWorld LoadReference(ItemDatabase db, int seed, int count, WorkshopLayout layout, List<string> errors)
-        {
-            var path = Shared.GeneratedPath($"world_{seed}_{count}.json");
-            if (!System.IO.File.Exists(path))
-            {
-                errors.Add($"No reference world for seed {seed} with {count} items ({path}). Run tools/export_shared.gd in the Godot project.");
-                return null;
-            }
-            var d = Shared.ReadObject(path);
-            var w = new ItemWorld(db) { seed = seed, layoutHash = (long)Json.Num(d, "layout_hash") };
-            foreach (var row in Json.Arr(d["instances"]))
-            {
-                var a = (List<object>)row;
-                int id = (int)(double)a[0];
-                int defId = (int)(double)a[1];
-                if (db.Get(defId) == null) { errors.Add($"Instance {id}: unknown definition {defId}"); continue; }
-                var o = new Vector3(Json.F(a[2]), Json.F(a[3]), Json.F(a[4]));
-                var bx = new Vector3(Json.F(a[5]), Json.F(a[6]), Json.F(a[7]));
-                var by = new Vector3(Json.F(a[8]), Json.F(a[9]), Json.F(a[10]));
-                var bz = new Vector3(Json.F(a[11]), Json.F(a[12]), Json.F(a[13]));
-                var inst = w.Add(defId, Shared.Matrix(bx, by, bz, o));
-                if (inst.id != id) errors.Add($"Instance id mismatch {id} vs {inst.id}");
-                inst.zone = layout.ZoneAt(inst.Position);
-            }
-            if (count == Json.Int(db.config, "total_items", 4096))
-            {
-                foreach (var defId in db.order)
-                    if (w.TotalOf(defId) != db.Get(defId).spawnCount)
-                        errors.Add($"Reference world has {w.TotalOf(defId)} copies of {defId}, catalog says {db.Get(defId).spawnCount}");
-            }
-            return w;
-        }
     }
 }

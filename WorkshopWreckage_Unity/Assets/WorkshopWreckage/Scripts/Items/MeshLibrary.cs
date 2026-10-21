@@ -23,9 +23,18 @@ namespace WorkshopWreckage
 
         static readonly Dictionary<string, Entry> _cache = new();
 
-        static string FileFor(string key, int lod) => Shared.MeshPath(key.Replace(":", "_") + "__lod" + lod + ".obj");
+        static string FileFor(string key, int lod) => Shared.MeshPath(key.Replace(":", "_") + "__lod" + lod + ".obj.gz");
 
         public static bool Has(string key) => _cache.ContainsKey(key + "|1") || File.Exists(FileFor(key, LodWorld));
+
+        static IEnumerable<string> Lines(string path)
+        {
+            using var fs = File.OpenRead(path);
+            using var gz = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionMode.Decompress);
+            using var r = new StreamReader(gz);
+            string line;
+            while ((line = r.ReadLine()) != null) yield return line;
+        }
 
         public static Entry Get(string key, int lod)
         {
@@ -49,7 +58,7 @@ namespace WorkshopWreckage
             var slotTris = new SortedDictionary<int, List<int>>();
             List<int> current = null;
             var ci = CultureInfo.InvariantCulture;
-            foreach (var raw in File.ReadLines(path))
+            foreach (var raw in Lines(path))
             {
                 if (raw.Length < 2) continue;
                 var p = raw.Split(' ');

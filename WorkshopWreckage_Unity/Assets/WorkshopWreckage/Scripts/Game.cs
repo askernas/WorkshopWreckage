@@ -11,8 +11,9 @@ namespace WorkshopWreckage
     /// <summary>Entry point and game controller (port of Godot main.gd). Created
     /// automatically after the first scene loads, so the scene needs no setup.
     ///
-    /// Command line: --shot=a.png;b.png --cam=x,y,z,yaw,pitch;...  --items=256|1024|4096
-    /// --presort=0.35  --play  --hud  --bench=out.json  --autoplay=out_dir</summary>
+    /// Command line: --preset=standard|large|massive  --seed=N  --shot=a.png;b.png
+    /// --cam=x,y,z,yaw,pitch;...  --items=N (benchmark subset)  --presort=0.35  --play  --hud
+    /// --bench=out.json  --autoplay=out_dir</summary>
     public class Game : MonoBehaviour
     {
         public ItemDatabase db;
@@ -30,7 +31,9 @@ namespace WorkshopWreckage
         public Hud hud;
         public RepairBay repairBay;
         public readonly Dictionary<string, StorageUnit> units = new();
-        public int itemCount = 4096;
+        public int itemCount = -1;   // -1 = the preset's full population
+        public string presetId = "standard";
+        int _layoutSeed = int.MinValue;
         public string state = "menu";
         public readonly Dictionary<string, string> args = new();
         public double startupMs;
@@ -61,23 +64,15 @@ namespace WorkshopWreckage
             Physics.IgnoreLayerCollision(Layers.Player, Layers.Target);
             Sfx.Init(transform);
 
-            db = ItemDatabase.LoadDefault();
-            layout = WorkshopLayout.Load();
-            if (db.IsValid) db.Validate();
+            if (args.TryGetValue("preset", out var pr)) presetId = pr;
+            bool valid = LoadPreset(presetId);
+            Debug.Log($"[boot] preset {presetId} loaded, valid {valid} ({sw.ElapsedMilliseconds} ms)");
             hud = new GameObject("UI").AddComponent<Hud>();
             hud.transform.SetParent(transform, false);
             hud.Init(this);
-            if (!db.IsValid) { hud.ShowFatal("The item data files are invalid:\n\n" + string.Join("\n", db.errors.Take(25))); return; }
-            _assignments = db.Assignments();
-
-            builder = new GameObject("Workshop").AddComponent<WorkshopBuilder>();
-            builder.transform.SetParent(transform, false);
-            builder.Build(layout);
-            BuildStorage();
+            if (!valid) { hud.ShowFatal("The item data files are invalid:\n\n" + string.Join("\n", db.errors.Take(25))); return; }
             repairBay = new GameObject("RepairBay").AddComponent<RepairBay>();
             repairBay.transform.SetParent(transform, false);
-            repairBay.transform.position = Shared.Pos(layout.repairBayPos.x, layout.repairBayPos.y, layout.repairBayPos.z);
-            repairBay.transform.rotation = Shared.YRot(layout.repairBayRot);
 
             player = new GameObject("Player").AddComponent<PlayerController>();
             player.transform.SetParent(transform, false);
@@ -94,7 +89,8 @@ namespace WorkshopWreckage
             repairBay.Init(this);
 
             if (args.TryGetValue("items", out var n)) itemCount = int.Parse(n);
-            if (!StartWorld(Json.Int(db.config, "default_seed", 1912), null)) return;
+            int seed = args.TryGetValue("seed", out var sd) ? int.Parse(sd) : Json.Int(db.config, "default_seed", 1912);
+            if (!StartWorld(seed, null)) return;
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
             StartCoroutine(ProbeLater());
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
@@ -116,11 +112,51 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- world lifecycle
 
+        /// <summary>Loads and validates a world-size preset's data; the workshop
+        /// itself is built per seed by BuildWorkshop.</summary>
+        public bool LoadPreset(string preset)
+        {
+            db = ItemDatabase.LoadPreset(preset);
+            if (db.IsValid) db.Validate();
+            if (!db.IsValid) return false;
+            presetId = preset;
+            _assignments = db.Assignments();
+            _layoutSeed = int.MinValue;
+            return true;
+        }
+
+        /// <summary>Generates the procedural workshop for the current preset and
+        /// seed and (re)builds room, furniture and storage units.</summary>
+        bool BuildWorkshop(int seed)
+        {
+            var l = WorkshopLayout.Generate(db, seed);
+            if (l.placementErrors.Count > 0) { hud.ShowFatal("The workshop layout is invalid:\n\n" + string.Join("\n", l.placementErrors.Take(20))); return false; }
+            layout = l;
+            _layoutSeed = seed;
+            if (builder != null) Destroy(builder.gameObject);
+            foreach (var u in units.Values) Destroy(u.gameObject);
+            units.Clear();
+            builder = new GameObject("Workshop").AddComponent<WorkshopBuilder>();
+            builder.transform.SetParent(transform, false);
+            Debug.Log("[boot] layout generated");
+            builder.Build(layout);
+            Debug.Log("[boot] workshop built");
+            BuildStorage();
+            Debug.Log("[boot] storage built");
+            repairBay.transform.position = Shared.Pos(layout.repairBayPos.x, layout.repairBayPos.y, layout.repairBayPos.z);
+            repairBay.transform.rotation = Shared.YRot(layout.repairBayRot);
+            if (startupMs > 0) StartCoroutine(ProbeLater());
+            return true;
+        }
+
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
-            var errors = new List<string>();
-            var w = ItemWorld.LoadReference(db, seed, itemCount, layout, errors);
-            if (w == null || errors.Count > 0) { hud.ShowFatal("World could not be loaded:\n\n" + string.Join("\n", errors.Take(20))); return false; }
+            if (_layoutSeed != seed && !BuildWorkshop(seed)) return false;
+            var gen = new WorldGenerator();
+            int total = Json.Int(db.config, "total_items", 4096);
+            var w = gen.Generate(db, layout, seed, itemCount > 0 && itemCount < total ? itemCount : -1);
+            if (w == null) { hud.ShowFatal("World could not be generated:\n\n" + string.Join("\n", gen.errors.Take(20))); return false; }
+            Debug.Log($"[world] preset {presetId}, seed {seed}: {w.Count} items in {gen.lastGenerationMs:0} ms ({layout.piles.Count} pile sites, {layout.surfaces.Count} surfaces, {units.Count} storage units)");
             world = w;
             if (renderer != null) Destroy(renderer.gameObject);
             renderer = new GameObject("Items").AddComponent<ItemRenderer>();
@@ -182,7 +218,8 @@ namespace WorkshopWreckage
             var d = SaveSystem.Read(slot);
             var problem = SaveSystem.Check(d, db);
             if (problem != "") { hud.OnFeedback(problem, false); hud.SetStatus(problem); return; }
-            itemCount = Json.Int(d, "item_count", 4096);
+            int count = Json.Int(d, "item_count", -1);
+            itemCount = count == Json.Int(db.config, "total_items", 4096) ? -1 : count;
             if (StartWorld(Json.Int(d, "seed"), d)) { SetState("play"); hud.Toast("Loaded " + slot); }
         }
 

@@ -446,6 +446,8 @@ namespace WorkshopWreckage
             Fill(r, "t", 18, BadC).text = text;
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
+            Debug.LogError("[fatal] " + text);
+            if (Game.Instance != null && Game.Instance.Automated) Application.Quit(2);
         }
 
         public void MarkHotbarDirty() => _hotbarDirty = true;

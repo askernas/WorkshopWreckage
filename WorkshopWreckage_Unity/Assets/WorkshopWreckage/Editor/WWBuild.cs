@@ -52,12 +52,15 @@ namespace WorkshopWreckage.EditorTools
 
         public void OnPreprocessBuild(BuildReport report)
         {
-            foreach (var sub in new[] { "data", "generated", "meshes" })
+            foreach (var sub in new[] { "data", "meshes" })
             {
                 var from = Path.Combine(Src, sub);
-                var to = Path.Combine(Dest, sub);
-                Directory.CreateDirectory(to);
-                foreach (var f in Directory.GetFiles(from)) File.Copy(f, Path.Combine(to, Path.GetFileName(f)), true);
+                foreach (var f in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
+                {
+                    var to = Path.Combine(Dest, sub, Path.GetRelativePath(from, f));
+                    Directory.CreateDirectory(Path.GetDirectoryName(to));
+                    File.Copy(f, to, true);
+                }
             }
             AssetDatabase.Refresh();
         }

@@ -45,7 +45,8 @@ namespace WorkshopWreckage
             g.player.enabled = false;
 
             // 1. pick individual items from a heap by aiming at them
-            var pile = ItemsNear(new Vector3(-2.2f, 0, 1.6f), 1.2f);
+            var heap = g.layout.piles.First(p => p.kind == "heap" && p.surface == 0);   // procedural: first floor heap
+            var pile = ItemsNear(new Vector3(heap.center.x, 0, heap.center.y), 1.2f);
             int visibleBefore = g.renderer.VisibleCount, picked = 0, exact = 0;
             foreach (var id in pile.Take(40))
             {

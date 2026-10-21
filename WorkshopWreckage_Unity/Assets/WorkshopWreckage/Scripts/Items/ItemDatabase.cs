@@ -32,14 +32,33 @@ namespace WorkshopWreckage
 
         public bool IsValid => errors.Count == 0;
 
-        public static ItemDatabase LoadDefault()
+        public string presetId;
+
+        /// <summary>World-size presets (shared/data/world_presets.json), smallest first.</summary>
+        public static List<(string id, Dictionary<string, object> cfg)> Presets()
         {
-            var db = new ItemDatabase();
+            var o = new List<(string id, Dictionary<string, object> cfg)>();
             try
             {
-                var cfg = Shared.ReadObject(Shared.DataPath("world_config.json"));
-                var catText = File.ReadAllText(Shared.DataPath("item_catalog.json"));
-                var stoText = File.ReadAllText(Shared.DataPath("storage_layout.json"));
+                foreach (var kv in Json.Obj(Shared.ReadObject(Shared.DataPath("world_presets.json"))["presets"]))
+                    o.Add((kv.Key, Json.Obj(kv.Value)));
+            }
+            catch (System.Exception e) { Debug.LogError("world_presets.json: " + e.Message); }
+            return o.OrderBy(p => Json.Int(p.cfg, "tier")).ToList();
+        }
+
+        public static ItemDatabase LoadDefault() => LoadPreset("standard");
+
+        /// <summary>Loads shared/data/presets/&lt;id&gt;/ (authored by CatalogAuthoring).</summary>
+        public static ItemDatabase LoadPreset(string preset)
+        {
+            var db = new ItemDatabase { presetId = preset };
+            try
+            {
+                string P(string f) => Shared.DataPath(Path.Combine("presets", preset, f));
+                var cfg = Shared.ReadObject(P("world_config.json"));
+                var catText = File.ReadAllText(P("item_catalog.json"));
+                var stoText = File.ReadAllText(P("storage_layout.json"));
                 db.Load(cfg, Json.Obj(Json.Parse(catText)), Json.Obj(Json.Parse(stoText)));
                 db.catalogHash = Fnv(catText) ^ Fnv(stoText);
             }
