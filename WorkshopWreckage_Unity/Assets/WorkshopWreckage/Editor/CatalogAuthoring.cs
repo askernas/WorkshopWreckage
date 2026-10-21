@@ -113,7 +113,53 @@ namespace WorkshopWreckage.EditorTools
                               $"layout {layoutMs:0} ms, world {gen.lastGenerationMs:0} ms; heights: " + string.Join(", ", bySurface.Select(kv => $"{kv.Key} {kv.Value}")));
                 }
             }
+            failures += ValidateProgression();
             if (Application.isBatchMode) EditorApplication.Exit(failures == 0 ? 0 : 1);
+        }
+
+        /// <summary>progression.json: configuration rules, anti-exploit behaviour and a
+        /// simulated full playthrough per preset (level reached vs. share sorted).</summary>
+        static int ValidateProgression()
+        {
+            int failures = 0;
+            var cfg = Shared.ReadObject(Shared.DataPath("progression.json"));
+            foreach (var e in new Progression(cfg, "standard").Validate()) { Debug.LogError("[validate] progression: " + e); failures++; }
+
+            var t = new Progression(cfg, "standard");
+            t.OnSorted(7, false);
+            long once = t.xp;
+            t.OnSorted(7, false);          // same instance re-sorted (taken out and stored again)
+            t.OnDiscovered(3, false); long d1 = t.xp; t.OnDiscovered(3, false);
+            if (t.xp != d1 || once <= 0) { Debug.LogError("[validate] progression: repeated sorting/discovery granted XP again"); failures++; }
+
+            foreach (var (id, _) in ItemDatabase.Presets())
+            {
+                var db = ItemDatabase.LoadPreset(id);
+                var p = new Progression(cfg, id);
+                var order = db.order.SelectMany(defId => Enumerable.Repeat(defId, db.Get(defId).spawnCount)).ToList();
+                var rng = new System.Random(5);
+                for (int i = order.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); (order[i], order[j]) = (order[j], order[i]); }
+                var sortedOf = new Dictionary<int, int>();
+                var at = new List<string>();
+                int next = 25;
+                for (int k = 0; k < order.Count; k++)
+                {
+                    int defId = order[k];
+                    p.OnDiscovered(defId, db.Get(defId).IsRobotPart);
+                    p.OnSorted(k, false);
+                    sortedOf[defId] = sortedOf.GetValueOrDefault(defId) + 1;
+                    if (sortedOf[defId] == db.Get(defId).spawnCount) p.OnDefinitionCompleted(defId, db.Get(defId).spawnCount);
+                    int pct = (int)(100L * (k + 1) / order.Count);
+                    while (pct >= next && next <= 100)
+                    {
+                        for (int z = 0; z < 4; z++) p.OnZoneRestored(z, next);
+                        at.Add($"{next}% → L{p.level}");
+                        next += 25;
+                    }
+                }
+                Debug.Log($"[validate] progression {id}: {order.Count} items, total XP {p.xp:N0} (max level needs {p.TotalXpForMax:N0}); " + string.Join(", ", at));
+            }
+            return failures;
         }
 
         // ------------------------------------------------------------------ choosing

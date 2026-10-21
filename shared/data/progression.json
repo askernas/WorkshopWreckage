@@ -1,0 +1,71 @@
+{
+	"version": 1,
+	"note": "Player levels, XP and skills. Engine independent; read by Progression.cs. XP is only ever granted once per instance/definition/zone/robot (see anti_exploit). 'status' marks what the current build implements: active = effect applied in game, planned = data reserved for a later milestone (see docs/ROADMAP.md).",
+	"levels": {
+		"max_level": 25,
+		"xp_curve": {"type": "power", "base": 19, "exponent": 1.55, "comment": "XP needed to go from level L to L+1 = round(base * L^exponent)"},
+		"skill_points_per_level": 1,
+		"bonus_skill_points": {"5": 1, "10": 1, "15": 1, "20": 1}
+	},
+	"xp_rewards": {
+		"sort_item": 2,
+		"sort_item_robot_assisted": 1,
+		"complete_definition": 15,
+		"complete_definition_per_copy": 1,
+		"zone_restored_25": 40,
+		"zone_restored_50": 60,
+		"zone_restored_75": 80,
+		"zone_restored_100": 150,
+		"discover_definition": 1,
+		"discover_robot_part": 25,
+		"robot_repaired": 300,
+		"objective_completed": 100
+	},
+	"anti_exploit": {
+		"sort_xp_once_per_instance": true,
+		"discover_xp_once_per_definition": true,
+		"no_xp_for_pickup_or_drop": true,
+		"comment": "Picking up and dropping items never grants XP; sorting grants XP only the first time an instance is stored, so taking an item out of storage and re-storing it gives nothing."
+	},
+	"preset_xp_scale": {
+		"standard": 1.0,
+		"large": 0.62,
+		"massive": 0.45,
+		"comment": "Per-item XP shrinks with world size so level 25 is reached at a similar completion fraction in every preset. Balance target: Massive completes in ~1.8x Standard's time (items x2.44)."
+	},
+	"skills": [
+		{"id": "pockets_1", "name": "Deeper Pockets", "group": "inventory", "unlock_level": 2, "cost": 1, "requires": [], "effects": {"inventory_capacity": 10}, "status": "active"},
+		{"id": "pockets_2", "name": "Tool Belt", "group": "inventory", "unlock_level": 6, "cost": 1, "requires": ["pockets_1"], "effects": {"inventory_capacity": 20}, "status": "active"},
+		{"id": "pockets_3", "name": "Parts Crate on Wheels", "group": "inventory", "unlock_level": 12, "cost": 2, "requires": ["pockets_2"], "effects": {"inventory_capacity": 40}, "status": "active"},
+		{"id": "quick_hands", "name": "Quick Hands", "group": "collection", "unlock_level": 3, "cost": 1, "requires": [], "effects": {"pickup_speed": 0.25}, "status": "planned"},
+		{"id": "long_reach", "name": "Long Reach", "group": "collection", "unlock_level": 4, "cost": 1, "requires": [], "effects": {"reach_m": 0.8}, "status": "active"},
+		{"id": "bulk_pickup", "name": "Handful", "group": "collection", "unlock_level": 5, "cost": 1, "requires": [], "effects": {"bulk_pickup_count": 4, "bulk_pickup_radius_m": 0.25}, "status": "planned"},
+		{"id": "magnet_1", "name": "Magnetic Glove", "group": "magnet", "unlock_level": 7, "cost": 1, "requires": [], "effects": {"magnet_range_m": 0.8, "magnet_max_items": 12}, "status": "planned"},
+		{"id": "magnet_2", "name": "Stronger Coils", "group": "magnet", "unlock_level": 10, "cost": 1, "requires": ["magnet_1"], "effects": {"magnet_range_m": 0.7, "magnet_max_items": 12}, "status": "planned"},
+		{"id": "filter_material", "name": "Material Filter", "group": "magnet", "unlock_level": 9, "cost": 1, "requires": ["magnet_1"], "effects": {"filter_material": 1}, "status": "planned"},
+		{"id": "filter_category", "name": "Category Filter", "group": "magnet", "unlock_level": 11, "cost": 1, "requires": ["magnet_1"], "effects": {"filter_category": 1}, "status": "planned"},
+		{"id": "scanner_1", "name": "Parts Scanner", "group": "scanning", "unlock_level": 3, "cost": 1, "requires": [], "effects": {"scan_radius_m": 4.0, "scan_highlights_destination": 1}, "status": "planned"},
+		{"id": "scanner_2", "name": "Advanced Scanning", "group": "scanning", "unlock_level": 13, "cost": 1, "requires": ["scanner_1"], "effects": {"scan_radius_m": 8.0, "scan_shows_remaining": 1}, "status": "planned"},
+		{"id": "supermagnet", "name": "Supermagnet — Exact Match", "group": "magnet", "unlock_level": 18, "cost": 3, "requires": ["magnet_2"], "effects": {"supermagnet": 1}, "status": "planned"},
+		{"id": "robot_coordination", "name": "Robot Task Coordination", "group": "robots", "unlock_level": 8, "cost": 1, "requires": [], "effects": {"robot_command_slots": 1}, "status": "planned"},
+		{"id": "robot_coordination_2", "name": "Shift Planner", "group": "robots", "unlock_level": 16, "cost": 2, "requires": ["robot_coordination"], "effects": {"robot_command_slots": 2, "robot_speed": 0.2}, "status": "planned"},
+		{"id": "auto_delivery", "name": "Automatic Storage Delivery", "group": "automation", "unlock_level": 20, "cost": 3, "requires": ["robot_coordination"], "effects": {"auto_delivery": 1}, "status": "planned"},
+		{"id": "area_collection", "name": "Area Sweep", "group": "automation", "unlock_level": 22, "cost": 3, "requires": ["bulk_pickup", "magnet_2"], "effects": {"area_collect_radius_m": 2.5, "area_collect_max_items": 40}, "status": "planned"}
+	],
+	"supermagnet": {
+		"radius_m": 6.0,
+		"max_items_per_activation": 25,
+		"cooldown_s": 20,
+		"energy_cost": 0,
+		"respect_inventory_capacity": true,
+		"overflow_to_buffer": false,
+		"include_robot_parts": false,
+		"line_of_sight_required": true,
+		"comment": "Matches the held item's exact definition id; only UNSORTED instances lying in the world (state InWorld, not reserved by robots). Works on non-magnetic materials."
+	},
+	"telemetry": {
+		"enabled": true,
+		"sample_interval_s": 60,
+		"comment": "Written to <persistentDataPath>/telemetry/<preset>_<seed>_<timestamp>.json"
+	}
+}

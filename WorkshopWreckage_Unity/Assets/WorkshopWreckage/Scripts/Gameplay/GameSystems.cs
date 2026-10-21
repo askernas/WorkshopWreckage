@@ -411,13 +411,26 @@ namespace WorkshopWreckage
             return new Dictionary<string, object>
             {
                 ["game"] = "Workshop Wreckage (Unity)", ["version"] = (double)Version, ["saved_at"] = DateTime.Now.ToString("s"),
+                ["preset"] = g.presetId, ["catalog_version"] = (double)Json.Int(g.db.config, "version", 1),
                 ["seed"] = (double)g.world.seed, ["item_count"] = (double)g.world.Count, ["catalog_hash"] = g.db.catalogHash.ToString(),
+                ["play_time_s"] = g.playTime, ["progression"] = g.progression.ToDict(),
                 ["items"] = items, ["storage"] = storage,
                 ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),
                 ["player"] = new Dictionary<string, object> { ["pos"] = new List<object> { (double)p.position.x, (double)p.position.y, (double)p.position.z }, ["yaw"] = (double)g.player.Yaw, ["pitch"] = (double)g.player.Pitch },
-                ["stats"] = new Dictionary<string, object> { ["sorted"] = (double)g.progress.sortedTotal, ["percent"] = (double)g.progress.OverallPercent },
+                ["stats"] = new Dictionary<string, object> { ["sorted"] = (double)g.progress.sortedTotal, ["percent"] = (double)g.progress.OverallPercent, ["level"] = (double)g.progression.level },
             };
+        }
+
+        /// <summary>True if the save describes the world currently being played
+        /// (same preset, seed and catalog), i.e. saving over it loses nothing else.</summary>
+        public static bool SameWorld(Dictionary<string, object> d, Game g)
+            => Json.Str(d, "preset", "standard") == g.presetId && Json.Int(d, "seed") == g.world.seed && Json.Str(d, "catalog_hash") == g.db.catalogHash.ToString();
+
+        public static string WorldLabel(Dictionary<string, object> d)
+        {
+            var p = Json.Str(d, "preset", "standard");
+            return $"{char.ToUpper(p[0]) + p.Substring(1)}, seed {Json.Int(d, "seed")}";
         }
 
         public static bool Write(string slot, Dictionary<string, object> data)
@@ -441,6 +454,8 @@ namespace WorkshopWreckage
         {
             if (d == null) return "No save in that slot.";
             if (Json.Int(d, "version") > Version) return "This save was made by a newer version of the game.";
+            if (Json.Str(d, "preset", "standard") != db.presetId) return $"This save belongs to the {Json.Str(d, "preset")} world size.";
+            if (Json.Int(d, "catalog_version", 1) != Json.Int(db.config, "version", 1)) return "This save was made with a different catalog version.";
             if (Json.Str(d, "catalog_hash") != db.catalogHash.ToString()) return "This save was made with a different item catalog.";
             return "";
         }
@@ -468,7 +483,7 @@ namespace WorkshopWreckage
             var d = Read(slot);
             if (d == null) return slot + " — empty";
             var st = Json.Obj(d["stats"]);
-            return $"{slot} — {Json.Str(d, "saved_at").Replace('T', ' ')}  ·  {Json.Int(st, "sorted")} sorted ({Json.Num(st, "percent"):0.0}%)";
+            return $"{slot} — {WorldLabel(d)}  ·  {Json.Str(d, "saved_at").Replace('T', ' ')}  ·  level {Json.Int(st, "level", 1)}  ·  {Json.Int(st, "sorted")} sorted ({Json.Num(st, "percent"):0.0}%)";
         }
     }
 }

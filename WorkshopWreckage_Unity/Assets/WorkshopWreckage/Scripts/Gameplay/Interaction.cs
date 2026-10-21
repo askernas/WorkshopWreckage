@@ -19,7 +19,9 @@ namespace WorkshopWreckage
     /// (port of InteractionController.gd). All actions change real ItemWorld state.</summary>
     public class Interaction : MonoBehaviour
     {
-        public const float Reach = 2.7f;
+        public const float BaseReach = 2.7f;
+        public float reachBonus;                      // from skills (progression.json: reach_m)
+        public float Reach => BaseReach + reachBonus;
         const float Repeat = 0.13f;
         static readonly Color OutlineItem = new(1f, 0.8f, 0.35f), Good = new(0.45f, 1f, 0.55f), Bad = new(1f, 0.4f, 0.3f);
 

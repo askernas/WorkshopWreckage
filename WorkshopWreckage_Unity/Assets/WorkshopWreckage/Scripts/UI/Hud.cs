@@ -19,7 +19,7 @@ namespace WorkshopWreckage
         Game _g;
         Canvas _canvas;
         RectTransform _hud, _menus;
-        Text _title, _sub, _hint, _feedback, _progress, _zone, _heldName, _heldCount, _heldDest, _carried, _inspectText, _debug, _status;
+        Text _level, _title, _sub, _hint, _feedback, _progress, _zone, _heldName, _heldCount, _heldDest, _carried, _inspectText, _debug, _status;
         Image _cross;
         RectTransform _toasts, _hotbar, _heldPanel, _inspect;
         float _feedbackT;
@@ -124,9 +124,10 @@ namespace WorkshopWreckage
             _toasts = At("Toasts", _hud, new Vector2(0.5f, 0), new Vector2(-300, 20), new Vector2(600, 300));
             var vl = _toasts.gameObject.AddComponent<VerticalLayoutGroup>();
             vl.spacing = 6; vl.childControlHeight = false; vl.childForceExpandHeight = false; vl.childAlignment = TextAnchor.UpperCenter;
-            var tl = At("Progress", _hud, Vector2.zero, new Vector2(20, 20), new Vector2(420, 64));
+            var tl = At("Progress", _hud, Vector2.zero, new Vector2(20, 20), new Vector2(440, 92));
             Panel(tl, new Color(0.1f, 0.07f, 0.05f, 0.72f), BrassDim);
             _progress = Label(tl, "p", 20, Brass, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14, 0), new Vector2(-10, -8));
+            _level = Label(tl, "l", 17, Cream, TextAnchor.MiddleLeft, Vector2.zero, Vector2.one, new Vector2(14, 2), new Vector2(-10, 4));
             _zone = Label(tl, "z", 16, Muted, TextAnchor.LowerLeft, Vector2.zero, Vector2.one, new Vector2(14, 8), new Vector2(-10, 0));
             _heldPanel = At("Held", _hud, Vector2.one, new Vector2(-580, -230), new Vector2(560, 130));
             Panel(_heldPanel, new Color(0.1f, 0.07f, 0.05f, 0.8f), BrassDim);
@@ -215,6 +216,18 @@ namespace WorkshopWreckage
             Title(m, "WORKSHOP\nWRECKAGE", 56);
             Para(m, "Restore order. Rebuild the robots.", 18, Muted, 28);
             _continue = MakeButton(m, "Continue", () => _g.LoadGame(LatestSlot()));
+            // world size: cycles through shared/data/world_presets.json
+            var presets = ItemDatabase.Presets();
+            if (presets.Count == 0) presets.Add((_g.presetId, _g.db.config));
+            int pi = Mathf.Max(0, presets.FindIndex(x => x.id == _g.presetId));
+            string PresetText() => $"World size:  {Json.Str(presets[pi].cfg, "label", presets[pi].id)}  ({Json.Int(presets[pi].cfg, "total_items"):N0} parts)";
+            Button presetBtn = null;
+            presetBtn = MakeButton(m, PresetText(), () =>
+            {
+                if (presets.Count == 0) return;
+                pi = (pi + 1) % presets.Count;
+                presetBtn.GetComponentInChildren<Text>().text = PresetText();
+            });
             var seedRow = new GameObject("Seed", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
             seedRow.transform.SetParent(m, false);
             seedRow.GetComponent<LayoutElement>().preferredHeight = 40;
@@ -224,16 +237,17 @@ namespace WorkshopWreckage
             _seed = inGo.GetComponent<InputField>();
             _seed.text = Json.Int(_g.db.config, "default_seed", 1912).ToString();
             _seed.textComponent.font = TextAtlas.Font;
-            MakeButton(m, "New Game", () => { if (_g.StartWorld(int.TryParse(_seed.text, out var s) ? s : 1912, null)) _g.SetState("play"); });
+            MakeButton(m, "New Game", () => { if (_g.NewGame(presets[pi].id, int.TryParse(_seed.text, out var s) ? s : 1912)) _g.SetState("play"); });
             MakeButton(m, "Load Game", () => ShowSub("load"));
             MakeButton(m, "Settings", () => ShowSub("settings"));
             MakeButton(m, "Quit", Application.Quit);
             Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel/1-9 select · Tab inventory · F5/F9 quick save/load · F3 stats", 14, Muted, 40);
-            Para(m, "<i>Note: this Unity build loads the reference layout for seed 1912 only.</i>", 13, Muted, 20);
+            Para(m, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20);
 
             var p = Screen("pause", 460);
             Title(p, "PAUSED");
             MakeButton(p, "Resume", () => _g.SetState("play"));
+            MakeButton(p, "Skills", () => ShowSub("skills"));
             MakeButton(p, "Save Game", () => ShowSub("save"));
             MakeButton(p, "Load Game", () => ShowSub("load"));
             MakeButton(p, "Settings", () => ShowSub("settings"));
@@ -250,6 +264,13 @@ namespace WorkshopWreckage
             _loadList = Rect("List", l, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
             Stack(_loadList);
             MakeButton(l, "Back", () => ShowScreenRaw(_backTo));
+
+            var sk = Screen("skills", 1000);
+            Title(sk, "SKILLS");
+            _skillHeader = Para(sk, "", 18, Brass, 28);
+            _skillList = Rect("List", sk, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            Stack(_skillList);
+            MakeButton(sk, "Back", () => ShowScreenRaw(_backTo));
 
             var st = Screen("settings", 640);
             Title(st, "SETTINGS");
@@ -329,13 +350,14 @@ namespace WorkshopWreckage
             foreach (var kv in _screens) kv.Value.gameObject.SetActive(kv.Key == name);
             _status.text = "";
             if (name == "save" || name == "load") RefreshSlots();
+            if (name == "skills") RefreshSkills();
             if (name == "inventory") RefreshLog();
             if (name == "main") _continue.interactable = LatestSlot() != "";
         }
 
         public bool BackFromSubScreen()
         {
-            if (_screen == "save" || _screen == "load" || _screen == "settings") { ShowScreenRaw(_backTo); return true; }
+            if (_screen == "save" || _screen == "load" || _screen == "settings" || _screen == "skills") { ShowScreenRaw(_backTo); return true; }
             return false;
         }
 
@@ -356,6 +378,28 @@ namespace WorkshopWreckage
                     });
                     b.interactable = saving || System.IO.File.Exists(SaveSystem.PathOf(slot));
                 }
+            }
+        }
+
+        Text _skillHeader;
+        RectTransform _skillList;
+
+        /// <summary>Skill tree from progression.json. Planned skills are listed (so the
+        /// progression is visible) but cannot be unlocked until they are implemented.</summary>
+        void RefreshSkills()
+        {
+            var pr = _g.progression;
+            if (pr == null) return;
+            _skillHeader.text = $"Level {pr.level} / {pr.maxLevel}   ·   {pr.XpIntoLevel:N0} / {(pr.level >= pr.maxLevel ? 0 : pr.XpForLevel(pr.level)):N0} XP   ·   {pr.skillPoints} skill point{(pr.skillPoints == 1 ? "" : "s")}";
+            foreach (Transform c in _skillList) Destroy(c.gameObject);
+            foreach (var s in pr.skills.OrderBy(s => s.unlockLevel))
+            {
+                bool owned = pr.unlocked.Contains(s.id);
+                string why = s.Active ? pr.CanUnlock(s.id) : "coming in a later milestone";
+                string state = owned ? "UNLOCKED" : why == "" ? $"unlock ({s.cost} pt)" : why;
+                var b = MakeButton(_skillList, $"Lv {s.unlockLevel,2}  {s.name}  —  {state}", () => { if (_g.UnlockSkill(s.id)) RefreshSkills(); });
+                b.interactable = !owned && s.Active && why == "";
+                b.GetComponent<LayoutElement>().preferredHeight = 30;
             }
         }
 
@@ -461,6 +505,8 @@ namespace WorkshopWreckage
             }
             if (_g == null || _g.world == null) return;
             var p = _g.progress;
+            var pr = _g.progression;
+            _level.text = pr == null ? "" : $"Level {pr.level}  ·  {pr.XpIntoLevel:N0}/{(pr.level >= pr.maxLevel ? pr.XpIntoLevel : pr.XpForLevel(pr.level)):N0} XP" + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
             _progress.text = $"Workshop restored  {p.OverallPercent:0.0}%   ({p.sortedTotal} / {_g.world.Count} sorted)";
             int z = _g.layout.ZoneAt(_g.player.transform.position);
             _zone.text = $"{_g.layout.zones[z].name}  —  {p.ZonePercent(z):0}% restored";

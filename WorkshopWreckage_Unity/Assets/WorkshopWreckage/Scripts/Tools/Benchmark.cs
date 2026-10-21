@@ -123,7 +123,7 @@ namespace WorkshopWreckage
             for (int i = 0; i < count; i++)
             {
                 var dir = (cam.forward + cam.right * (float)(rng.NextDouble() * 0.7 - 0.35) + cam.up * (float)(rng.NextDouble() * 0.5 - 0.25)).normalized;
-                var (id, _) = g.index.Pick(cam.position, dir, Interaction.Reach);
+                var (id, _) = g.index.Pick(cam.position, dir, Interaction.BaseReach);
                 total += g.index.LastPickMicros;
                 worst = System.Math.Max(worst, g.index.LastPickMicros);
                 if (id >= 0) hits++;

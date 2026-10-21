@@ -183,10 +183,20 @@ namespace WorkshopWreckage
             repairBay.Refresh();
             foreach (var u in units.Values) { u.labelProvider = LabelFor; u.RefreshLabels(); }
             interaction.ResetState();
+            StartProgression(seed, save);
             progress.Milestone += (key, text) => { hud.Toast(text, key.StartsWith("zone") || key == "first_pickup"); Sfx.Play("milestone", null, -6); };
             progress.DefinitionCompleted += id => { hud.Toast($"Set complete: {db.Get(id).displayName}  (all {world.TotalOf(id)})", true); Sfx.Play("complete", null, -4); };
             progress.Discovered += id => { _labelsDirty.Add(db.Get(id).storageBox); Sfx.Play("discover", null, -12); };
-            inventory.Changed += () => { hud.MarkHotbarDirty(); var hid = inventory.HeldId(); held.ShowHeld(hid >= 0 ? world.DefOf(hid) : null); };
+            int lastCount = inventory.items.Count;
+            inventory.Changed += () =>
+            {
+                hud.MarkHotbarDirty();
+                var hid = inventory.HeldId();
+                held.ShowHeld(hid >= 0 ? world.DefOf(hid) : null);
+                if (inventory.items.Count > lastCount) { _activity = "collecting"; telemetry.Pickup(); }
+                else if (inventory.items.Count < lastCount) _activity = "depositing";
+                lastCount = inventory.items.Count;
+            };
             held.ShowHeld(inventory.HeldId() >= 0 ? world.DefOf(inventory.HeldId()) : null);
             hud.MarkHotbarDirty();
             if (save != null && save.TryGetValue("player", out var po))
@@ -204,18 +214,124 @@ namespace WorkshopWreckage
             return true;
         }
 
+        // ---------------------------------------------------------------- progression
+
+        public Progression progression;
+        public Telemetry telemetry;
+        public double playTime;
+        string _activity = "collecting";
+        string _telemetryFile;
+        Dictionary<string, object> _progressionCfg;
+        public const int BaseInventory = 30;
+
+        void StartProgression(int seed, Dictionary<string, object> save)
+        {
+            _progressionCfg ??= Shared.ReadObject(Shared.DataPath("progression.json"));
+            progression = new Progression(_progressionCfg, presetId);
+            foreach (var e in progression.Validate()) Debug.LogError("[progression] " + e);
+            telemetry = new Telemetry(presetId, seed, world.Count);
+            playTime = 0;
+            _telemetryFile = Path.Combine(Application.persistentDataPath, "telemetry", $"{presetId}_{seed}_{DateTime.Now:yyyyMMdd_HHmmss}.json");
+            if (save != null)
+            {
+                progression.Load(Json.Obj(save.GetValueOrDefault("progression")));
+                playTime = Json.Num(save, "play_time_s");
+            }
+            ApplySkills();
+            progression.LeveledUp += lv =>
+            {
+                hud.Toast($"Level {lv}!  Skill point earned (Esc → Skills)", true);
+                Sfx.Play("milestone", null, -4);
+                telemetry.LevelReached(lv, playTime, progress.sortedTotal);
+            };
+            // XP is earned only for meaningful, non-repeatable progress (see progression.json)
+            storage.Deposited += (box, id) =>
+            {
+                bool robot = world.instances[id].owner.StartsWith("robot");
+                progression.OnSorted(id, robot);
+                telemetry.Sorted(robot, playTime, progress.sortedTotal);
+            };
+            progress.DefinitionCompleted += id => progression.OnDefinitionCompleted(id, world.TotalOf(id));
+            progress.Discovered += id => progression.OnDiscovered(id, db.Get(id).IsRobotPart);
+            progress.Milestone += (key, _) =>
+            {
+                var p = key.Split('_');   // zone_<index>_<percent>
+                if (p.Length == 3 && p[0] == "zone") progression.OnZoneRestored(int.Parse(p[1]), int.Parse(p[2]));
+            };
+        }
+
+        /// <summary>Applies the effects of unlocked skills that this build implements.</summary>
+        public void ApplySkills()
+        {
+            inventory.capacity = BaseInventory + (int)progression.Effect("inventory_capacity");
+            interaction.reachBonus = (float)progression.Effect("reach_m");
+        }
+
+        public bool UnlockSkill(string id)
+        {
+            if (!progression.Unlock(id)) return false;
+            ApplySkills();
+            telemetry.SkillUnlocked(id, playTime);
+            hud.Toast("Skill unlocked: " + progression.Skill(id).name, true);
+            return true;
+        }
+
+        void WriteTelemetry()
+        {
+            if (telemetry == null || Automated) return;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(_telemetryFile));
+                File.WriteAllText(_telemetryFile, Json.Write(telemetry.ToDict(playTime)));
+            }
+            catch (Exception e) { Debug.LogWarning("Telemetry not written: " + e.Message); }
+        }
+
+        void OnApplicationQuit() => WriteTelemetry();
+
+        /// <summary>Starts a new world, switching world-size preset first if needed.</summary>
+        public bool NewGame(string preset, int seed)
+        {
+            if (preset != presetId || db == null || !db.IsValid)
+            {
+                if (!LoadPreset(preset)) { hud.ShowFatal("The item data files are invalid:\n\n" + string.Join("\n", db.errors.Take(25))); return false; }
+            }
+            itemCount = -1;
+            return StartWorld(seed, null);
+        }
+
+        // Saving never silently replaces a different world: the first attempt to
+        // overwrite a slot that holds another preset/seed only warns.
+        string _overwriteArmed;
+        float _overwriteArmedAt;
+
         public void SaveGame(string slot)
         {
+            var existing = SaveSystem.Read(slot);
+            if (existing != null && !Automated && !SaveSystem.SameWorld(existing, this) && !(_overwriteArmed == slot && Time.unscaledTime - _overwriteArmedAt < 8))
+            {
+                _overwriteArmed = slot;
+                _overwriteArmedAt = Time.unscaledTime;
+                var msg = $"Slot '{slot}' holds a different workshop ({SaveSystem.WorldLabel(existing)}). Save again within 8 s to overwrite it.";
+                hud.OnFeedback(msg, false);
+                hud.SetStatus(msg);
+                return;
+            }
+            _overwriteArmed = null;
             if (SaveSystem.Write(slot, SaveSystem.Serialize(this)))
             {
                 Sfx.Play("save", null, -6);
                 hud.Toast($"Game saved ({slot})");
+                WriteTelemetry();
             }
         }
 
         public void LoadGame(string slot)
         {
             var d = SaveSystem.Read(slot);
+            if (d == null) { hud.SetStatus("No save in that slot."); return; }
+            var preset = Json.Str(d, "preset", "standard");
+            if (preset != presetId && !LoadPreset(preset)) { hud.ShowFatal($"The '{preset}' preset data is invalid:\n\n" + string.Join("\n", db.errors.Take(25))); return; }
             var problem = SaveSystem.Check(d, db);
             if (problem != "") { hud.OnFeedback(problem, false); hud.SetStatus(problem); return; }
             int count = Json.Int(d, "item_count", -1);
@@ -287,6 +403,12 @@ namespace WorkshopWreckage
                 var us = _labelsDirty.Where(db.boxes.ContainsKey).Select(b => Json.Str(db.boxes[b], "unit")).Distinct().ToList();
                 foreach (var u in us) if (units.TryGetValue(u, out var su)) su.RefreshLabels();
                 _labelsDirty.Clear();
+            }
+            if (world != null && telemetry != null && state == "play")
+            {
+                playTime += Time.deltaTime;
+                telemetry.Tick(Time.deltaTime, inventory.items.Count == 0 ? "collecting" : _activity);
+                telemetry.MaybeSample(playTime, Json.Num(Json.Obj(_progressionCfg["telemetry"]), "sample_interval_s", 60), progress.sortedTotal, progression.level);
             }
             if (world == null || Automated) return;
             var kb = Keyboard.current;
