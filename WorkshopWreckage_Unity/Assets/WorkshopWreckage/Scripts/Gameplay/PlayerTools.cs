@@ -1,0 +1,251 @@
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.Rendering;
+
+namespace WorkshopWreckage
+{
+    /// <summary>Player collection tools unlocked through skills (progression.json):
+    /// Handful (bulk pickup of the same part around the one you pick), Magnetic Glove
+    /// (hold B: magnetic parts fly to you; material / category filters match the part
+    /// in hand), Parts Scanner (V: highlights unsorted copies of the part in hand and
+    /// its destination), Supermagnet (X: exact-match attraction of the held part's
+    /// definition). All of them move real items into the inventory: never sorted
+    /// parts, never parts reserved or carried by robots, never robot components, and
+    /// never more than the free inventory space. Collected parts still have to be
+    /// delivered to their destinations by hand.</summary>
+    public class PlayerTools : MonoBehaviour
+    {
+        Game g;
+        float _magnetT, _superReady, _scanUntil;
+        int _magnetTaken;
+        readonly List<int> _scanned = new();
+        string _scanDest;
+        Material _outline, _destGhost;
+        MaterialPropertyBlock _mpb;
+        Mesh _cube;
+
+        Progression P => g.progression;
+        Inventory Inv => g.inventory;
+        public int lastScanCount, lastSuperCount, lastMagnetCount;
+
+        public void Init(Game game)
+        {
+            g = game;
+            _outline = new Material(EnvMaterials.Outline);
+            _destGhost = EnvMaterials.NewGhost();
+            _destGhost.SetColor("_Color", new Color(0.4f, 1f, 0.55f, 0.35f));
+            _mpb = new MaterialPropertyBlock();
+            var c = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            _cube = c.GetComponent<MeshFilter>().sharedMesh;
+            Destroy(c);
+        }
+
+        public void ResetState() { _scanned.Clear(); _scanUntil = 0; _superReady = 0; _magnetTaken = 0; }
+
+        Vector3 Hand => g.held.HandWorld().GetColumn(3);
+        /// <summary>The glove sweeps low in front of the player.</summary>
+        Vector3 MagnetOrigin
+        {
+            get
+            {
+                var t = g.player.transform;
+                return t.position + Vector3.up * 0.6f + Vector3.ProjectOnPlane(t.forward, Vector3.up).normalized * 0.5f;
+            }
+        }
+        int HeldDef => g.inventory.HeldId() >= 0 ? g.world.instances[g.inventory.HeldId()].defId : -1;
+
+        /// <summary>Can the player's tools take this part right now?</summary>
+        bool Takeable(int id)
+        {
+            var inst = g.world.instances[id];
+            return inst.state == ItemState.InWorld && !g.robotReserved.Contains(id) && !g.interaction.busy.Contains(id) && !g.world.DefOf(id).IsRobotPart;
+        }
+
+        bool LineOfSight(Vector3 from, Vector3 to)
+        {
+            var d = to - from;
+            float len = d.magnitude;
+            if (len < 0.05f) return true;
+            return !Physics.Raycast(from, d / len, len - 0.05f, 1 << Layers.Env);
+        }
+
+        /// <summary>Moves a part into the inventory with a flying animation.</summary>
+        bool Take(int id, float flyTime)
+        {
+            if (!Takeable(id) || Inv.IsFull) return false;
+            var inst = g.world.instances[id];
+            var from = inst.transform;
+            var def = g.world.DefOf(id);
+            g.index.Remove(id);
+            g.world.SetState(id, ItemState.Carried, "player");
+            Inv.Add(id);
+            g.interaction.SettleNeighbours(from, def);
+            g.interaction.StartFly(def, from, g.held.HandWorld(), flyTime);
+            return true;
+        }
+
+        void Update()
+        {
+            if (g == null || g.world == null || P == null || g.state != "play" || g.interaction.inspecting) return;
+            var kb = Keyboard.current;
+            if (kb == null) return;
+            if (kb.bKey.isPressed) MagnetTick(Time.deltaTime);
+            else _magnetTaken = 0;
+            if (kb.vKey.wasPressedThisFrame) Scan();
+            if (kb.xKey.wasPressedThisFrame) Supermagnet();
+        }
+
+        void LateUpdate() => DrawScan();
+
+        // ---------------------------------------------------------------- handful
+
+        /// <summary>Called after a manual pickup: with Handful, nearby copies of the
+        /// same part come along (same definition only).</summary>
+        public int OnManualPickup(int id)
+        {
+            if (P == null) return 0;
+            int n = (int)P.Effect("bulk_pickup_count");
+            if (n <= 1) return 0;
+            float r = (float)P.Effect("bulk_pickup_radius_m");
+            var p = g.world.instances[id].Position;
+            int def = g.world.instances[id].defId;
+            int taken = 0;
+            foreach (var o in g.index.QuerySphere(p, r).Where(o => o != id && g.world.instances[o].defId == def)
+                         .OrderBy(o => (g.world.instances[o].Position - p).sqrMagnitude).Take(n - 1).ToList())
+                if (Take(o, 0.18f + taken * 0.04f)) taken++;
+            if (taken > 0) g.telemetry?.SkillUsed("bulk_pickup");
+            return taken;
+        }
+
+        // ---------------------------------------------------------------- magnet
+
+        /// <summary>Hold B: one magnetic part at a time flies to the hand (nearest
+        /// first), up to the glove's limit per hold.</summary>
+        public int MagnetTick(float dt)
+        {
+            float range = (float)P.Effect("magnet_range_m");
+            if (range <= 0) { if (_magnetT <= 0) { g.hud.OnFeedback("You need the Magnetic Glove skill (Esc → Skills)", false); _magnetT = 2; } _magnetT -= dt; return 0; }
+            int max = (int)P.Effect("magnet_max_items");
+            _magnetT -= dt;
+            if (_magnetT > 0 || _magnetTaken >= max) return 0;
+            _magnetT = 0.11f;
+            var hand = MagnetOrigin;
+            int held = HeldDef;
+            var hd = held >= 0 ? g.db.Get(held) : null;
+            bool byMaterial = P.Has("filter_material") && hd != null, byCategory = P.Has("filter_category") && hd != null;
+            int pick = -1;
+            foreach (var i in g.index.QuerySphere(hand, range)
+                         .Where(Takeable)
+                         .Where(i => { var d = g.world.DefOf(i); return d.magnetic && (!byMaterial || d.material == hd.material) && (!byCategory || d.category == hd.category); })
+                         .OrderBy(i => (g.world.instances[i].Position - hand).sqrMagnitude))
+                if (LineOfSight(hand, g.world.instances[i].Position)) { pick = i; break; }
+            if (pick < 0) return 0;
+            if (Inv.IsFull) { g.hud.OnFeedback($"Your hands are full ({Inv.Count}/{Inv.capacity})", false); _magnetT = 1; return 0; }
+            float dist = (g.world.instances[pick].Position - hand).magnitude;
+            if (!Take(pick, Mathf.Lerp(0.12f, 0.35f, dist / Mathf.Max(range, 0.1f)))) return 0;
+            _magnetTaken++;
+            lastMagnetCount++;
+            Sfx.Play("magnet", hand, -10, 0.15f);
+            g.telemetry?.SkillUsed("magnet");
+            return 1;
+        }
+
+        // ---------------------------------------------------------------- scanner
+
+        /// <summary>V: highlights unsorted copies of the part in hand (or aimed at)
+        /// within range and shows where it belongs.</summary>
+        public int Scan()
+        {
+            float r = (float)P.Effect("scan_radius_m");
+            if (r <= 0) { g.hud.OnFeedback("You need the Parts Scanner skill (Esc → Skills)", false); return 0; }
+            int def = HeldDef >= 0 ? HeldDef : g.interaction.targetType == "item" ? g.world.instances[g.interaction.targetItem].defId : -1;
+            if (def < 0) { g.hud.OnFeedback("Scanner: hold or aim at a part to scan for it", false); return 0; }
+            var me = g.player.transform.position;
+            _scanned.Clear();
+            _scanned.AddRange(g.world.IdsOf(def).Where(i => g.world.instances[i].state == ItemState.InWorld && (g.world.instances[i].Position - me).magnitude <= r));
+            _scanDest = P.Has("scan_highlights_destination") ? g.db.Get(def).storageBox : null;
+            _scanUntil = Time.time + 6;
+            lastScanCount = _scanned.Count;
+            var d = g.db.Get(def);
+            string remaining = P.Has("scan_shows_remaining") ? $"  ·  {g.world.IdsOf(def).Count(i => g.world.instances[i].state != ItemState.Stored)} not yet sorted in the workshop" : "";
+            g.hud.OnFeedback($"Scanner: {_scanned.Count} × {d.displayName} within {r:0} m  →  {g.db.BoxLabel(d.storageBox)}{remaining}", true);
+            Sfx.Play("discover", null, -8, 0);
+            g.telemetry?.SkillUsed("scanner");
+            return _scanned.Count;
+        }
+
+        void DrawScan()
+        {
+            if (Time.time > _scanUntil || g.world == null) return;
+            float pulse = 0.5f + 0.5f * Mathf.Sin(Time.time * 6);
+            var rp = new RenderParams(_outline) { matProps = _mpb, shadowCastingMode = ShadowCastingMode.Off };
+            foreach (var id in _scanned)
+            {
+                var inst = g.world.instances[id];
+                if (inst.state != ItemState.InWorld) continue;
+                var mesh = g.renderer.WorldMeshFor(id);
+                var e = ItemDatabase.Extents(g.world.DefOf(id));
+                _mpb.SetFloat("_Grow", Mathf.Clamp(0.01f / Mathf.Max(0.002f, e[2] * 0.5f), 0.06f, 0.6f));
+                _mpb.SetColor("_Color", Color.Lerp(new Color(0.3f, 0.9f, 1f), Color.white, pulse * 0.4f));
+                for (int s = 0; s < mesh.subMeshCount; s++) Graphics.RenderMesh(rp, mesh, s, inst.transform);
+            }
+            if (_scanDest != null && g.db.boxes.TryGetValue(_scanDest, out var dd) && g.units.TryGetValue(Json.Str(dd, "unit"), out var unit))
+            {
+                var p = unit.DestPoint(dd);
+                var size = new Vector3((float)Json.Num(dd, "width", 0.2), Mathf.Min(0.4f, (float)Json.Num(dd, "height", 0.2)), 0.08f);
+                var m = Matrix4x4.TRS(p, unit.transform.rotation, size * (1.05f + 0.05f * pulse));
+                Graphics.RenderMesh(new RenderParams(_destGhost) { shadowCastingMode = ShadowCastingMode.Off }, _cube, 0, m);
+            }
+        }
+
+        // ---------------------------------------------------------------- supermagnet
+
+        /// <summary>X: every unsorted copy of the held part's exact definition within
+        /// range and line of sight flies to the hand (rules in progression.json).</summary>
+        public int Supermagnet()
+        {
+            if (!P.Has("supermagnet")) { g.hud.OnFeedback("You need the Supermagnet skill (Esc → Skills)", false); return 0; }
+            int def = HeldDef;
+            if (def < 0) { g.hud.OnFeedback("Supermagnet: hold the part you want more of", false); return 0; }
+            if (Time.time < _superReady) { g.hud.OnFeedback($"Supermagnet recharging ({_superReady - Time.time:0} s)", false); return 0; }
+            var cfg = P.supermagnet;
+            var hand = Hand;
+            bool los = Json.Bool(cfg, "line_of_sight_required", true);
+            float radius = (float)Json.Num(cfg, "radius_m", 6);
+            var candidates = g.world.IdsOf(def).Select(i =>
+            {
+                var inst = g.world.instances[i];
+                float dist = (inst.Position - hand).magnitude;
+                return new WorkshopWreckage.Supermagnet.Candidate
+                {
+                    id = i, defId = inst.defId, inWorld = inst.state == ItemState.InWorld && !g.interaction.busy.Contains(i),
+                    reservedByRobot = g.robotReserved.Contains(i), robotPart = g.db.Get(def).IsRobotPart, distance = dist,
+                    lineOfSight = dist <= radius && (!los || LineOfSight(hand, inst.Position)),
+                };
+            }).ToList();
+            var ids = WorkshopWreckage.Supermagnet.Select(def, candidates, cfg, Inv.capacity - Inv.Count);
+            if (ids.Count == 0) { g.hud.OnFeedback(Inv.IsFull ? "Supermagnet: your hands are full" : "Supermagnet: no more of those in range", false); return 0; }
+            StartCoroutine(Pull(ids));
+            _superReady = Time.time + (float)Json.Num(cfg, "cooldown_s", 20);
+            lastSuperCount = ids.Count;
+            Sfx.Play("supermagnet", hand, -2, 0);
+            g.hud.OnFeedback($"Supermagnet: {ids.Count} × {g.db.Get(def).displayName}", true);
+            g.telemetry?.SkillUsed("supermagnet");
+            return ids.Count;
+        }
+
+        IEnumerator Pull(List<int> ids)
+        {
+            var hand = Hand;
+            foreach (var id in ids)
+            {
+                float dist = (g.world.instances[id].Position - hand).magnitude;
+                Take(id, Mathf.Lerp(0.25f, 0.7f, dist / 6f));
+                yield return new WaitForSeconds(0.05f);
+            }
+        }
+    }
+}

@@ -241,7 +241,7 @@ namespace WorkshopWreckage
             MakeButton(m, "Load Game", () => ShowSub("load"));
             MakeButton(m, "Settings", () => ShowSub("settings"));
             MakeButton(m, "Quit", Application.Quit);
-            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel/1-9 select · R send nearest robot · T robot follow/work · Tab log · F5/F9 save/load", 14, Muted, 40);
+            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel/1-9 select · B magnet · V scan · X supermagnet · R send robot · T robot follow/work · Tab log · F5/F9 save/load", 14, Muted, 40);
             Para(m, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20);
 
             var p = Screen("pause", 460);
@@ -506,7 +506,7 @@ namespace WorkshopWreckage
             if (_g == null || _g.world == null) return;
             var p = _g.progress;
             var pr = _g.progression;
-            _level.text = pr == null ? "" : $"Level {pr.level}  ·  {pr.XpIntoLevel:N0}/{(pr.level >= pr.maxLevel ? pr.XpIntoLevel : pr.XpForLevel(pr.level)):N0} XP" + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
+            _level.text = pr == null ? "" : (pr.level >= pr.maxLevel ? $"Level {pr.level} (max)  ·  {pr.xp:N0} XP" : $"Level {pr.level}  ·  {pr.XpIntoLevel:N0}/{pr.XpForLevel(pr.level):N0} XP") + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
             _progress.text = $"Workshop restored  {p.OverallPercent:0.0}%   ({p.sortedTotal} / {_g.world.Count} sorted)";
             int z = _g.layout.ZoneAt(_g.player.transform.position);
             _zone.text = $"{_g.layout.zones[z].name}  —  {p.ZonePercent(z):0}% restored" + RobotStatus();

@@ -34,6 +34,7 @@ namespace WorkshopWreckage
         public Robot retrobot => robots.Find(r => r.id == "retrobot");
         public readonly HashSet<int> robotReserved = new();   // parts a robot is on its way to: no one else takes them
         public DebrisField debris;
+        public PlayerTools tools;
         public readonly Dictionary<string, StorageUnit> units = new();
         public int itemCount = -1;   // -1 = the preset's full population
         public string presetId = "standard";
@@ -87,6 +88,9 @@ namespace WorkshopWreckage
             interaction = new GameObject("Interaction").AddComponent<Interaction>();
             interaction.transform.SetParent(transform, false);
             interaction.Init(this);
+            tools = new GameObject("PlayerTools").AddComponent<PlayerTools>();
+            tools.transform.SetParent(transform, false);
+            tools.Init(this);
             interaction.TargetChanged += hud.OnTarget;
             interaction.Feedback += hud.OnFeedback;
             interaction.InspectChanged += hud.ShowInspect;
@@ -190,6 +194,7 @@ namespace WorkshopWreckage
             repairBay.Refresh();
             foreach (var u in units.Values) { u.labelProvider = LabelFor; u.RefreshLabels(); }
             interaction.ResetState();
+            tools.ResetState();
             StartProgression(seed, save);
             progress.Milestone += (key, text) => { hud.Toast(text, key.StartsWith("zone") || key == "first_pickup"); Sfx.Play("milestone", null, -6); };
             progress.DefinitionCompleted += id => { hud.Toast($"Set complete: {db.Get(id).displayName}  (all {world.TotalOf(id)})", true); Sfx.Play("complete", null, -4); };

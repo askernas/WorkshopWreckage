@@ -40,6 +40,8 @@ namespace WorkshopWreckage
             _clips["save"] = Chime(new[] { 659.25f, 987.77f }, 0.4f);
             _clips["robot_boot"] = Sweep(1.4f, 90, 620, 0.55f);
             _clips["servo"] = Sweep(0.16f, 320, 520, 0.3f);
+            _clips["magnet"] = Sweep(0.14f, 520, 880, 0.22f);
+            _clips["supermagnet"] = Sweep(0.9f, 140, 1250, 0.6f);
             for (int k = 0; k < 12; k++) _2d.Add(gameObject.AddComponent<AudioSource>());
             for (int k = 0; k < 10; k++)
             {

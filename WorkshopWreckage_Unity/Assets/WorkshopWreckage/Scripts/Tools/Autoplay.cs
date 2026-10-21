@@ -160,6 +160,8 @@ namespace WorkshopWreckage
             yield return RetrobotChecks();
             // 7. the other four robots, all working together
             yield return AllRobotsChecks();
+            // 8. player tools from skills
+            yield return ToolChecks();
 
             g.PlaceCamera("0.6,1.65,3.6,0,-18");
             g.hud.SetHudVisible(true);
@@ -258,6 +260,73 @@ namespace WorkshopWreckage
             var hover = g.robots.First(r => r.id == "hoverbot");
             Check("no part is ever held by two robots", !doubleHeld && g.world.instances.Where(i => i.state == ItemState.Carried && i.owner.StartsWith("robot:")).All(i => g.robots.Count(r => r.carried.Contains(i.id)) == 1), "");
             Check("Hoverbot stores into destinations the small robots can't reach", hover.delivered > before["hoverbot"].delivered, $"{hover.delivered - before["hoverbot"].delivered} stored by Hoverbot");
+        }
+
+        IEnumerator ToolChecks()
+        {
+            var pr = g.progression;
+            pr.level = pr.maxLevel;
+            pr.skillPoints = 99;
+            foreach (var s in pr.skills.Where(s => s.Active).OrderBy(s => s.unlockLevel)) g.UnlockSkill(s.id);
+            Check("tool skills unlock (levels, points, prerequisites)", pr.Has("bulk_pickup_count") && pr.Has("magnet_range_m") && pr.Has("scan_radius_m") && pr.Has("supermagnet"),
+                  $"{pr.unlocked.Count} skills, inventory capacity {g.inventory.capacity}");
+            foreach (var r in g.robots) r.enabled = false;   // keep robots out of the way while measuring
+            bool Free(ItemInstance i) => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && !g.world.DefOf(i.id).IsRobotPart && i.Position.y < 0.6f;
+
+            // Handful: a part with a same-kind neighbour right next to it
+            var withPair = g.world.instances.Where(Free).FirstOrDefault(i => g.index.QuerySphere(i.Position, 0.2f).Any(o => o != i.id && g.world.instances[o].defId == i.defId && Free(g.world.instances[o])));
+            if (withPair != null)
+            {
+                g.player.Teleport(withPair.Position + new Vector3(0.8f, -withPair.Position.y, 0.8f));
+                int before = g.inventory.Count;
+                g.interaction.Pickup(withPair.id, true);
+                yield return Frames(20);
+                Check("Handful also picks up nearby copies of the same part", g.inventory.Count - before >= 2 && g.inventory.items.Skip(before).All(i => g.world.instances[i].defId == withPair.defId),
+                      $"{g.inventory.Count - before} × {g.world.DefOf(withPair.id).displayName}");
+            }
+            else Check("Handful also picks up nearby copies of the same part", false, "no pair found");
+
+            // Scanner: counts unsorted copies of the held part in range
+            g.inventory.Select(withPair?.defId ?? -1);
+            int found = g.tools.Scan();
+            var me = g.player.transform.position;
+            int expect = g.world.IdsOf(g.inventory.heldDef).Count(i => g.world.instances[i].state == ItemState.InWorld && (g.world.instances[i].Position - me).magnitude <= (float)pr.Effect("scan_radius_m"));
+            Check("Scanner finds the unsorted copies of the held part", found == expect, $"{found} found, {expect} expected");
+            yield return g.Capture(Path.Combine(outDir, "19_scanner.png"), 4);
+
+            // Supermagnet: exact-match pull of the held part's definition
+            var group = g.world.instances.Where(Free).GroupBy(i => i.defId).Select(gr => gr.ToList())
+                .Select(l => (l, c: l.First())).FirstOrDefault(x => x.l.Count(o => (o.Position - x.c.Position).magnitude < 3f) >= 3);
+            if (group.c != null)
+            {
+                var c = group.c;
+                g.player.Teleport(c.Position + new Vector3(0.7f, -c.Position.y, 0.4f));
+                g.interaction.Pickup(c.id, true);
+                yield return Frames(5);
+                g.inventory.Select(c.defId);
+                int before = g.inventory.Count;
+                int pulled = g.tools.Supermagnet();
+                yield return new WaitForSeconds(1.5f);
+                var got = g.inventory.items.Skip(before).ToList();
+                Check("Supermagnet pulls only exact matches, unsorted, within range", pulled > 0 && got.Count == pulled && got.All(i => g.world.instances[i].defId == c.defId),
+                      $"{pulled} × {g.world.DefOf(c.id).displayName}");
+            }
+            else Check("Supermagnet pulls only exact matches, unsorted, within range", false, "no group found");
+
+            // Magnetic glove (empty hand: no filters): only magnetic parts come
+            var mag = g.world.instances.Where(Free).FirstOrDefault(i => g.world.DefOf(i.id).magnetic && i.Position.y < 0.3f);
+            if (mag != null)
+            {
+                g.player.Teleport(mag.Position + new Vector3(0, -mag.Position.y, -0.5f));
+                g.player.SetView(0, -0.6f);
+                g.inventory.heldDef = -1;
+                int before = g.inventory.Count;
+                for (float t = 0; t < 1.5f; t += Time.deltaTime) { g.tools.MagnetTick(Time.deltaTime); yield return null; }
+                var got = g.inventory.items.Skip(before).ToList();
+                Check("Magnetic glove pulls magnetic parts only", got.Count > 0 && got.All(i => g.world.DefOf(i).magnetic), $"{got.Count} parts pulled");
+            }
+            else Check("Magnetic glove pulls magnetic parts only", false, "no magnetic part found");
+            foreach (var r in g.robots) r.enabled = true;
         }
 
         void Install(int id)

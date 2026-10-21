@@ -22,7 +22,8 @@ namespace WorkshopWreckage
         public const float BaseReach = 2.7f;
         public float reachBonus;                      // from skills (progression.json: reach_m)
         public float Reach => BaseReach + reachBonus;
-        const float Repeat = 0.13f;
+        const float BaseRepeat = 0.13f;
+        float Repeat => BaseRepeat / (1f + (float)(game.progression?.Effect("pickup_speed") ?? 0));   // Quick Hands
         static readonly Color OutlineItem = new(1f, 0.8f, 0.35f), Good = new(0.45f, 1f, 0.55f), Bad = new(1f, 0.4f, 0.3f);
 
         public Game game;
@@ -308,6 +309,7 @@ namespace WorkshopWreckage
             Inv.Add(id);
             Inv.Select(def.id);
             if (animate) StartCoroutine(Fly(def, from, game.held.HandWorld(), 0.16f, null));
+            game.tools?.OnManualPickup(id);   // Handful: nearby copies come along
             SettleNeighbours(from, def);
             Sfx.Play(ItemDatabase.Extents(def)[0] > 0.24f ? "pickup_heavy" : "pickup", from.GetColumn(3), -2);
             lastActionMicros = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1e6 / System.Diagnostics.Stopwatch.Frequency;
@@ -437,6 +439,8 @@ namespace WorkshopWreckage
         }
 
         // ---------------------------------------------------------------- helpers
+
+        public void StartFly(ItemDefinition def, Matrix4x4 from, Matrix4x4 to, float dur) => StartCoroutine(Fly(def, from, to, dur, null));
 
         IEnumerator Fly(ItemDefinition def, Matrix4x4 from, Matrix4x4 to, float dur, Action done)
         {
