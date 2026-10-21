@@ -15,3 +15,4 @@ WorkshopWreckage_Unity/[Uu]ser[Ss]ettings/
 *.sln
 # local benchmark scratch
 bench_out/
+shared/meshes/
