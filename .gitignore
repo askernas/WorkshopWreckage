@@ -16,3 +16,8 @@ WorkshopWreckage_Unity/[Uu]ser[Ss]ettings/
 # local benchmark scratch
 bench_out/
 shared/meshes/
+
+# engine builds
+Builds/
+*.slnx
+WorkshopWreckage_Unity/.vs/

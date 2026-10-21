@@ -1,0 +1,120 @@
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+namespace WorkshopWreckage
+{
+    /// <summary>First-person movement (port of PlayerController.gd): walk, sprint,
+    /// crouch, jump, mouse look, Q/E turning, head bob, footsteps.</summary>
+    public class PlayerController : MonoBehaviour
+    {
+        const float Walk = 3.0f, Sprint = 5.2f, CrouchSpeed = 1.6f, Accel = 14f, Gravity = 9.8f, TurnSpeed = 2.6f;
+        public const float Eye = 1.62f, EyeCrouch = 0.95f;
+
+        public Camera cam;
+        public Transform head;
+        public bool inputEnabled = true, lookEnabled = true;
+        public float sensitivity = 0.22f;
+        public bool invertY;
+        CharacterController _cc;
+        Vector3 _vel;
+        float _yaw, _pitch, _bob, _stepAcc, _eye = Eye;
+        public System.Action stepped;
+
+        /// <summary>Godot-convention yaw/pitch in radians (yaw 0 = look along Godot -Z).</summary>
+        public float Yaw => _yaw;
+        public float Pitch => _pitch;
+
+        public void Init()
+        {
+            gameObject.layer = Layers.Player;
+            _cc = gameObject.AddComponent<CharacterController>();
+            _cc.radius = 0.28f;
+            _cc.height = 1.7f;
+            _cc.center = new Vector3(0, 0.85f, 0);
+            _cc.stepOffset = 0.25f;
+            _cc.skinWidth = 0.02f;
+            head = new GameObject("Head").transform;
+            head.SetParent(transform, false);
+            head.localPosition = new Vector3(0, Eye, 0);
+            var camGo = new GameObject("Camera");
+            camGo.transform.SetParent(head, false);
+            cam = camGo.AddComponent<Camera>();
+            cam.nearClipPlane = 0.02f;
+            cam.farClipPlane = 80;
+            cam.fieldOfView = 72f;   // Godot's Camera3D fov is vertical too
+            cam.cullingMask &= ~(1 << TextAtlas.Layer);
+            camGo.AddComponent<AudioListener>();
+            var data = camGo.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            data.renderPostProcessing = true;
+            data.antialiasing = UnityEngine.Rendering.Universal.AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+            camGo.tag = "MainCamera";
+        }
+
+        /// <summary>Sets view from Godot-convention yaw/pitch (radians).</summary>
+        public void SetView(float yaw, float pitch)
+        {
+            _yaw = yaw;
+            _pitch = pitch;
+            Apply();
+        }
+
+        void Apply()
+        {
+            transform.rotation = Quaternion.Euler(0, -_yaw * Mathf.Rad2Deg, 0);
+            head.localRotation = Quaternion.Euler(-_pitch * Mathf.Rad2Deg, 0, 0);
+        }
+
+        public void Teleport(Vector3 feet)
+        {
+            _cc.enabled = false;
+            transform.position = feet;
+            _cc.enabled = true;
+            _vel = Vector3.zero;
+        }
+
+        void Update()
+        {
+            var kb = Keyboard.current;
+            var mouse = Mouse.current;
+            if (lookEnabled && mouse != null && Cursor.lockState == CursorLockMode.Locked)
+            {
+                var d = mouse.delta.ReadValue();
+                float s = sensitivity * 0.01f;   // radians per pixel, as in Godot
+                _yaw -= d.x * s;
+                _pitch = Mathf.Clamp(_pitch + d.y * s * (invertY ? -1 : 1), -1.536f, 1.536f);
+            }
+            Vector3 wish = Vector3.zero;
+            bool crouch = false, sprint = false;
+            if (inputEnabled && kb != null)
+            {
+                float f = (kb.wKey.isPressed ? 1 : 0) - (kb.sKey.isPressed ? 1 : 0);
+                float r = (kb.dKey.isPressed ? 1 : 0) - (kb.aKey.isPressed ? 1 : 0);
+                wish = (transform.forward * f + transform.right * r);
+                if (wish.sqrMagnitude > 1) wish.Normalize();
+                float turn = (kb.qKey.isPressed ? 1 : 0) - (kb.eKey.isPressed ? 1 : 0);
+                _yaw += turn * TurnSpeed * Time.deltaTime;
+                crouch = kb.leftCtrlKey.isPressed || kb.cKey.isPressed;
+                sprint = kb.leftShiftKey.isPressed && !crouch;
+                if (kb.spaceKey.wasPressedThisFrame && _cc.isGrounded) _vel.y = 3.2f;
+            }
+            Apply();
+            float speed = crouch ? CrouchSpeed : sprint ? Sprint : Walk;
+            var target = wish * speed;
+            _vel.x = Mathf.MoveTowards(_vel.x, target.x, Accel * Time.deltaTime * speed);
+            _vel.z = Mathf.MoveTowards(_vel.z, target.z, Accel * Time.deltaTime * speed);
+            if (_cc.isGrounded && _vel.y < 0) _vel.y = -0.5f;
+            _vel.y -= Gravity * Time.deltaTime;
+            _cc.Move(_vel * Time.deltaTime);
+            _eye = Mathf.Lerp(_eye, crouch ? EyeCrouch : Eye, Mathf.Min(1, Time.deltaTime * 10));
+            float h = new Vector2(_vel.x, _vel.z).magnitude;
+            if (_cc.isGrounded && h > 0.3f)
+            {
+                _bob += Time.deltaTime * h * 2.4f;
+                _stepAcc += Time.deltaTime * h;
+                if (_stepAcc > 0.75f) { _stepAcc = 0; stepped?.Invoke(); }
+            }
+            else _bob = Mathf.Lerp(_bob, Mathf.Round(_bob / Mathf.PI) * Mathf.PI, Mathf.Min(1, Time.deltaTime * 6));
+            head.localPosition = new Vector3(Mathf.Cos(_bob * 0.5f) * 0.012f, _eye + Mathf.Abs(Mathf.Sin(_bob)) * 0.025f, 0);
+        }
+    }
+}
