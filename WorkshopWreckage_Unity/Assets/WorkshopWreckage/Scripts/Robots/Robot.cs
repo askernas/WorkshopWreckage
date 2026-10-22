@@ -105,6 +105,14 @@ namespace WorkshopWreckage
             _model.transform.SetParent(transform, false);
             _model.Init();
             _model.transform.localScale = Vector3.one * (_height / _model.ModelHeight);
+            // locomotion sound: steps for walkers, a motor loop for wheels / tracks / rotor
+            _loopName = locomotion switch { "wheel" => "loop_wheel", "tracks" => "loop_tracks", "hover" => "loop_rotor", _ => null };
+            if (_loopName != null)
+            {
+                _loop = gameObject.AddComponent<AudioSource>();
+                _loop.spatialBlend = 1; _loop.minDistance = 0.6f; _loop.maxDistance = 14; _loop.loop = true; _loop.volume = 0;
+                _loop.rolloffMode = AudioRolloffMode.Linear;
+            }
             RefreshAssembly(false);
         }
 
@@ -215,6 +223,9 @@ namespace WorkshopWreckage
         }
 
         public bool handoverPending;
+        AudioSource _loop;
+        string _loopName;
+        float _lastStepPhase;
 
         public bool Free => Active && carried.Count == 0 && _step != Step.Picking && _step != Step.Depositing && _step != Step.ToPlayer;
 
@@ -276,6 +287,7 @@ namespace WorkshopWreckage
         void Update()
         {
             if (g == null || g.world == null) return;
+            if (g.state == "paused" || g.state == "menu") { if (_loop != null) _loop.volume = 0; return; }   // the workshop holds still
             float dt = Time.deltaTime;
             _time += dt;
             var fwd0 = transform.forward;
@@ -713,6 +725,7 @@ namespace WorkshopWreckage
             _phase += dt * Mathf.Lerp(5f, 8.5f, Mathf.Clamp01(moving)) * (_gait > 0 ? 1 : 0);
             if (_gait == 0) _phase = Mathf.MoveTowards(_phase, Mathf.Round(_phase / Mathf.PI) * Mathf.PI, dt * 6);   // finish the step: legs come to rest together
             _armHold = Mathf.MoveTowards(_armHold, carried.Count > 0 ? 1 : 0, dt * 3f);
+            Sounds(moving);
             bool idle = _gait < 0.05f && _armReach == 0 && _armLift == 0;
             _model.Animate(new RobotAnim
             {
@@ -728,6 +741,27 @@ namespace WorkshopWreckage
                     if (go.transform.parent != parent) go.transform.SetParent(parent, false);
                     go.transform.localPosition = local + new Vector3(0, 0.05f * _armLift, 0.06f * _armLift);
                 }
+        }
+
+        void Sounds(float moving)
+        {
+            if (_loop != null)
+            {
+                if (_loop.clip == null) { _loop.clip = Sfx.Clip(_loopName); if (_loop.clip != null) { _loop.time = Random.value * 0.9f; _loop.Play(); } }
+                float want = locomotion == "hover" ? 0.22f + 0.12f * moving : 0.25f * Mathf.Clamp01(moving * 1.3f);
+                _loop.volume = Mathf.MoveTowards(_loop.volume, want * Sfx.masterVolume, Time.deltaTime);
+                _loop.pitch = locomotion == "hover" ? 1f + 0.08f * moving : 0.85f + 0.3f * Mathf.Clamp01(moving);
+            }
+            else if (_gait > 0.1f)
+            {
+                // a tiny tick on every footfall (twice per stride; three ticks for the hexapod's tripods)
+                float step = Mathf.Floor(_phase / Mathf.PI);
+                if (step != _lastStepPhase)
+                {
+                    _lastStepPhase = step;
+                    Sfx.Play(locomotion == "hexapod" ? "spider_step" : "robot_step", transform.position, -22, 0.2f);
+                }
+            }
         }
 
         void ShowCarried(int itemId)
@@ -761,7 +795,7 @@ namespace WorkshopWreckage
             {
                 Step.ToItem => carried.Count > 0 ? $"{displayName}: collecting ({carried.Count}/{_capacity})" : $"{displayName}: fetching a part",
                 Step.Picking => $"{displayName}: picking up",
-                Step.ToDest or Step.Depositing => $"{displayName}: delivering {carried.Count}",
+                Step.ToDest or Step.Depositing => carried.Count > 0 ? $"{displayName}: delivering {carried.Count}" : $"{displayName}: storing",
                 _ => status == "" ? $"{displayName}: looking for parts" : $"{displayName}: {status}",
             } + zone;
         }

@@ -266,6 +266,11 @@ namespace WorkshopWreckage
             var hover = g.robots.First(r => r.id == "hoverbot");
             Check("no part is ever held by two robots", !doubleHeld && g.world.instances.Where(i => i.state == ItemState.Carried && i.owner.StartsWith("robot:")).All(i => g.robots.Count(r => r.carried.Contains(i.id)) == 1), "");
             Check("Hoverbot stores into destinations the small robots can't reach", hover.delivered > before["hoverbot"].delivered, $"{hover.delivered - before["hoverbot"].delivered} stored by Hoverbot");
+            g.SetState("paused");
+            g.hud.OpenScreen("robots");
+            yield return g.Capture(Path.Combine(outDir, "20_robots_screen.png"), 5);
+            g.hud.BackFromSubScreen();
+            g.SetState("play");
         }
 
         IEnumerator ToolChecks()

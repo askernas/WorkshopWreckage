@@ -248,6 +248,7 @@ namespace WorkshopWreckage
             Title(p, "PAUSED");
             MakeButton(p, "Resume", () => _g.SetState("play"));
             MakeButton(p, "Skills", () => ShowSub("skills"));
+            MakeButton(p, "Robots", () => ShowSub("robots"));
             MakeButton(p, "Save Game", () => ShowSub("save"));
             MakeButton(p, "Load Game", () => ShowSub("load"));
             MakeButton(p, "Settings", () => ShowSub("settings"));
@@ -271,6 +272,13 @@ namespace WorkshopWreckage
             _skillList = Rect("List", sk, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
             Stack(_skillList);
             MakeButton(sk, "Back", () => ShowScreenRaw(_backTo));
+
+            var rs = Screen("robots", 1150);
+            Title(rs, "ROBOTS");
+            Para(rs, "R: nearest robot works on the part you aim at  ·  T: work / follow  ·  H: hand your parts to a robot  ·  J: work zone", 15, Muted, 24);
+            _robotList = Rect("List", rs, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            Stack(_robotList);
+            MakeButton(rs, "Back", () => ShowScreenRaw(_backTo));
 
             var st = Screen("settings", 640);
             Title(st, "SETTINGS");
@@ -351,17 +359,19 @@ namespace WorkshopWreckage
             _status.text = "";
             if (name == "save" || name == "load") RefreshSlots();
             if (name == "skills") RefreshSkills();
+            if (name == "robots") RefreshRobots();
             if (name == "inventory") RefreshLog();
             if (name == "main") _continue.interactable = LatestSlot() != "";
         }
 
         public bool BackFromSubScreen()
         {
-            if (_screen == "save" || _screen == "load" || _screen == "settings" || _screen == "skills") { ShowScreenRaw(_backTo); return true; }
+            if (_screen == "save" || _screen == "load" || _screen == "settings" || _screen == "skills" || _screen == "robots") { ShowScreenRaw(_backTo); return true; }
             return false;
         }
 
         public void SetStatus(string t) => _status.text = t;
+        public void OpenScreen(string name) => ShowSub(name);
 
         void RefreshSlots()
         {
@@ -377,6 +387,37 @@ namespace WorkshopWreckage
                         else _g.LoadGame(slot);
                     });
                     b.interactable = saving || System.IO.File.Exists(SaveSystem.PathOf(slot));
+                }
+            }
+        }
+
+        RectTransform _robotList;
+        float _robotRefreshT;
+
+        /// <summary>Robot management: status, load and work record of every robot, with
+        /// work / follow and zone release.</summary>
+        void RefreshRobots()
+        {
+            foreach (Transform c in _robotList) Destroy(c.gameObject);
+            foreach (var r in _g.robots)
+            {
+                var row = new GameObject(r.id, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+                row.transform.SetParent(_robotList, false);
+                row.GetComponent<LayoutElement>().preferredHeight = 40;
+                var h = row.GetComponent<HorizontalLayoutGroup>();
+                h.spacing = 8; h.childControlWidth = true; h.childForceExpandWidth = false; h.childControlHeight = true;
+                string zone = r.zoneCenter.HasValue ? "  ·  zone" : "";
+                var info = Para(row.transform, $"<b>{r.displayName}</b>   {r.Describe().Substring(r.displayName.Length + 2)}   ·   stored {r.delivered}, piled {r.staged}{zone}", 17, r.Active ? Cream : Muted, 40);
+                info.alignment = TextAnchor.MiddleLeft;
+                info.GetComponent<LayoutElement>().preferredWidth = 820;
+                if (!r.Active) continue;
+                var robot = r;
+                var b = MakeButton(row.transform, r.mode == Robot.Mode.Following ? "Work" : "Follow me", () => { robot.ToggleFollow(); RefreshRobots(); });
+                b.GetComponent<LayoutElement>().preferredWidth = 140;
+                if (r.zoneCenter.HasValue)
+                {
+                    var z = MakeButton(row.transform, "Clear zone", () => { robot.AssignZone(null); RefreshRobots(); });
+                    z.GetComponent<LayoutElement>().preferredWidth = 140;
                 }
             }
         }
@@ -498,6 +539,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (_screen == "robots" && (_robotRefreshT -= Time.unscaledDeltaTime) <= 0) { _robotRefreshT = 1; RefreshRobots(); }
             if (_feedbackT > 0)
             {
                 _feedbackT -= Time.deltaTime;

@@ -41,6 +41,11 @@ namespace WorkshopWreckage
             _clips["robot_boot"] = Sweep(1.4f, 90, 620, 0.55f);
             _clips["servo"] = Sweep(0.16f, 320, 520, 0.3f);
             _clips["magnet"] = Sweep(0.14f, 520, 880, 0.22f);
+            _clips["robot_step"] = Clink(3400, 0.035f, 0.18f);
+            _clips["spider_step"] = Clink(5200, 0.02f, 0.12f);
+            _clips["loop_wheel"] = Loop("wheel");
+            _clips["loop_tracks"] = Loop("tracks");
+            _clips["loop_rotor"] = Loop("rotor");
             _clips["supermagnet"] = Sweep(0.9f, 140, 1250, 0.6f);
             for (int k = 0; k < 12; k++) _2d.Add(gameObject.AddComponent<AudioSource>());
             for (int k = 0; k < 10; k++)
@@ -53,6 +58,38 @@ namespace WorkshopWreckage
                 s.maxDistance = 25;
                 _3d.Add(s);
             }
+        }
+
+        public static AudioClip Clip(string name) => _i != null && _i._clips.TryGetValue(name, out var c) ? c : null;
+
+        /// <summary>Seamless one-second loops for robot locomotion (toy motors).</summary>
+        static AudioClip Loop(string kind)
+        {
+            int n = Rate;
+            var s = new float[n];
+            var rng = new System.Random(kind.GetHashCode());
+            float lp = 0;
+            for (int i = 0; i < n; i++)
+            {
+                float t = (float)i / Rate;
+                float noise = (float)(rng.NextDouble() * 2 - 1);
+                lp += (noise - lp) * 0.08f;
+                switch (kind)
+                {
+                    case "wheel":    // small electric motor whine + tyre hiss (whole cycles in 1 s)
+                        s[i] = Mathf.Sin(2 * Mathf.PI * 880 * t) * 0.12f + Mathf.Sin(2 * Mathf.PI * 1320 * t) * 0.05f + lp * 0.25f;
+                        break;
+                    case "tracks":   // clattering links at 14 per second over a low rumble
+                        float link = Mathf.Exp(-((t * 14) % 1) * 30);
+                        s[i] = Mathf.Sin(2 * Mathf.PI * 55 * t) * 0.18f + lp * 0.5f * link + Mathf.Sin(2 * Mathf.PI * 2400 * t) * 0.08f * link;
+                        break;
+                    default:         // two-blade rotor: 24 blade passes per second over a motor hum
+                        float blade = 0.5f + 0.5f * Mathf.Sin(2 * Mathf.PI * 24 * t);
+                        s[i] = (lp * 0.6f * blade + Mathf.Sin(2 * Mathf.PI * 240 * t) * 0.08f);
+                        break;
+                }
+            }
+            return Make("loop_" + kind, s);
         }
 
         public static void Play(string name, Vector3? at = null, float volumeDb = 0, float pitchVar = 0.08f)
