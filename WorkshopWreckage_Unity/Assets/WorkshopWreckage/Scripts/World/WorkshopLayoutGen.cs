@@ -123,7 +123,7 @@ namespace WorkshopWreckage
             lamps.Add(new Vector3(0.9f, 3, -0.75f));
             lamps.Add(new Vector3(repairBayPos.x + 0.4f, 2.7f, repairBayPos.z - 1.3f));   // over the repair bay and Retrobot
             // an even grid from wall to wall (lamp range 7 m), so corners of big rooms aren't dark
-            int nx = Mathf.Max(2, Mathf.CeilToInt((W - 3f) / 5f) + 1), nz = Mathf.Max(2, Mathf.CeilToInt((D - 5f) / 5f) + 1);
+            int nx = Mathf.Max(2, Mathf.CeilToInt((W - 3f) / 6.5f) + 1), nz = Mathf.Max(2, Mathf.CeilToInt((D - 5f) / 6.5f) + 1);   // ~6.5 m apart: every spot lit, few overlaps (GPU)
             for (int ix = 0; ix < nx; ix++)
                 for (int iz = 0; iz < nz; iz++)
                 {
