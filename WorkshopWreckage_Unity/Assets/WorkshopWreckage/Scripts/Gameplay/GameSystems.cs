@@ -8,7 +8,10 @@ namespace WorkshopWreckage
     /// <summary>Destination contents and rules (port of StorageSystem.gd).</summary>
     public class StorageSystem
     {
-        public enum Result { Ok, WrongBox, Full, UnknownBox }
+        public enum Result { Ok, WrongBox, Full, UnknownBox, Blocked }
+        /// <summary>Stray parts (unsorted, belonging elsewhere) lying in a destination: it
+        /// can't be filled until they are taken out. Set by the game (needs the spatial index).</summary>
+        public Func<string, int> straysIn;
         public readonly ItemDatabase db;
         public readonly ItemWorld world;
         public readonly Dictionary<string, List<int>> contents = new();
@@ -24,6 +27,7 @@ namespace WorkshopWreckage
             if (!db.boxes.ContainsKey(box) && !db.stations.ContainsKey(box)) return Result.UnknownBox;
             if (world.DefOf(id).storageBox != box) return Result.WrongBox;
             if (Stored(box).Count >= db.BoxCapacity(box)) return Result.Full;
+            if (straysIn != null && straysIn(box) > 0) return Result.Blocked;
             return Result.Ok;
         }
 
@@ -54,17 +58,23 @@ namespace WorkshopWreckage
             Result.WrongBox => "Wrong destination — this belongs in " + db.BoxLabel(world.DefOf(id).storageBox),
             Result.Full => $"That one is full ({db.BoxCapacity(box)})",
             Result.UnknownBox => "Not a storage destination",
+            Result.Blocked => $"Blocked — {straysIn?.Invoke(box)} stray part(s) lie in here; take them out first",
             _ => "",
         };
     }
 
-    /// <summary>What the player carries (port of Inventory.gd).</summary>
+    /// <summary>What the player carries. Early on every part is its own slot, in the
+    /// order it was picked up (you sort your pockets yourself); the Parts Organiser skill
+    /// (stacking) groups identical parts into stacks ordered by category and name.</summary>
     public class Inventory
     {
         public readonly ItemWorld world;
-        public int capacity = 30;
+        public int capacity = 10;
         public readonly List<int> items = new();
         public int heldDef = -1;
+        /// <summary>Parts Organiser: identical parts stack, stacks sorted by type.</summary>
+        public bool stacking;
+        int _heldSlot = -1;   // without stacking: the held instance
         public event Action Changed;
 
         public Inventory(ItemWorld w) { world = w; }
@@ -75,7 +85,7 @@ namespace WorkshopWreckage
         {
             if (IsFull || items.Contains(id)) return false;
             items.Add(id);
-            if (heldDef < 0) heldDef = world.instances[id].defId;
+            if (heldDef < 0) { heldDef = world.instances[id].defId; _heldSlot = id; }
             Changed?.Invoke();
             return true;
         }
@@ -83,18 +93,24 @@ namespace WorkshopWreckage
         public void Remove(int id)
         {
             items.Remove(id);
-            if (heldDef >= 0 && IdsOf(heldDef).Count == 0)
+            if (_heldSlot == id) _heldSlot = -1;
+            if (heldDef >= 0 && (stacking ? IdsOf(heldDef).Count == 0 : _heldSlot < 0))
             {
-                var s = Stacks();
-                heldDef = s.Count > 0 ? s[0].defId : -1;
+                // the hand takes the next part (the same kind if there is one)
+                var same = IdsOf(heldDef);
+                if (!stacking && same.Count > 0) _heldSlot = same[^1];
+                else if (items.Count > 0) { _heldSlot = items[^1]; heldDef = world.instances[_heldSlot].defId; }
+                else heldDef = -1;
             }
             Changed?.Invoke();
         }
 
         public List<int> IdsOf(int def) => items.Where(i => world.instances[i].defId == def).ToList();
 
+        /// <summary>Hotbar slots: one per part (pickup order) or, with stacking, one per definition.</summary>
         public List<(int defId, List<int> ids)> Stacks()
         {
+            if (!stacking) return items.Select(i => (world.instances[i].defId, new List<int> { i })).ToList();
             var o = new List<(int, List<int>)>();
             var idx = new Dictionary<int, int>();
             foreach (var id in items)
@@ -103,28 +119,47 @@ namespace WorkshopWreckage
                 if (!idx.TryGetValue(d, out var k)) { idx[d] = k = o.Count; o.Add((d, new List<int>())); }
                 o[k].Item2.Add(id);
             }
-            return o;
+            return o.OrderBy(x => world.db.Get(x.Item1).category).ThenBy(x => world.db.Get(x.Item1).displayName).ToList();
         }
 
         public int HeldId()
         {
+            if (heldDef < 0) return -1;
+            if (!stacking) return items.Contains(_heldSlot) ? _heldSlot : -1;
             var l = IdsOf(heldDef);
             return l.Count > 0 ? l[^1] : -1;
         }
 
+        /// <summary>Holds a part of this definition (the newest one picked up).</summary>
         public void Select(int def)
         {
-            if (IdsOf(def).Count > 0) { heldDef = def; Changed?.Invoke(); }
+            var l = IdsOf(def);
+            if (l.Count == 0) return;
+            heldDef = def;
+            _heldSlot = l[^1];
+            Changed?.Invoke();
         }
+
+        /// <summary>Holds hotbar slot k.</summary>
+        public void SelectSlot(int k)
+        {
+            var s = Stacks();
+            if (k < 0 || k >= s.Count) return;
+            heldDef = s[k].defId;
+            _heldSlot = s[k].ids[^1];
+            Changed?.Invoke();
+        }
+
+        int HeldSlotIndex(List<(int defId, List<int> ids)> s) => Math.Max(0, stacking ? s.FindIndex(x => x.defId == heldDef) : s.FindIndex(x => x.ids.Contains(_heldSlot)));
 
         public void Cycle(int dir)
         {
             var s = Stacks();
             if (s.Count == 0) return;
-            int i = Math.Max(0, s.FindIndex(x => x.defId == heldDef));
-            heldDef = s[((i + dir) % s.Count + s.Count) % s.Count].defId;
-            Changed?.Invoke();
+            SelectSlot(((HeldSlotIndex(s) + dir) % s.Count + s.Count) % s.Count);
         }
+
+        public bool IsHeldSlot((int defId, List<int> ids) slot) => stacking ? slot.defId == heldDef : slot.ids.Contains(HeldId());
     }
 
     /// <summary>Discovery, counts, zones, milestones (port of ProgressTracker.gd).</summary>

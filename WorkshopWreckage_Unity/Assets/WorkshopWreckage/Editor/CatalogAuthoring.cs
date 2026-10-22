@@ -166,13 +166,16 @@ namespace WorkshopWreckage.EditorTools
 
         static string SortKey(ProceduralCatalog cat, int id) => string.Join(",", cat.Decode(id).Select(x => x.ToString("000")));
 
+        // material axis: steel, stainless, brass, copper, aluminium, painted, oxidized (rusty), worn.
+        // A colourful workshop: lots of painted and rusty parts, brass and copper accents,
+        // bright steel only for a minority (playtest: "too much shiny metal").
         static readonly Dictionary<int, int[]> MaterialWeights = new()
         {
-            [-1] = new[] { 40, 16, 14, 4, 6, 6, 8, 10 },
-            [4] = new[] { 60, 25, 4, 1, 0, 4, 6, 8 },
-            [5] = new[] { 55, 30, 6, 0, 0, 0, 4, 10 },
-            [3] = new[] { 36, 8, 26, 6, 8, 8, 6, 8 },
-            [9] = new[] { 30, 4, 8, 2, 12, 22, 10, 12 },
+            [-1] = new[] { 14, 6, 14, 8, 6, 26, 16, 10 },
+            [4] = new[] { 22, 10, 8, 4, 0, 26, 18, 12 },
+            [5] = new[] { 30, 20, 6, 0, 0, 20, 12, 12 },
+            [3] = new[] { 14, 4, 22, 8, 6, 24, 14, 8 },
+            [9] = new[] { 10, 2, 6, 2, 8, 40, 18, 14 },
         };
 
         static int Weighted(System.Random r, int[] w)

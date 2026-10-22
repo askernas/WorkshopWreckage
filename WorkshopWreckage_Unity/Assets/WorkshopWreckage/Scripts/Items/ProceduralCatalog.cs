@@ -197,6 +197,20 @@ namespace WorkshopWreckage
             return f + m;
         }
 
+        /// <summary>Each painted definition gets its own shade of its paint family (red ->
+        /// vermilion, maroon, orange...; blue -> navy, teal...), so painted parts are told
+        /// apart by colour, not just by name. Deterministic per id.</summary>
+        static Color PaintShade(Color c, int id)
+        {
+            uint h = (uint)id * 2654435761u;
+            float u = (h & 0xff) / 255f, v = ((h >> 8) & 0xff) / 255f, w = ((h >> 16) & 0xff) / 255f;
+            Color.RGBToHSV(c, out var hue, out var sat, out var val);
+            hue = Mathf.Repeat(hue + (u - 0.5f) * 0.12f, 1f);
+            sat = Mathf.Clamp01(sat * (0.75f + 0.45f * v));
+            val = Mathf.Clamp(val * (0.7f + 0.5f * w), 0.12f, 0.95f);
+            return Color.HSVToRGB(hue, sat, val);
+        }
+
         static void Weight(ItemDefinition d, float vol) => d.weightG = Snap(vol / 1000f * Density[d.material], 0.1f);
 
         ItemDefinition Build(int id)
@@ -363,7 +377,7 @@ namespace WorkshopWreckage
             {
                 d.magnetic = MagneticMaterials.Contains(d.material);
                 d.rarity = Mathf.Min(3, MaterialRarity[d.material] + (d.finish == "polished" ? 1 : 0));
-                if (d.material == "painted") d.variantColor = Paints[d.finish];
+                if (d.material == "painted") d.variantColor = PaintShade(Paints[d.finish], d.id);
             }
             d.meshScaleMm = Snap(d.worldScale * 1000f / vs, 0.001f);
             d.visualScale = vs;

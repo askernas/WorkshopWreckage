@@ -36,20 +36,32 @@ namespace WorkshopWreckage
     public class WorkshopLayout
     {
         const float UnitGap = 0.06f;
+        /// <summary>Highest shelf deck (m) that gets unsorted parts: below eye height, so they stay visible and reachable.</summary>
+        public const float MaxStrayShelf = 1.2f;
         public Vector3 roomMin, roomMax, spawn;
         public float spawnYaw;
         public readonly List<Dictionary<string, object>> furniture = new();
         public readonly List<Dictionary<string, object>> windows = new();
         public readonly List<Vector3> lamps = new();
+        /// <summary>Overhead fluorescent fixtures (Godot space, hanging height): the workshop's main light.</summary>
+        public readonly List<Vector3> fixtures = new();
         public readonly List<(string name, Rect rect)> zones = new();
         public readonly Dictionary<string, Dictionary<string, object>> units = new();
         public readonly List<Rect> floorBlockers = new();
         public readonly List<PileSurfaceDef> surfaces = new();
+        /// <summary>Every shelf deck (Godot XZ rect, height): what a dropped or falling part rests on.</summary>
+        public readonly List<(Rect rect, float y)> decks = new();
         public readonly List<PileSite> piles = new();
         public readonly List<string> placementErrors = new();
         public readonly Dictionary<string, List<int>> robotPartPiles = new();
+        /// <summary>Open floor near the spawn: Retrobot's parts lie here in plain sight, and
+        /// one small starter set sits at starterSpot for a quick first completed box.</summary>
+        public readonly List<Vector2> retroSpots = new();
+        public Vector2 starterSpot;
         public Vector3 repairBayPos;
         public Rect trayRect;                                     // sorting tray (Godot XZ); kept clear of generated debris
+        /// <summary>Height of the sorting tray's bottom (parts in the tray rest on it).</summary>
+        public const float TrayFloor = 0.04f;
         public readonly List<Rect> keepClear = new();             // no starting piles here, but walkable
         public float repairBayRot;
         readonly List<Dictionary<string, object>> _runs = new();
@@ -95,18 +107,29 @@ namespace WorkshopWreckage
             F("clock", new Vector3(3.8f, 3.75f, north + 0.05f), new Vector3(0.9f, 0.9f, 0.08f));
             F("machine", new Vector3(-0.5f, 0, south - 0.9f), new Vector3(2.4f, 1.2f, 0.9f));
             Block(new Vector2(-0.5f, south - 0.9f), new Vector2(2.5f, 1.0f));
-            F("door", new Vector3(west + 3.6f, 0, south - 0.03f), new Vector3(1.3f, 2.4f, 0.1f));
-            F("barrel", new Vector3(west + 4.7f, 0, south - 0.6f), new Vector3(0.6f, 0.9f, 0.6f));
-            Block(new Vector2(west + 4.7f, south - 0.6f), new Vector2(0.65f, 0.65f));
+            // the entry door, well clear of the Robot Workbench: nothing stands within 30 cm of
+            // its frame, and a walkway in front of it is kept free
+            float doorX = west + 5.6f;
+            F("door", new Vector3(doorX, 0, south - 0.03f), new Vector3(1.3f, 2.4f, 0.1f));
+            Block(new Vector2(doorX, south - 0.2f), new Vector2(1.3f + 0.2f + 0.6f, 0.4f));
+            keepClear.Add(new Rect(doorX - 1.05f, south - 1.7f, 2.1f, 1.5f));
+            F("barrel", new Vector3(west + 9.6f, 0, south - 0.6f), new Vector3(0.6f, 0.9f, 0.6f));
+            Block(new Vector2(west + 9.6f, south - 0.6f), new Vector2(0.65f, 0.65f));
             F("stool", new Vector3(-1.3f, 0, north + 1.7f), new Vector3(0.4f, 0.65f, 0.4f));
             Block(new Vector2(-1.3f, north + 1.7f), new Vector2(0.4f, 0.4f));
             F("blueprint", new Vector3(east - 0.05f, 3.6f, -1.0f), new Vector3(0.02f, 0.8f, 1.1f), -Mathf.PI / 2);
-            F("blueprint", new Vector3(west + 6.4f, 3.3f, south - 0.05f), new Vector3(1.0f, 0.75f, 0.02f), Mathf.PI);
+            F("blueprint", new Vector3(west + 8.6f, 3.3f, south - 0.05f), new Vector3(1.0f, 0.75f, 0.02f), Mathf.PI);
             repairBayPos = new Vector3(west + 1.55f, 0, south - 0.5f);
             repairBayRot = Mathf.PI;
             Block(new Vector2(repairBayPos.x, repairBayPos.z), new Vector2(3.0f, 1.0f));
             // sorting tray in front of the repair bay: drop any parts here and the robots sort them
-            trayRect = new Rect(west + 2.3f, south - 2.85f, 1.3f, 0.8f);   // clear of the west pallet run and the door
+            // against the south wall beside the door: out of the way of the workbench and the walkways
+            // a metre out from the wall so robots reach it from both long sides; 0.6 m deep so every
+            // part is within arm's reach over the low rim. Its rim is solid (a floor blocker) and
+            // its bottom is a surface parts rest on.
+            trayRect = new Rect(doorX + 1.25f, south - 1.6f, 1.4f, 0.6f);
+            Block(trayRect.center, trayRect.size);
+            decks.Add((trayRect, TrayFloor));
             F("sorting_tray", new Vector3(trayRect.center.x, 0, trayRect.center.y), new Vector3(trayRect.width, 0.12f, trayRect.height));
             keepClear.Add(new Rect(trayRect.position - Vector2.one * 0.5f, trayRect.size + Vector2.one));
             keepClear.Add(new Rect(repairBayPos.x - 1.6f, repairBayPos.z - 2.0f, 3.2f, 1.6f));   // robots' home spots
@@ -122,14 +145,11 @@ namespace WorkshopWreckage
             lamps.Add(new Vector3(1.8f, 3, north + 0.9f));
             lamps.Add(new Vector3(0.9f, 3, -0.75f));
             lamps.Add(new Vector3(repairBayPos.x + 0.4f, 2.7f, repairBayPos.z - 1.3f));   // over the repair bay and Retrobot
-            // an even grid from wall to wall (lamp range 7 m), so corners of big rooms aren't dark
-            int nx = Mathf.Max(2, Mathf.CeilToInt((W - 3f) / 6.5f) + 1), nz = Mathf.Max(2, Mathf.CeilToInt((D - 5f) / 6.5f) + 1);   // ~6.5 m apart: every spot lit, few overlaps (GPU)
+            // rows of industrial fluorescent fixtures from wall to wall (~4.5 × 4 m apart)
+            int nx = Mathf.Max(2, Mathf.RoundToInt((W - 4.4f) / 4.5f) + 1), nz = Mathf.Max(2, Mathf.RoundToInt((D - 4.6f) / 4f) + 1);
             for (int ix = 0; ix < nx; ix++)
                 for (int iz = 0; iz < nz; iz++)
-                {
-                    var lp = new Vector3(Mathf.Lerp(west + 2f, east - 2f, ix / (float)(nx - 1)), 3, Mathf.Lerp(north + 3.2f, south - 2f, iz / (float)(nz - 1)));
-                    if (lamps.All(l => new Vector2(l.x - lp.x, l.z - lp.z).magnitude > 2.6f)) lamps.Add(lp);
-                }
+                    fixtures.Add(new Vector3(Mathf.Lerp(west + 2.2f, east - 2.2f, ix / (float)(nx - 1)), 3.9f, Mathf.Lerp(north + 2.4f, south - 2.2f, iz / (float)(nz - 1))));
 
             // --- storage runs: walls first, then freestanding aisles ----------------
             // Godot-space directions (Unity's Vector3.forward/back have the opposite Z meaning)
@@ -140,11 +160,12 @@ namespace WorkshopWreckage
             Run(new Vector3(east, 0, north + 0.75f), toSouth, toWest, D - 1.5f, "shelving", "drawer_cabinet", "pallet_zone");
             Run(new Vector3(east - 0.75f, 0, south), toWest, toNorth, east - 0.75f - 0.75f, "shelving", "pallet_zone");
             Run(new Vector3(west, 0, north + 0.2f), toSouth, toEast, D - 3.2f, "pallet_zone");
-            float x0 = 3.2f, len = east - x0 - 2.2f;
+            // freestanding back-to-back aisles, with room to walk between them (AisleClear)
+            float x0 = 3.2f, len = east - x0 - (1.2f + AisleClear);
             for (int r = 0; r < aisleRows; r++)
             {
-                float z = south - 3.5f - r * 3.4f;
-                if (z < north + 3.6f) break;
+                float z = south - (1.2f + AisleClear + 0.6f) - r * (1.2f + AisleClear);
+                if (z < north + 0.6f + AisleClear + 0.6f) break;
                 // back-to-back pair: one run faces north, the other south
                 Run(new Vector3(x0, 0, z), toEast, toNorth, len, "shelving", "drawer_cabinet");
                 Run(new Vector3(x0 + len, 0, z), toWest, toSouth, len, "shelving", "drawer_cabinet");
@@ -159,13 +180,24 @@ namespace WorkshopWreckage
                 for (int i = 0; i < _runs.Count && !placed; i++)
                 {
                     var run = _runs[i];
-                    if (!((List<string>)run["types"]).Contains(type) || used[i] + w > (float)run["length"] + 0.001f) continue;
+                    if (!((List<string>)run["types"]).Contains(type)) continue;
                     var dir = (Vector3)run["dir"];
                     var n = (Vector3)run["normal"];
-                    var c = (Vector3)run["start"] + dir * (used[i] + w / 2) + n * (d / 2 + 0.02f);
-                    PlaceUnit(db, u, c, n, Mathf.Abs(dir.x) > 0.5f);
-                    used[i] += w + UnitGap;
-                    placed = true;
+                    bool alongX = Mathf.Abs(dir.x) > 0.5f;
+                    // where runs meet at a corner, slide along until the footprint is clear of
+                    // everything already standing there (units never overlap)
+                    while (used[i] + w <= (float)run["length"] + 0.001f)
+                    {
+                        var c = (Vector3)run["start"] + dir * (used[i] + w / 2) + n * (d / 2 + 0.02f);
+                        if (Clear(Footprint(c, w, d, alongX)))
+                        {
+                            PlaceUnit(db, u, c, n, alongX);
+                            used[i] += w + UnitGap;
+                            placed = true;
+                            break;
+                        }
+                        used[i] += 0.2f;
+                    }
                 }
                 if (!placed) leftover.Add(u);
             }
@@ -175,6 +207,12 @@ namespace WorkshopWreckage
                 if (PlaceIsland(db, u)) continue;
                 placementErrors.Add($"No room for storage unit {Json.Str(u, "id")} ({Json.Str(u, "type")}, {Json.Num(u, "width"):0.00} m) in a {W}×{D} m workshop");
             }
+
+            // no two storage units may ever overlap
+            var rects = units.Select(kv => (kv.Key, r: Footprint(WorkshopLayout.V(kv.Value["pos"]), (float)Json.Num(kv.Value, "width"), (float)Json.Num(kv.Value, "depth"), Mathf.Abs(Mathf.Sin((float)Json.Num(kv.Value, "rot_y"))) < 0.5f))).ToList();
+            for (int a = 0; a < rects.Count; a++)
+                for (int b = a + 1; b < rects.Count; b++)
+                    if (rects[a].r.Overlaps(rects[b].r)) placementErrors.Add($"Storage units {rects[a].Key} and {rects[b].Key} overlap");
 
             // --- surfaces ----------------------------------------------------------
             var floor = new PileSurfaceDef { name = "floor", rect = new Rect(west + 0.1f, north + 0.1f, W - 0.2f, D - 0.2f), y = 0, floor = true, maxHeight = 1.25f };
@@ -266,11 +304,41 @@ namespace WorkshopWreckage
             foreach (var robot in new[] { "unibot", "spiderbot", "caterpillarbot", "hoverbot" })
                 robotPartPiles[robot] = floorPiles.OrderBy(_ => rng.Next()).Take(4).ToList();
 
+            // open spots near the start, away from every heap: Retrobot's parts and the starter set
+            var sp = new Vector2(spawn.x, spawn.z);
+            var taken = piles.Where(p => p.kind != "scatter").Select(p => p.center).ToList();
+            starterSpot = OpenSpot(sp + new Vector2(0, -1.7f), 0, 2.5f, taken) ?? sp + new Vector2(0, -1.4f);
+            taken.Add(starterSpot);
+            for (int k = 0; k < 5; k++)
+            {
+                float a = -Mathf.PI / 2 + (k - 2) * 0.62f;   // a fan in front of the spawn (Godot -z = north = ahead)
+                var s = OpenSpot(sp + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * (2.6f + 0.5f * (k % 2)), 0, 3f, taken);
+                if (s == null) continue;
+                retroSpots.Add(s.Value);
+                taken.Add(s.Value);
+            }
+
             // --- zones -----------------------------------------------------------------
             zones.Add(("North Workbench", new Rect(west, north, W, 3.0f)));
             zones.Add(("Window Bay", new Rect(west, north + 3f, W * 0.27f, D - 3f)));
             zones.Add(("Shelving Aisles", new Rect(east - W * 0.3f, north + 3f, W * 0.3f, D - 3f)));
             zones.Add(("Central Floor", new Rect(west + W * 0.27f, north + 3f, W * 0.43f, D - 3f)));
+        }
+
+        /// <summary>Walking room between facing storage (Godot metres).</summary>
+        const float AisleClear = 2.4f;
+
+        static Rect Footprint(Vector3 c, float w, float d, bool alongX)
+        {
+            var s = alongX ? new Vector2(w, d) : new Vector2(d, w);
+            return new Rect(new Vector2(c.x, c.z) - s / 2, s);
+        }
+
+        /// <summary>No furniture, unit or keep-clear area overlaps this footprint.</summary>
+        bool Clear(Rect r)
+        {
+            r = new Rect(r.position + Vector2.one * 0.02f, r.size - Vector2.one * 0.04f);   // touching neighbours is fine
+            return !floorBlockers.Any(b => b.Overlaps(r)) && !keepClear.Any(b => b.Overlaps(r));
         }
 
         void Run(Vector3 start, Vector3 dir, Vector3 normal, float length, params string[] types)
@@ -292,7 +360,7 @@ namespace WorkshopWreckage
         /// <summary>Finds open floor for a freestanding unit, keeping a walkway around it.</summary>
         bool PlaceIsland(ItemDatabase db, Dictionary<string, object> u)
         {
-            const float Walkway = 1.15f;
+            const float Walkway = 1.4f;
             float w = (float)Json.Num(u, "width"), d = (float)Json.Num(u, "depth");
             var foot = new Vector2(w, d);
             var room = new Rect(roomMin.x, roomMin.z, roomMax.x - roomMin.x, roomMax.z - roomMin.z);
@@ -333,6 +401,9 @@ namespace WorkshopWreckage
                 var dests = db.DestinationsOf(id);
                 for (int lv = 0; lv < levels.Count; lv++)
                 {
+                    decks.Add((ToWorld(-w / 2, -d / 2, w / 2, d / 2), levels[lv]));
+                    // stray parts only where you can see and reach them: no higher than chest height
+                    if (levels[lv] > MaxStrayShelf) continue;
                     var s = new PileSurfaceDef { name = $"shelf_{id}_{lv}", rect = ToWorld(-w / 2 + 0.08f, -d / 2 + 0.06f, w / 2 - 0.08f, d / 2 - 0.06f), y = levels[lv], maxHeight = clearance - 0.12f };
                     foreach (var dd in dests.Where(x => Json.Int(x, "level") == lv))
                     {
@@ -349,6 +420,23 @@ namespace WorkshopWreckage
                 surfaces.Add(new PileSurfaceDef { name = $"pallet_{id}", rect = ToWorld(-w / 2 + 0.05f, -d / 2 + 0.05f, w / 2 - 0.05f, d / 2 - 0.05f), y = 0.14f, maxHeight = 0.75f });
         }
 
+        /// <summary>The nearest point to `want` (searching outwards up to maxR) that is clear of
+        /// furniture and keep-clear areas by 0.5 m and at least 1.5 m from every pile centre.</summary>
+        Vector2? OpenSpot(Vector2 want, float minR, float maxR, List<Vector2> avoid)
+        {
+            for (float r = minR; r <= maxR; r += 0.15f)
+                for (int k = 0; k < Mathf.Max(1, (int)(r * 12)); k++)
+                {
+                    float a = k / Mathf.Max(1f, r * 12) * Mathf.PI * 2;
+                    var p = want + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
+                    if (p.x < roomMin.x + 1 || p.x > roomMax.x - 1 || p.y < roomMin.z + 1 || p.y > roomMax.z - 1) continue;
+                    if (floorBlockers.Concat(keepClear).Any(b => new Rect(b.position - Vector2.one * 0.5f, b.size + Vector2.one).Contains(p))) continue;
+                    if (avoid.Any(q => Vector2.Distance(p, q) < 1.5f)) continue;
+                    return p;
+                }
+            return null;
+        }
+
         /// <summary>Well-spread free floor positions (Poisson-disc style, deterministic).</summary>
         List<Vector2> FreeFloorSpots(System.Random rng, int wanted)
         {
@@ -359,7 +447,7 @@ namespace WorkshopWreckage
                 var p = new Vector2(Mathf.Lerp(roomMin.x + 1.6f, roomMax.x - 1.6f, (float)rng.NextDouble()), Mathf.Lerp(roomMin.z + 1.8f, roomMax.z - 1.6f, (float)rng.NextDouble()));
                 if (Vector2.Distance(p, new Vector2(spawn.x, spawn.z)) < 1.8f) continue;
                 if (floorBlockers.Any(b => new Rect(b.position - Vector2.one * 0.9f, b.size + Vector2.one * 1.8f).Contains(p))) continue;
-                if (keepClear.Any(b => new Rect(b.position - Vector2.one * 0.9f, b.size + Vector2.one * 1.8f).Contains(p))) continue;
+                if (keepClear.Any(b => new Rect(b.position - Vector2.one * 1.5f, b.size + Vector2.one * 3f).Contains(p))) continue;   // heaps keep their distance from the door, tray and robot mats
                 if (o.Any(q => Vector2.Distance(p, q) < minDist)) continue;
                 o.Add(p);
                 if (attempt > wanted * 150) minDist *= 0.97f;

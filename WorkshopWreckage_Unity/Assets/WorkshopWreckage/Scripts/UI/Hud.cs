@@ -279,6 +279,13 @@ namespace WorkshopWreckage
 
             BuildRobotScreens();
 
+            var ex = Screen("exit", 620);
+            Title(ex, "LEAVE THE WORKSHOP?", 34);
+            Para(ex, "Stepping out through the door ends the game.\nYour workshop is saved to the quick slot if you choose to save.", 17, Muted, 56);
+            MakeButton(ex, "Save and leave", () => _g.LeaveWorkshop(true));
+            MakeButton(ex, "Leave without saving", () => _g.LeaveWorkshop(false));
+            MakeButton(ex, "Stay in the workshop", () => _g.SetState("play"));
+
             var st = Screen("settings", 640);
             Title(st, "SETTINGS");
             SliderRow(st, "Mouse sensitivity", 0.05f, 0.6f, _g.player != null ? _g.player.sensitivity : 0.22f, v => _g.player.sensitivity = v);
@@ -340,7 +347,7 @@ namespace WorkshopWreckage
         public void SetScreen(string state)
         {
             _hud.gameObject.SetActive(state != "menu");
-            ShowScreenRaw(state == "menu" ? "main" : state == "paused" ? "pause" : state == "inventory" ? "inventory" : state == "workbench" ? "workbench" : "");
+            ShowScreenRaw(state == "menu" ? "main" : state == "paused" ? "pause" : state == "inventory" ? "inventory" : state == "workbench" ? "workbench" : state == "exit" ? "exit" : "");
         }
 
         public void SetHudVisible(bool v) => _hud.gameObject.SetActive(v);
@@ -430,10 +437,11 @@ namespace WorkshopWreckage
         {
             var inv = _g.inventory; var p = _g.progress; var db = _g.db;
             var t = $"<b>Carrying {inv.Count} / {inv.capacity}</b>\n";
-            foreach (var (defId, ids) in inv.Stacks())
+            foreach (var slot in inv.Stacks())
             {
+                var (defId, ids) = slot;
                 var def = db.Get(defId);
-                t += $"{(defId == inv.heldDef ? "▶ " : "   ")}<b>{def.displayName}</b> ×{ids.Count}   <color=#b8a890>{p.CountLabel(defId)}</color>   → {db.BoxLabel(def.storageBox)}\n";
+                t += $"{(inv.IsHeldSlot(slot) ? "▶ " : "   ")}<b>{def.displayName}</b> ×{ids.Count}   <color=#b8a890>{p.CountLabel(defId)}</color>   → {db.BoxLabel(def.storageBox)}\n";
             }
             t += $"\n<b>Workshop restored: {p.OverallPercent:0.0}%</b>  ({p.sortedTotal} of {_g.world.Count} parts sorted) · discovered part types: {p.discovered.Count}\n";
             for (int z = 0; z < _g.layout.zones.Count; z++)
@@ -558,15 +566,16 @@ namespace WorkshopWreckage
             _hotbarDirty = false;
             foreach (Transform c in _hotbar) Destroy(c.gameObject);
             var stacks = inv.Stacks();
-            for (int i = 0; i < Mathf.Min(9, stacks.Count); i++)
+            int shown = Mathf.Min(15, stacks.Count);
+            for (int i = 0; i < shown; i++)
             {
                 var (defId, ids) = stacks[i];
-                bool sel = defId == inv.heldDef;
+                bool sel = inv.IsHeldSlot(stacks[i]);
                 var r = Rect("slot", _hotbar, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
                 var le = r.gameObject.AddComponent<LayoutElement>();
-                le.preferredWidth = 150; le.preferredHeight = 40;
+                le.preferredWidth = Mathf.Min(150, 1390f / Mathf.Max(1, shown) - 6); le.preferredHeight = 40;
                 Panel(r, sel ? new Color(0.25f, 0.17f, 0.08f, 0.9f) : new Color(0.1f, 0.07f, 0.05f, 0.75f), sel ? Brass : BrassDim);
-                Fill(r, "t", 15, Cream, TextAnchor.MiddleCenter).text = $"{i + 1}  {_g.db.Get(defId).shape} ×{ids.Count}";
+                Fill(r, "t", shown > 9 ? 13 : 15, Cream, TextAnchor.MiddleCenter).text = (i < 9 ? $"{i + 1}  " : "") + _g.db.Get(defId).shape + (ids.Count > 1 ? $" ×{ids.Count}" : "");
             }
         }
 

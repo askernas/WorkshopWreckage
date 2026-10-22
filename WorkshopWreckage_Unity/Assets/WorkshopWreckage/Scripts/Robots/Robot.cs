@@ -555,8 +555,9 @@ namespace WorkshopWreckage
                     if (targetId < 0 || g.world.instances[targetId].state != ItemState.InWorld) { Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; break; }
                     var ip = g.world.instances[targetId].Position;
                     bool high = !Flies && ip.y > _maxPickH;   // only climbers choose those: they climb up from the path's end
+                    bool tray = g.InTray(ip);                 // reached over the rim from outside
                     float fd = Flat(ip - transform.position).magnitude;
-                    bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : ((!high && fd <= _reach * 0.75f) || (Steer(dt) && (fd <= _reach + 0.1f || (high && fd <= 1.0f))));
+                    bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : ((!high && fd <= _reach * 0.75f) || (Steer(dt) && (fd <= _reach + 0.1f || (high && fd <= 1.0f) || (tray && fd <= 0.65f))));
                     if (arrived) { _step = Step.Picking; StartCoroutine(PickUp(targetId)); }
                     else if (!Flies && _pathIdx >= _path.Count) { _unreachable.Add(targetId); Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; }
                     break;
@@ -702,7 +703,7 @@ namespace WorkshopWreckage
                 else
                 {
                     bool high = inst.Position.y > _maxPickH;
-                    var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : _reach);
+                    var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : g.InTray(inst.Position) ? 0.65f : _reach);
                     var path = goal.HasValue ? _nav.Path(me, goal.Value) : null;
                     if (path == null) { _unreachable.Add(inst.id); continue; }
                     _path = path;
@@ -772,6 +773,7 @@ namespace WorkshopWreckage
             if (strategy == "assigned_definition" && assignedDef >= 0 && i.defId != assignedDef) return false;
             if (Flies && g.debris != null && g.debris.At(i.Position) > i.Position.y + ItemDatabase.Extents(def)[2] * 0.5f + 0.05f) return false;   // buried
             bool staged = i.owner.StartsWith("stage:");
+            if (staged && Blocked(def.storageBox)) return false;   // waits until someone clears the strays out of its destination
             if (ReachableDest(def.storageBox)) return true;
             if (staged) return false;   // waiting for a robot that can store it
             if (_stagedNow != null && _stagedNow.GetValueOrDefault("stage:" + def.storageBox) >= StagingCapacity) return false;   // that zone is full
@@ -782,6 +784,15 @@ namespace WorkshopWreckage
         /// <summary>Can it put a part into this destination itself? Never for a courier
         /// (Unibot); otherwise if the destination is within reach (climbing for a climber).</summary>
         public bool ReachableDest(string box) => _canStore && g.db.boxes.TryGetValue(box, out var d) && Json.Num(d, "elevation_m") <= ReachHeight;
+
+        readonly Dictionary<string, (float t, bool v)> _blocked = new();
+        bool Blocked(string box)
+        {
+            if (_blocked.TryGetValue(box, out var e) && _time - e.t < 5f) return e.v;
+            bool v = g.StraysIn(box).Count > 0;
+            _blocked[box] = (_time, v);
+            return v;
+        }
 
         public static int StagingCapacity => Json.Int(RootConfig(), "staging_capacity", 14);
         public int StagingCount(string box) => g.world.instances.Count(i => i.state == ItemState.InWorld && i.owner == "stage:" + box);
@@ -814,7 +825,7 @@ namespace WorkshopWreckage
             var inst = g.world.instances[itemId];
             var def = g.world.DefOf(itemId);
             var spot = StagingSpot(def.storageBox);
-            return inst.state == ItemState.InWorld && spot.HasValue && Flat(inst.Position - spot.Value).magnitude <= 0.45f && !ReachableDest(def.storageBox);
+            return inst.state == ItemState.InWorld && (inst.owner == "stage:" + def.storageBox || (spot.HasValue && Flat(inst.Position - spot.Value).magnitude <= 0.45f && !ReachableDest(def.storageBox)));
         }
 
         /// <summary>Where Hoverbot hovers to reach a point: in front of a storage unit
@@ -906,7 +917,8 @@ namespace WorkshopWreckage
         IEnumerator Deposit()
         {
             var here = carried.Where(c => g.world.DefOf(c).storageBox == _destBox).ToList();
-            if (!_destReachable) { yield return StageBelow(here); yield break; }
+            // stray parts lying in the destination block it: leave the load in its staging zone
+            if (!_destReachable || g.StraysIn(_destBox).Count > 0) { yield return StageBelow(here); yield break; }
             if (!Flies && _destPoint.y > _maxPickH) yield return ClimbTo(_destPoint);   // climbs up to store it
             float high = Mathf.Clamp01((_destPoint.y - transform.position.y) / (_height * 2f));
             for (float t = 0; t < _depositTime * 0.5f; t += Time.deltaTime)

@@ -1,6 +1,6 @@
 {
 	"version": 2,
-	"note": "Player levels, XP, skills and robot upgrades. Engine independent; read by Progression.cs. XP is only ever granted once per instance/definition/zone/robot (see anti_exploit). Completing a whole ordinary item definition (every copy stored) is the main source of XP; sorting single parts gives a little. Robot blueprints unlock at levels set in robots.json (blueprint_level). 'status' marks what the current build implements: active = effect applied in game, planned = data reserved for a later milestone (see docs/ROADMAP.md).",
+	"note": "Player levels, XP, skills and robot upgrades. The player carries 10 parts at first (Game.BaseInventory), 15 at most with both pocket skills. Engine independent; read by Progression.cs. XP is only ever granted once per instance/definition/zone/robot (see anti_exploit). Completing a whole ordinary item definition (every copy stored) is the main source of XP; sorting single parts gives a little. Robot blueprints unlock at levels set in robots.json (blueprint_level). 'status' marks what the current build implements: active = effect applied in game, planned = data reserved for a later milestone (see docs/ROADMAP.md).",
 	"levels": {
 		"max_level": 25,
 		"xp_curve": {"type": "power", "base": 19, "exponent": 1.55, "comment": "XP needed to go from level L to L+1 = round(base * L^exponent)"},
@@ -35,9 +35,9 @@
 		"comment": "Per-item XP shrinks with world size so level 25 is reached at a similar completion fraction in every preset. Balance target: Massive completes in ~1.8x Standard's time (items x2.44)."
 	},
 	"skills": [
-		{"id": "pockets_1", "name": "Deeper Pockets", "group": "inventory", "unlock_level": 2, "cost": 1, "requires": [], "effects": {"inventory_capacity": 10}, "status": "active"},
-		{"id": "pockets_2", "name": "Tool Belt", "group": "inventory", "unlock_level": 6, "cost": 1, "requires": ["pockets_1"], "effects": {"inventory_capacity": 20}, "status": "active"},
-		{"id": "pockets_3", "name": "Parts Crate on Wheels", "group": "inventory", "unlock_level": 12, "cost": 2, "requires": ["pockets_2"], "effects": {"inventory_capacity": 40}, "status": "active"},
+		{"id": "pockets_1", "name": "Deeper Pockets", "group": "inventory", "unlock_level": 5, "cost": 1, "requires": [], "effects": {"inventory_capacity": 2}, "status": "active"},
+		{"id": "pockets_2", "name": "Tool Belt", "group": "inventory", "unlock_level": 12, "cost": 2, "requires": ["pockets_1"], "effects": {"inventory_capacity": 3}, "status": "active"},
+		{"id": "organiser", "name": "Parts Organiser", "group": "inventory", "unlock_level": 6, "cost": 1, "requires": [], "effects": {"inventory_stacking": 1}, "status": "active", "comment": "Identical parts stack in one slot and the pockets are sorted by type. Before this every part is its own slot, in pickup order."},
 		{"id": "quick_hands", "name": "Quick Hands", "group": "collection", "unlock_level": 3, "cost": 1, "requires": [], "effects": {"pickup_speed": 0.25}, "status": "active"},
 		{"id": "inventory_manifest", "name": "Inventory Manifest", "group": "scanning", "unlock_level": 4, "cost": 1, "requires": [], "effects": {"reveal_totals": 1}, "status": "active"},
 		{"id": "long_reach", "name": "Long Reach", "group": "collection", "unlock_level": 4, "cost": 1, "requires": [], "effects": {"reach_m": 0.8}, "status": "active"},

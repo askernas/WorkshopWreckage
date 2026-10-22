@@ -32,7 +32,9 @@ namespace WorkshopWreckage
         public RobotWorkbench workbench;
         public readonly List<Robot> robots = new();
         public Robot retrobot => robots.Find(r => r.id == "retrobot");
-        public readonly HashSet<int> robotReserved = new();   // parts a robot is on its way to: no one else takes them
+        public readonly HashSet<int> robotReserved = new();
+        /// <summary>The starter set placed in plain sight near the spawn (see WorldGenerator).</summary>
+        public List<int> starterIds = new();   // parts a robot is on its way to: no one else takes them
         public DebrisField debris;
         public PlayerTools tools;
         /// <summary>Per-preset multipliers (world_presets.json "scaling"): bigger worlds get stronger robots and tools.</summary>
@@ -109,6 +111,7 @@ namespace WorkshopWreckage
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
             StartCoroutine(ProbeLater());
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
+            if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
@@ -167,6 +170,7 @@ namespace WorkshopWreckage
             trayTarget.AddComponent<StorageTarget>().destId = "TRAY";
             Debug.Log("[boot] workshop built");
             BuildStorage();
+            _containers = null;
             Debug.Log("[boot] storage built");
             workbench.transform.position = Shared.Pos(layout.repairBayPos.x, layout.repairBayPos.y, layout.repairBayPos.z);
             workbench.transform.rotation = Shared.YRot(layout.repairBayRot);
@@ -177,16 +181,17 @@ namespace WorkshopWreckage
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
             if (_layoutSeed != seed && !BuildWorkshop(seed)) return false;
-            var gen = new WorldGenerator();
+            var gen = new WorldGenerator { forbidden = InsideContainerG };
             int total = Json.Int(db.config, "total_items", 4096);
             var w = gen.Generate(db, layout, seed, itemCount > 0 && itemCount < total ? itemCount : -1);
             if (w == null) { hud.ShowFatal("World could not be generated:\n\n" + string.Join("\n", gen.errors.Take(20))); return false; }
             Debug.Log($"[world] preset {presetId}, seed {seed}: {w.Count} items in {gen.lastGenerationMs:0} ms ({layout.piles.Count} pile sites, {layout.surfaces.Count} surfaces, {units.Count} storage units)");
             world = w;
+            starterIds = gen.starterIds;
             if (renderer != null) Destroy(renderer.gameObject);
             renderer = new GameObject("Items").AddComponent<ItemRenderer>();
             renderer.transform.SetParent(transform, false);
-            storage = new StorageSystem(db, world) { placement = StoragePlacement };
+            storage = new StorageSystem(db, world) { placement = StoragePlacement, straysIn = box => StraysIn(box).Count };
             inventory = new Inventory(world);
             if (save != null) SaveSystem.ApplyItems(save, world);
             progress = new ProgressTracker(world, layout.zones.Select(z => z.name).ToList());
@@ -200,7 +205,8 @@ namespace WorkshopWreckage
                 }
                 var inv = Json.Obj(save["inventory"]);
                 foreach (var x in Json.Arr(inv["items"])) inventory.items.Add((int)(double)x);
-                inventory.heldDef = Json.Int(inv, "held_def", -1);
+                int hd = Json.Int(inv, "held_def", -1);
+                if (hd >= 0) inventory.Select(hd);
                 progress.Load(Json.Obj(save["progress"]));
             }
             renderer.Build(world);
@@ -238,6 +244,11 @@ namespace WorkshopWreckage
             };
             held.ShowHeld(inventory.HeldId() >= 0 ? world.DefOf(inventory.HeldId()) : null);
             hud.MarkHotbarDirty();
+            if (save == null && starterIds.Count > 0)
+            {
+                var sd = world.DefOf(starterIds[0]);
+                hud.Toast($"Right in front of you: {starterIds.Count} × {sd.displayName} — they all go in {db.BoxLabel(sd.storageBox)}", true);
+            }
             if (save != null && save.TryGetValue("player", out var po))
             {
                 var pl = Json.Obj(po);
@@ -254,6 +265,73 @@ namespace WorkshopWreckage
         }
 
         float _lightT;
+
+        /// <summary>Highest furniture surface (bench, shelf deck, pallet) or the floor under a
+        /// Unity-space point, no higher than maxY.</summary>
+        public float SurfaceBelow(Vector3 p, float maxY)
+        {
+            float best = 0;
+            var q = new Vector2(p.x, -p.z);
+            foreach (var s in layout.surfaces)
+                if (!s.floor && s.y <= maxY && s.y > best && s.rect.Contains(q)) best = s.y;
+            foreach (var (r, y) in layout.decks)
+                if (y <= maxY && y > best && r.Contains(q)) best = y;
+            return best;
+        }
+
+        /// <summary>Unsorted parts of other definitions lying inside an open destination
+        /// (shelf section, bin, box, crate, pallet): they block storing there.</summary>
+        public List<int> StraysIn(string box)
+        {
+            var o = new List<int>();
+            if (index == null || !db.boxes.TryGetValue(box, out var d) || !units.TryGetValue(Json.Str(d, "unit"), out var u) || u.type == "drawer_cabinet") return o;
+            var m = u.DestWorld(box);
+            var inner = StorageUnit.Inner(d);
+            var inv = m.inverse;
+            var c = m.MultiplyPoint3x4(new Vector3(0, inner.y / 2, 0));
+            foreach (var id in index.QuerySphere(c, inner.magnitude * 0.5f + 0.05f))
+            {
+                var i = world.instances[id];
+                if (i.state != ItemState.InWorld || world.DefOf(id).storageBox == box || interaction.busy.Contains(id)) continue;
+                var l = inv.MultiplyPoint3x4(i.Position);
+                if (Mathf.Abs(l.x) < inner.x / 2 && Mathf.Abs(l.z) < inner.z / 2 && l.y > -0.03f && l.y < inner.y + 0.05f) o.Add(id);
+            }
+            return o;
+        }
+
+        List<(Matrix4x4 inv, Vector3 half, Bounds aabb)> _containers;
+
+        /// <summary>Closed containers (boxes, bins, crates): parts are never generated inside
+        /// them, where they would be hidden. Godot-space centre and radius.</summary>
+        /// <summary>Unity-space point inside a closed container (boxes, bins, crates)?</summary>
+        public bool InsideContainer(Vector3 p, float r) => InsideContainerG(new Vector3(p.x, p.y, -p.z), r);
+
+        bool InsideContainerG(Vector3 g, float r)
+        {
+            if (_containers == null)
+            {
+                _containers = new List<(Matrix4x4, Vector3, Bounds)>();
+                foreach (var kv in db.boxes)
+                {
+                    var kind = Json.Str(kv.Value, "kind");
+                    if (kind == "shelf_section" || kind == "floor_pallet" || kind == "drawer") continue;
+                    if (!units.TryGetValue(Json.Str(kv.Value, "unit"), out var u)) continue;
+                    var m = u.DestWorld(kv.Key);
+                    var inner = StorageUnit.Inner(kv.Value);
+                    var half = new Vector3(inner.x / 2, inner.y, inner.z / 2);
+                    var c = m.MultiplyPoint3x4(new Vector3(0, inner.y / 2, 0));
+                    _containers.Add((m.inverse, half, new Bounds(c, Vector3.one * (inner.magnitude + 0.1f))));
+                }
+            }
+            var p = Shared.Pos(g.x, g.y, g.z);
+            foreach (var (inv, half, aabb) in _containers)
+            {
+                if (!aabb.Contains(p)) continue;
+                var l = inv.MultiplyPoint3x4(p);
+                if (Mathf.Abs(l.x) < half.x + r * 0.5f && Mathf.Abs(l.z) < half.z + r * 0.5f && l.y > -0.05f && l.y < half.y + r * 0.5f) return true;
+            }
+            return false;
+        }
 
         /// <summary>Workshop restoration made visible: each zone's lamps glow brighter as
         /// the zone is restored (up to +45% at 100%), easing towards the new level.</summary>
@@ -372,6 +450,32 @@ namespace WorkshopWreckage
             }
         }
 
+        /// <summary>QA (--layoutdump=file.json): floor plan in Godot XZ — room, storage unit
+        /// footprints, floor blockers, keep-clear areas, spawn and unsorted part positions.</summary>
+        void DumpLayout(string path)
+        {
+            List<object> R(Rect r) => new() { (double)r.xMin, (double)r.yMin, (double)r.width, (double)r.height };
+            var d = new Dictionary<string, object>
+            {
+                ["room"] = new List<object> { (double)layout.roomMin.x, (double)layout.roomMin.z, (double)layout.roomMax.x, (double)layout.roomMax.z },
+                ["spawn"] = new List<object> { (double)layout.spawn.x, (double)layout.spawn.z },
+                ["units"] = layout.units.ToDictionary(kv => kv.Key, kv => (object)kv.Value),
+                ["blockers"] = layout.floorBlockers.Select(r => (object)R(r)).ToList(),
+                ["keep_clear"] = layout.keepClear.Select(r => (object)R(r)).ToList(),
+                ["items"] = world.instances.Where(i => i.state == ItemState.InWorld).Select(i => (object)new List<object> { (double)i.Position.x, (double)(-i.Position.z), (double)i.Position.y, (double)(db.Get(i.defId).IsRobotPart ? 1 : 0) }).ToList(),
+            };
+            File.WriteAllText(path, Json.Write(d));
+        }
+
+        /// <summary>Leaving through the workshop door ends the game (after the prompt).</summary>
+        public void LeaveWorkshop(bool save)
+        {
+            if (save) SaveGame("quick");
+            WriteTelemetry();
+            if (Automated) return;   // tests never quit from here
+            Application.Quit();
+        }
+
         /// <summary>Opens the Robot Workbench screen on a project.</summary>
         public void OpenWorkbench(string projectId)
         {
@@ -457,7 +561,7 @@ namespace WorkshopWreckage
         string _activity = "collecting";
         string _telemetryFile;
         Dictionary<string, object> _progressionCfg;
-        public const int BaseInventory = 30;
+        public const int BaseInventory = 10;
 
         void StartProgression(int seed, Dictionary<string, object> save)
         {
@@ -502,6 +606,7 @@ namespace WorkshopWreckage
         public void ApplySkills()
         {
             inventory.capacity = BaseInventory + (int)progression.Effect("inventory_capacity");
+            inventory.stacking = progression.Has("inventory_stacking");
             interaction.reachBonus = (float)progression.Effect("reach_m");
         }
 
@@ -668,7 +773,7 @@ namespace WorkshopWreckage
             if (kb.escapeKey.wasPressedThisFrame)
             {
                 if (state == "play") { if (interaction.inspecting) interaction.EndInspect(); else SetState("paused"); }
-                else if (state == "paused" || state == "inventory" || state == "workbench") { if (!hud.BackFromSubScreen()) SetState("play"); }
+                else if (state == "paused" || state == "inventory" || state == "workbench" || state == "exit") { if (!hud.BackFromSubScreen()) SetState("play"); }
                 else if (state == "menu") hud.BackFromSubScreen();
             }
             else if (kb.tabKey.wasPressedThisFrame && (state == "play" || state == "inventory")) SetState(state == "play" ? "inventory" : "play");

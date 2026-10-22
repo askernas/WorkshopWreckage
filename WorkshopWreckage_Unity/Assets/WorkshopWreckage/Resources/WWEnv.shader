@@ -1,6 +1,8 @@
-// Environment material: world-space triplanar albedo (brick, planks, wood,
-// painted metal textures generated at start-up), tint, metallic/smoothness
-// from a mask texture. _WW_UV switches to mesh UVs (label atlases).
+// Environment material: world-space triplanar PBR. Albedo + mask (R metallic,
+// G smoothness, B ambient occlusion when _AO > 0) + optional triplanar normal map
+// (whiteout blend), anti-tiling macro variation (_Macro) for big floors and contact
+// grime near the floor (_Grime). Textures are baked (Resources/EnvTex) or generated
+// at start-up. _WW_UV switches to mesh UVs (label atlases), _WW_OBJECT to object space.
 Shader "WorkshopWreckage/Env"
 {
     Properties
@@ -12,6 +14,11 @@ Shader "WorkshopWreckage/Env"
         _Metallic ("Metallic", Range(0,1)) = 0
         _Smoothness ("Smoothness", Range(0,1)) = 0.3
         _Emission ("Emission", Float) = 0
+        _BumpMap ("Normal map", 2D) = "bump" {}
+        _BumpScale ("Normal strength", Float) = 0
+        _AO ("Mask B is occlusion", Range(0,1)) = 0
+        _Macro ("Anti-tiling variation", Range(0,1)) = 0
+        _Grime ("Contact grime near the floor", Range(0,1)) = 0
     }
 
     HLSLINCLUDE
@@ -23,9 +30,14 @@ Shader "WorkshopWreckage/Env"
         float _Metallic;
         float _Smoothness;
         float _Emission;
+        float _BumpScale;
+        float _AO;
+        float _Macro;
+        float _Grime;
     CBUFFER_END
     TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
     TEXTURE2D(_MaskTex); SAMPLER(sampler_MaskTex);
+    TEXTURE2D(_BumpMap); SAMPLER(sampler_BumpMap);
 
     struct Attributes
     {
@@ -43,6 +55,21 @@ Shader "WorkshopWreckage/Env"
         float4 y = SAMPLE_TEXTURE2D(tex, smp, p.xz * _Scale);
         float4 z = SAMPLE_TEXTURE2D(tex, smp, p.xy * _Scale);
         return x * w.x + y * w.y + z * w.z;
+    }
+
+    // triplanar normal mapping, whiteout blend (Ben Golus)
+    float3 TriNormal(float3 p, float3 n)
+    {
+        float3 w = pow(abs(n), 4);
+        w /= (w.x + w.y + w.z);
+        float3 tx = UnpackNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, p.zy * _Scale), _BumpScale);
+        float3 ty = UnpackNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, p.xz * _Scale), _BumpScale);
+        float3 tz = UnpackNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, p.xy * _Scale), _BumpScale);
+        float3 s = sign(n);
+        tx = float3(tx.xy + n.zy, abs(tx.z) * n.x);
+        ty = float3(ty.xy + n.xz, abs(ty.z) * n.y);
+        tz = float3(tz.xy + n.xy, abs(tz.z) * n.z);
+        return normalize(tx.zyx * w.x + ty.xzy * w.y + tz.xyz * w.z);
     }
     ENDHLSL
 
@@ -111,6 +138,16 @@ Shader "WorkshopWreckage/Env"
                 #else
                     float4 albedo = SampleTri(TEXTURE2D_ARGS(_MainTex, sampler_MainTex), i.positionWS, n);
                     float4 mask = SampleTri(TEXTURE2D_ARGS(_MaskTex, sampler_MaskTex), i.positionWS, n);
+                    if (_Macro > 0)
+                    {
+                        // a second, much larger sample breaks up the repetition of big surfaces
+                        float3 q = i.positionWS * 0.137 + 0.31;
+                        float3 m2 = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, q.xz * _Scale).rgb;
+                        float l = dot(m2, float3(0.3, 0.59, 0.11)) / max(dot(albedo.rgb, float3(0.3, 0.59, 0.11)), 0.05);
+                        albedo.rgb *= lerp(1, clamp(l, 0.65, 1.35), _Macro);
+                    }
+                    if (_BumpScale > 0) n = TriNormal(i.positionWS, n);
+                    if (_Grime > 0) albedo.rgb *= 1 - _Grime * (1 - smoothstep(0.0, 0.55, i.positionWS.y)) * 0.45;
                 #endif
                 InputData d = (InputData)0;
                 d.positionWS = i.positionWS;
@@ -125,7 +162,7 @@ Shader "WorkshopWreckage/Env"
                 s.albedo = albedo.rgb * _BaseColor.rgb;
                 s.metallic = _Metallic * mask.r;
                 s.smoothness = _Smoothness * mask.g;
-                s.occlusion = 1;
+                s.occlusion = lerp(1, mask.b, _AO);
                 s.alpha = 1;
                 s.emission = s.albedo * _Emission;
                 half4 col = UniversalFragmentPBR(d, s);

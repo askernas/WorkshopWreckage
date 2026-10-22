@@ -16,6 +16,9 @@ namespace WorkshopWreckage
         readonly int w, h;
         readonly float[] heights;
         public readonly List<Rect> blockers = new();
+        /// <summary>Spots a part may never rest at (Godot centre, radius): inside closed
+        /// containers. Checked before anything is stamped, so nothing floats on a rejected spot.</summary>
+        public System.Func<Vector3, float, bool> forbidden;
 
         public PileSurface(Rect r, float y, float cellSize = 0.012f)
         {
@@ -125,6 +128,7 @@ namespace WorkshopWreckage
             var bz = x * sr + z * cr;
             var center = new Vector3(at.x, c + rho / Mathf.Cos(pitch), at.y);
             if (center.y > maxY) return null;
+            if (forbidden != null && (forbidden(center, rho) || forbidden(new Vector3(at.x + dir.x * L, center.y, at.y + dir.y * L), rho) || forbidden(new Vector3(at.x - dir.x * L, center.y, at.y - dir.y * L), rho))) return null;
             var perp = new Vector2(-dir.y, dir.x);
             StampDisc(at, L + rho * 0.5f, q =>
             {
@@ -157,6 +161,7 @@ namespace WorkshopWreckage
             var z = Vector3.Cross(x, normal);
             var center = new Vector3(at.x, c + T / normal.y, at.y);
             if (center.y > maxY) return null;
+            if (forbidden != null && forbidden(center, R)) return null;
             StampDisc(at, R, q => { var o = q - at; return c + gx * o.x + gz * o.y + 2 * T; });
             return Shared.Matrix(x * scale, normal * scale, z * scale, center);
         }
@@ -170,6 +175,8 @@ namespace WorkshopWreckage
     {
         public readonly List<string> errors = new();
         public double lastGenerationMs;
+        /// <summary>See PileSurface.forbidden (set by the game from the built storage units).</summary>
+        public System.Func<Vector3, float, bool> forbidden;
         System.Random _rng;
 
         static readonly Dictionary<string, float> MaxHeight = new() { ["heap"] = 1.25f, ["feature"] = 0.9f, ["spill"] = 0.6f, ["cluster"] = 0.45f, ["scatter"] = 0.35f };
@@ -200,7 +207,7 @@ namespace WorkshopWreckage
             var surfaces = new List<PileSurface>();
             foreach (var s in layout.surfaces)
             {
-                var surf = new PileSurface(s.rect, s.y);
+                var surf = new PileSurface(s.rect, s.y) { forbidden = forbidden };
                 if (s.floor) { surf.blockers.AddRange(layout.floorBlockers); surf.blockers.AddRange(layout.keepClear); }
                 foreach (var o in s.obstacles) surf.blockers.Add(o.rect);
                 surfaces.Add(surf);
@@ -230,19 +237,25 @@ namespace WorkshopWreckage
             var caps = Capacities(layout, ordinary);
             var assign = new List<List<int>>();
             for (int p = 0; p < layout.piles.Count; p++) assign.Add(Draw(layout.piles[p], caps[p], pools));
-            foreach (var id in robotIds)
+            // the starter set: one small definition whose destination is low, open and close
+            // to the spawn, all its copies together in plain sight for a quick first box
+            var starter = StarterSet(db, layout, world);
+            if (starter.Count > 0) foreach (var a in assign) a.RemoveAll(starter.Contains);
+            // robot parts: Retrobot's lie alone on open floor near the start; the others on
+            // top of their piles (placed last), so they can be seen, never buried
+            var retro = robotIds.Where(id => world.DefOf(id).craftingPurpose == "robot:retrobot").ToList();
+            foreach (var id in robotIds.Except(retro.Take(layout.retroSpots.Count)))
             {
                 var robot = world.DefOf(id).craftingPurpose.Split(':').ElementAtOrDefault(1) ?? "";
                 var choices = layout.robotPartPiles.TryGetValue(robot, out var ch) && ch.Count > 0 ? ch : new List<int> { 0 };
-                var seq = assign[choices[_rng.Next(choices.Count)]];
-                seq.Insert(_rng.Next(seq.Count / 3, seq.Count + 1), id);
+                assign[choices[_rng.Next(choices.Count)]].Add(id);
             }
             // heaps foundation-first: big parts go down before small ones settle between them
             for (int p = 0; p < layout.piles.Count; p++)
             {
                 var kind = layout.piles[p].kind;
                 if (kind != "heap" && kind != "feature" && kind != "spill") continue;
-                assign[p] = assign[p].Select(id => (k: Radius(world.DefOf(id)) * (kind == "feature" ? 1f : Range(0.55f, 1.45f)), id))
+                assign[p] = assign[p].Select(id => (k: world.DefOf(id).IsRobotPart ? -1f : Radius(world.DefOf(id)) * (kind == "feature" ? 1f : Range(0.55f, 1.45f)), id))
                     .OrderByDescending(t => t.k).Select(t => t.id).ToList();
             }
 
@@ -269,8 +282,42 @@ namespace WorkshopWreckage
                 for (int attempt = 0; attempt < 40 && !ok; attempt++) ok = Place(world, surfaces[0], layout.surfaces[0], floorPile, id, layout);
                 if (!ok) errors.Add($"Could not place instance {id}");
             }
+            // last of all, so nothing lands on top: Retrobot's parts, one per open spot near
+            // the start, and the starter set as a small tidy cluster
+            var starterSite = new PileSite { kind = "cluster", center = layout.starterSpot, sigma = new Vector2(0.09f, 0.09f), maxHeight = 0.2f };
+            foreach (var id in starter)
+                if (!Place(world, surfaces[0], layout.surfaces[0], starterSite, id, layout) && !PlaceAnywhere(world, surfaces[0], layout, floorPile, id))
+                    errors.Add($"Could not place instance {id}");
+            starterIds = starter;
+            var retroPlaced = retro.Take(layout.retroSpots.Count).ToList();
+            for (int k = 0; k < retroPlaced.Count; k++)
+            {
+                var site = new PileSite { kind = "feature", center = layout.retroSpots[k], sigma = new Vector2(0.05f, 0.05f) };
+                if (!Place(world, surfaces[0], layout.surfaces[0], site, retroPlaced[k], layout, true) && !PlaceAnywhere(world, surfaces[0], layout, floorPile, retroPlaced[k]))
+                    errors.Add($"Could not place instance {retroPlaced[k]}");
+            }
             lastGenerationMs = sw.Elapsed.TotalMilliseconds;
             return errors.Count == 0 ? world : null;
+        }
+
+        bool PlaceAnywhere(ItemWorld world, PileSurface floor, WorkshopLayout layout, PileSite site, int id)
+        {
+            for (int attempt = 0; attempt < 40; attempt++) if (Place(world, floor, layout.surfaces[0], site, id, layout)) return true;
+            return false;
+        }
+
+        /// <summary>Instance ids of the starter set (empty if none fits).</summary>
+        public List<int> starterIds = new();
+
+        static List<int> StarterSet(ItemDatabase db, WorkshopLayout layout, ItemWorld world)
+        {
+            var sp = new Vector2(layout.spawn.x, layout.spawn.z);
+            var best = db.order.Select(db.Get)
+                .Where(d => !d.IsRobotPart && d.spawnCount >= 3 && d.spawnCount <= 6 && world.TotalOf(d.id) == d.spawnCount && db.boxes.TryGetValue(d.storageBox, out var b)
+                            && db.IsOpenKind(d.storageBox) && Json.Num(b, "elevation_m") <= 1.2 && layout.units.ContainsKey(Json.Str(b, "unit")) && Radius(d) < 0.15f)
+                .OrderBy(d => { var u = WorkshopLayout.V(layout.units[Json.Str(db.boxes[d.storageBox], "unit")]["pos"]); return Vector2.Distance(new Vector2(u.x, u.z), sp); })
+                .FirstOrDefault();
+            return best == null ? new List<int>() : world.IdsOf(best.id).ToList();
         }
 
         static float Radius(ItemDefinition d)

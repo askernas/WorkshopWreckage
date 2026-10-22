@@ -53,9 +53,42 @@ namespace WorkshopWreckage
             return m;
         }
 
+        // --- baked PBR sets (tools/texgen/bake_textures.py -> Resources/EnvTex) ----------
+
+        /// <summary>A baked texture set: albedo, normal and mask (R metallic, G smoothness,
+        /// B occlusion). Null if the set is missing (then the generated fallback is used).</summary>
+        static Material Baked(string key, string set, float tileMetres, float bump, Color tint, float macro = 0, float grime = 0, float smooth = 1)
+        {
+            if (_cache.TryGetValue(key, out var m)) return m;
+            var albedo = Resources.Load<Texture2D>("EnvTex/" + set + "_albedo");
+            if (albedo == null) return null;
+            m = Make(key, albedo, Resources.Load<Texture2D>("EnvTex/" + set + "_mask"), 1f / tileMetres, 0, smooth, tint);
+            var nrm = Resources.Load<Texture2D>("EnvTex/" + set + "_normal");
+            if (nrm != null) { m.SetTexture("_BumpMap", nrm); m.SetFloat("_BumpScale", bump); }
+            m.SetFloat("_AO", 1);
+            m.SetFloat("_Macro", macro);
+            m.SetFloat("_Grime", grime);
+            return m;
+        }
+
+        /// <summary>Old workshop concrete slab (after resources/concrete floor.jpg), 4 m tile with anti-tiling.</summary>
+        public static Material Concrete() => Baked("concrete", "concrete", 4f, 1.0f, new Color(0.84f, 0.84f, 0.85f), 0.8f) ?? Planks();
+
+        /// <summary>Kraft cardboard, tinted per box.</summary>
+        public static Material Cardboard(Color tint)
+        {
+            var q = new Color(Mathf.Round(tint.r * 20) / 20, Mathf.Round(tint.g * 20) / 20, Mathf.Round(tint.b * 20) / 20);
+            return Baked("cardboard" + ColorUtility.ToHtmlStringRGB(q), "cardboard", 0.5f, 0.8f, new Color(q.r / 0.62f, q.g / 0.47f, q.b / 0.3f), 0, 0, 1) ?? Plain(tint, 0, 0.1f);
+        }
+
+        /// <summary>Rough-sawn crate slats.</summary>
+        public static Material CrateWood(Color tint) => Baked("crate" + ColorUtility.ToHtmlStringRGB(tint), "cratewood", 1f, 1.0f, tint) ?? Wood(tint);
+
         // --- brick: 2 m tile (texture u,v in [0,1) -> metres * 2) -----------------
         public static Material Brick()
         {
+            var baked = Baked("brick_baked", "brick", 2.025f, 1.4f, Color.white, 0.35f, 1f);
+            if (baked != null) return baked;
             if (_cache.TryGetValue("brick", out var m)) return m;
             var brick = new Color(0.50f, 0.25f, 0.16f);
             var mortar = new Color(0.58f, 0.52f, 0.44f);
@@ -115,6 +148,8 @@ namespace WorkshopWreckage
         static Texture2D _wood;
         public static Material Wood(Color tint)
         {
+            var baked = Baked("woodb" + ColorUtility.ToHtmlStringRGB(tint), "woodgrain", 1f, 0.8f, tint, 0, 0, 0.9f);
+            if (baked != null) return baked;
             _wood ??= Tex(512, "wood", (u, v) =>
             {
                 float g = Noise(u * 2f, v * 24f, 3);
@@ -187,7 +222,7 @@ namespace WorkshopWreckage
             _paintMask ??= Tex(512, "paint_mask", (u, v) =>
             {
                 float ch = Chips(u, v);
-                return new Color(Mathf.Lerp(0.15f, 0.85f, ch), Mathf.Lerp(0.45f, 0.55f, ch), 0, 1);
+                return new Color(Mathf.Lerp(0.04f, 0.5f, ch), Mathf.Lerp(0.45f, 0.55f, ch), 0, 1);   // paint is not metal; only bare chips are
             }, true);
             return Make(key, tex, _paintMask, 2f, 1, 1, Color.white);
         }

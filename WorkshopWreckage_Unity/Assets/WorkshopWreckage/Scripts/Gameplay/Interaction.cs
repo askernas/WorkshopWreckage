@@ -126,8 +126,7 @@ namespace WorkshopWreckage
             {
                 if (((UnityEngine.InputSystem.Controls.KeyControl)kb[(Key)((int)Key.Digit1 + k)]).wasPressedThisFrame)
                 {
-                    var s = Inv.Stacks();
-                    if (k < s.Count) Inv.Select(s[k].defId);
+                    Inv.SelectSlot(k);
                 }
             }
         }
@@ -164,6 +163,7 @@ namespace WorkshopWreckage
                 var st = hit.Value.collider.GetComponent<StorageTarget>();
                 if (st != null && st.station) { targetType = "station"; targetPoint = hit.Value.point; }
                 else if (st != null && st.destId == "TRAY") targetType = "tray";
+                else if (st != null && st.destId == "EXIT") targetType = "exit";
                 else if (st != null) { targetType = "dest"; targetDest = st.destId; targetUnit = st.unit; }
             }
             ShowHover();
@@ -252,7 +252,8 @@ namespace WorkshopWreckage
                 case "dest":
                 {
                     var title = game.db.BoxLabel(targetDest) + "  ·  " + AssignedName(targetDest);
-                    var sub = $"{Storage.Stored(targetDest).Count} / {game.db.BoxCapacity(targetDest)} stored";
+                    int strays = game.StraysIn(targetDest).Count;
+                    var sub = $"{Storage.Stored(targetDest).Count} / {game.db.BoxCapacity(targetDest)} stored" + (strays > 0 ? $"  ·  {strays} stray part{(strays == 1 ? "" : "s")} in the way" : "");
                     if (held < 0) return new TargetInfo { title = title, sub = sub, hint = "" };
                     var r = Storage.Check(targetDest, held);
                     if (r == StorageSystem.Result.Ok)
@@ -268,6 +269,8 @@ namespace WorkshopWreckage
                     return new TargetInfo { title = "Sorting Tray", sub = $"{game.TrayCount} parts waiting · the robots sort what you put here",
                         hint = n > 0 ? $"[LMB] Put the held part in    [G] Put all {n} in" : "Drop any parts here for the robots", tone = n > 0 ? 1 : 0 };
                 }
+                case "exit":
+                    return new TargetInfo { title = "Workshop door", sub = "Out to the yard — leaving ends the game", hint = "[LMB] Leave the workshop", tone = 0 };
                 case "station":
                 {
                     var wb = game.workbench;
@@ -308,6 +311,9 @@ namespace WorkshopWreckage
                     break;
                 case "tray":
                     if (Inv.HeldId() >= 0) DropInTray(Inv.HeldId());
+                    break;
+                case "exit":
+                    game.SetState("exit");
                     break;
             }
         }
@@ -375,9 +381,13 @@ namespace WorkshopWreckage
             var def = World.DefOf(id);
             if (def.IsRobotPart) { if (feedback) Feedback?.Invoke("Robot parts go to the Robot Workbench — carry them there yourself", false); return false; }
             var r = game.TrayRectU;
-            var p = new Vector3(UnityEngine.Random.Range(r.xMin + 0.12f, r.xMax - 0.12f), 0, UnityEngine.Random.Range(r.yMin + 0.12f, r.yMax - 0.12f));
+            var p = new Vector3(UnityEngine.Random.Range(r.xMin + 0.1f, r.xMax - 0.1f), 0, UnityEngine.Random.Range(r.yMin + 0.1f, r.yMax - 0.1f));
             var e = ItemDatabase.Extents(def);
-            var m = Matrix4x4.TRS(new Vector3(p.x, game.debris.At(p) + 0.02f + e[2] * 0.5f, p.z),
+            // it lands on the tray's bottom, or on top of the parts already lying there
+            float rest = WorkshopLayout.TrayFloor;
+            foreach (var o in game.index.QuerySphere(p + Vector3.up * 0.1f, Mathf.Max(e[0], e[1]) * 0.5f + 0.05f))
+                if (World.instances[o].state == ItemState.InWorld && !busy.Contains(o)) rest = Mathf.Max(rest, game.index.WorldBounds(o).max.y);
+            var m = Matrix4x4.TRS(new Vector3(p.x, rest + e[2] * 0.5f + 0.003f, p.z),
                 Quaternion.Euler(UnityEngine.Random.Range(-10f, 10f), UnityEngine.Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
             var from = game.held.HandWorld();
             Inv.Remove(id);
@@ -578,40 +588,72 @@ namespace WorkshopWreckage
             done?.Invoke();
         }
 
+        /// <summary>Nothing floats: after a part is taken away, every part that rested on it
+        /// falls until it rests on the highest real support under its footprint (another
+        /// part, a shelf deck, bench, pallet or the floor); parts on those fall in turn.</summary>
         public void SettleNeighbours(Matrix4x4 removed, ItemDefinition removedDef)
         {
-            float rRemoved = HeldView.Radius(removedDef);
-            float drop = ItemDatabase.Extents(removedDef)[2] * 0.8f;
             var ro = (Vector3)removed.GetColumn(3);
-            int settled = 0;
-            foreach (var nid in game.index.QuerySphere(ro, rRemoved * 1.6f + 0.05f))
+            float r = HeldView.Radius(removedDef);
+            var queue = new Queue<(int id, int depth)>();
+            var drops = new Dictionary<int, float>();
+            foreach (var nid in game.index.QuerySphere(ro, r + 0.3f))
+                if (World.instances[nid].Position.y > ro.y - 0.01f) queue.Enqueue((nid, 0));
+            int settled = 0, considered = 0;
+            for (int guard = 0; queue.Count > 0 && guard < 400 && settled < 120; guard++)
             {
-                if (busy.Contains(nid)) continue;
-                var n = World.instances[nid];
-                float dy = n.Position.y - ro.y;
-                if (dy <= 0.004f) continue;
-                float hd = new Vector2(n.Position.x - ro.x, n.Position.z - ro.z).magnitude;
-                float reach = rRemoved + HeldView.Radius(World.DefOf(nid));
-                if (hd > reach * 0.85f) continue;
-                float amount = Mathf.Min(drop * (1 - hd / reach), dy);
-                float floorY = ItemDatabase.Extents(World.DefOf(nid))[2] * 0.5f;
-                float targetY = Mathf.Max(floorY, n.Position.y - amount);
-                if (targetY >= n.Position.y - 0.002f) continue;
-                busy.Add(nid);
+                var (id, depth) = queue.Dequeue();
+                if (drops.ContainsKey(id) || busy.Contains(id)) continue;
+                var inst = World.instances[id];
+                if (inst.state != ItemState.InWorld) continue;
+                var b = game.index.WorldBounds(id);
+                float support = SupportUnder(id, b, drops);
+                float dy = b.min.y - support;
+                considered++;
+                if (dy < 0.012f) continue;
+                drops[id] = dy;
+                busy.Add(id);
                 settled++;
-                StartCoroutine(Settle(nid, n.transform, targetY, 0.22f + UnityEngine.Random.value * 0.08f));
+                StartCoroutine(Settle(id, inst.transform, inst.Position.y - dy, Mathf.Clamp(Mathf.Sqrt(dy) * 0.45f, 0.12f, 0.45f), depth * 0.05f));
+                // whatever rested on this part comes down after it
+                foreach (var m in game.index.QuerySphere(b.center + Vector3.up * b.extents.y, Mathf.Max(b.extents.x, b.extents.z) + 0.2f))
+                    if (m != id && !drops.ContainsKey(m) && World.instances[m].Position.y > inst.Position.y) queue.Enqueue((m, depth + 1));
             }
             if (settled > 0) Sfx.Play("settle", ro, -10);
+            lastSettleInfo = $"{considered} checked, {settled} fell";
         }
 
-        IEnumerator Settle(int id, Matrix4x4 start, float targetY, float dur)
+        public string lastSettleInfo = "";
+
+        /// <summary>Height the part would rest on: the furniture surface or floor below it,
+        /// or the top of a part under its footprint (parts already falling count at their
+        /// new height; a lower neighbour it already leans into holds it where it is).</summary>
+        public float SupportUnder(int id, Bounds b, Dictionary<int, float> drops)
         {
+            float s = game.SurfaceBelow(b.center, b.min.y + 0.03f);
+            var core = new Rect(b.center.x - b.extents.x * 0.6f, b.center.z - b.extents.z * 0.6f, b.extents.x * 1.2f, b.extents.z * 1.2f);
+            foreach (var m in game.index.QuerySphere(new Vector3(b.center.x, b.min.y - 0.1f, b.center.z), Mathf.Max(b.extents.x, b.extents.z) + 0.25f))
+            {
+                if (m == id || World.instances[m].state != ItemState.InWorld) continue;
+                var mb = game.index.WorldBounds(m);
+                if (drops.TryGetValue(m, out var d)) mb.center -= Vector3.up * d;
+                else if (busy.Contains(m)) continue;
+                if (mb.center.y >= b.center.y - 0.005f) continue;   // beside or above, not under
+                if (!core.Overlaps(new Rect(mb.min.x, mb.min.z, mb.size.x, mb.size.z))) continue;
+                s = Mathf.Max(s, Mathf.Min(mb.max.y, b.min.y));
+            }
+            return s;
+        }
+
+        IEnumerator Settle(int id, Matrix4x4 start, float targetY, float dur, float delay = 0)
+        {
+            if (delay > 0) yield return new WaitForSeconds(delay);
             float t = 0;
             float y0 = start.m13;
             while (t < 1)
             {
                 t = Mathf.Min(1, t + Time.deltaTime / dur);
-                var m = start;
+                var m = World.instances[id].state == ItemState.InWorld ? World.instances[id].transform : start;
                 m.m13 = Mathf.Lerp(y0, targetY, t * t);
                 World.SetTransform(id, m);
                 yield return null;

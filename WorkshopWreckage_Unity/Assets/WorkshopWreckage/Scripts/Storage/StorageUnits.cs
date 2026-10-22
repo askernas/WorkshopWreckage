@@ -89,7 +89,8 @@ namespace WorkshopWreckage
             ["Gears"] = new Color(0.25f, 0.42f, 0.23f), ["Springs"] = new Color(0.18f, 0.44f, 0.48f), ["Bearings"] = new Color(0.42f, 0.44f, 0.46f),
             ["Shafts & Pins"] = new Color(0.55f, 0.36f, 0.17f), ["Electronics"] = new Color(0.29f, 0.31f, 0.5f), ["Specialty Parts"] = new Color(0.48f, 0.18f, 0.29f),
         };
-        static readonly Color Upright = new(0.85f, 0.42f, 0.1f), Beam = new(0.16f, 0.3f, 0.55f), Cardboard = new(0.62f, 0.45f, 0.28f);
+        // painted steel shelving in off-white and beige (playtest: no wooden shelves)
+        static readonly Color Upright = new(0.84f, 0.82f, 0.75f), Beam = new(0.76f, 0.71f, 0.6f), Cardboard = new(0.62f, 0.45f, 0.28f);
         static readonly Color[] BinColors = { new(0.18f, 0.35f, 0.62f), new(0.55f, 0.12f, 0.1f), new(0.75f, 0.55f, 0.15f), new(0.32f, 0.36f, 0.38f) };
 
         public Dictionary<string, object> unit;
@@ -224,7 +225,7 @@ namespace WorkshopWreckage
             var levels = Json.Arr(unit["levels"]);
             var upright = EnvMaterials.Metal(Upright, 0.25f);
             var beam = EnvMaterials.Metal(Beam, 0.3f);
-            var deck = EnvMaterials.Wood(new Color(0.55f, 0.4f, 0.26f));
+            var deck = EnvMaterials.Metal(new Color(0.87f, 0.85f, 0.79f), 0.15f);
             foreach (var sx in new[] { -1f, 1f })
             {
                 foreach (var sz in new[] { -1f, 1f })
@@ -269,13 +270,13 @@ namespace WorkshopWreckage
         {
             float shade = new[] { 0.86f, 0.94f, 1f, 1.08f }[rng.Next(4)];
             var tint = Cardboard * shade;
-            var m = EnvMaterials.Plain(new Color(tint.r, tint.g, tint.b), 0, 0.1f);
+            var m = EnvMaterials.Cardboard(new Color(tint.r, tint.g, tint.b));
             float wall = 0.008f;
             b.Box(o + new Vector3(0, wall / 2, 0), new Vector3(inner.x + 2 * wall, wall, inner.z + 2 * wall), m);
             foreach (var sx in new[] { -1f, 1f }) b.Box(o + new Vector3(sx * (inner.x / 2 + wall / 2), inner.y / 2, 0), new Vector3(wall, inner.y, inner.z + 2 * wall), m);
             b.Box(o + new Vector3(0, inner.y / 2, -inner.z / 2 - wall / 2), new Vector3(inner.x, inner.y, wall), m);
             b.Box(o + new Vector3(0, inner.y / 2, inner.z / 2 + wall / 2), new Vector3(inner.x, inner.y, wall), m);
-            var flap = EnvMaterials.Plain(new Color(tint.r * 0.9f, tint.g * 0.9f, tint.b * 0.9f), 0, 0.1f);
+            var flap = EnvMaterials.Cardboard(new Color(tint.r * 0.9f, tint.g * 0.9f, tint.b * 0.9f));
             b.Box(o + new Vector3(0, inner.y + 0.04f, -inner.z / 2 - 0.03f), new Vector3(inner.x, 0.1f, 0.006f), flap, false, R(Vector3.right, -0.5f));
             b.Box(o + new Vector3(0, inner.y / 2, inner.z / 2 + wall + 0.001f), new Vector3(0.05f, inner.y, 0.002f), EnvMaterials.Plain(new Color(0.75f, 0.62f, 0.42f), 0, 0.6f));
         }
@@ -293,7 +294,7 @@ namespace WorkshopWreckage
 
         void Crate(Batch b, Vector3 o, Vector3 inner)
         {
-            var m = EnvMaterials.Wood(new Color(0.62f, 0.46f, 0.28f));
+            var m = EnvMaterials.CrateWood(Color.white);
             b.Box(o + new Vector3(0, 0.012f, 0), new Vector3(inner.x + 0.04f, 0.025f, inner.z + 0.04f), m);
             for (int k = 0; k < 3; k++)
             {

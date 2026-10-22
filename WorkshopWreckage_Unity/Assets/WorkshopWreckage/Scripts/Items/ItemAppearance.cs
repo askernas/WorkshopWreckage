@@ -10,14 +10,17 @@ namespace WorkshopWreckage
 
         static readonly Dictionary<string, P> Materials = new()
         {
-            ["steel"] = new P(new Color(0.50f, 0.51f, 0.53f), 1.0f, 0.4f, 0.35f),
-            ["stainless"] = new P(new Color(0.62f, 0.63f, 0.65f), 1.0f, 0.28f, 0.15f),
-            ["brass"] = new P(new Color(0.86f, 0.66f, 0.30f), 1.0f, 0.30f, 0.40f),
-            ["copper"] = new P(new Color(0.88f, 0.50f, 0.33f), 1.0f, 0.33f, 0.45f),
-            ["aluminium"] = new P(new Color(0.7f, 0.71f, 0.73f), 1.0f, 0.45f, 0.20f),
-            ["painted"] = new P(new Color(0.7f, 0.7f, 0.7f), 0.15f, 0.55f, 0.55f),
-            ["oxidized"] = new P(new Color(0.46f, 0.27f, 0.15f), 0.35f, 0.88f, 0.90f),
-            ["worn"] = new P(new Color(0.30f, 0.30f, 0.32f), 0.90f, 0.58f, 0.70f),
+            // workshop parts are oily and worn: metals are only partly mirror-like, so a part on the
+            // floor shows the light falling on it instead of reflecting the dark room above
+            // without environment reflections metals would look dark: they are mostly diffuse here
+            ["steel"] = new P(new Color(0.58f, 0.59f, 0.6f), 0.3f, 0.5f, 0.5f),
+            ["stainless"] = new P(new Color(0.7f, 0.71f, 0.73f), 0.35f, 0.38f, 0.15f),
+            ["brass"] = new P(new Color(0.86f, 0.66f, 0.30f), 0.35f, 0.4f, 0.40f),
+            ["copper"] = new P(new Color(0.88f, 0.50f, 0.33f), 0.35f, 0.42f, 0.45f),
+            ["aluminium"] = new P(new Color(0.75f, 0.76f, 0.78f), 0.3f, 0.5f, 0.20f),
+            ["painted"] = new P(new Color(0.7f, 0.7f, 0.7f), 0.05f, 0.5f, 0.6f),
+            ["oxidized"] = new P(new Color(0.52f, 0.26f, 0.11f), 0.1f, 0.9f, 1.0f),
+            ["worn"] = new P(new Color(0.42f, 0.42f, 0.43f), 0.25f, 0.65f, 0.70f),
             ["electronic"] = new P(new Color(1, 1, 1), 0.0f, 0.45f, 0.15f),
         };
 
@@ -31,7 +34,7 @@ namespace WorkshopWreckage
             switch (def.finish)
             {
                 case "zinc": p.albedo = new Color(0.6f, 0.64f, 0.68f); p.roughness = 0.30f; break;
-                case "black_oxide": p.albedo = new Color(0.10f, 0.10f, 0.11f); p.metallic = 0.85f; p.roughness = 0.45f; break;
+                case "black_oxide": p.albedo = new Color(0.2f, 0.2f, 0.21f); p.metallic = 0.25f; p.roughness = 0.5f; break;
                 case "polished": p.roughness = Mathf.Max(0.18f, p.roughness - 0.15f); p.wear *= 0.3f; break;
             }
             if (def.subcategory == "led") p.roughness = 0.15f;

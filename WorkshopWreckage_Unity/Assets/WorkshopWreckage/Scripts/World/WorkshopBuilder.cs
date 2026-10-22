@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -21,7 +22,10 @@ namespace WorkshopWreckage
             BuildRoom();
             foreach (var f in l.furniture) BuildFurniture(f);
             foreach (var p in l.lamps) BuildLamp(p);
+            for (int k = 0; k < l.fixtures.Count; k++) BuildFixture(l.fixtures[k], k);
             BuildLighting();
+            BuildShafts();
+            BuildTrayLight();
         }
 
         Transform Group(string name, Vector3 posG, float rotG = 0)
@@ -45,7 +49,7 @@ namespace WorkshopWreckage
             var c = (lo + hi) * 0.5f;
             var room = Group("Room", Vector3.zero);
             var b = new Batch();
-            b.Box(new Vector3(c.x, -0.05f, c.z), new Vector3(size.x + 1, 0.1f, size.z + 1), EnvMaterials.Planks(), true);
+            b.Box(new Vector3(c.x, -0.05f, c.z), new Vector3(size.x + 1, 0.1f, size.z + 1), EnvMaterials.Concrete(), true);
             var brick = EnvMaterials.Brick();
             float t = 0.3f;
             b.Box(new Vector3(c.x, size.y / 2, lo.z - t / 2), new Vector3(size.x + 2 * t, size.y, t), brick, true);
@@ -74,11 +78,11 @@ namespace WorkshopWreckage
                 for (int k = 0; k < 7; k++)
                     b.Box(new Vector3(x, y0 + (y1 - y0) * k / 6f, wz), new Vector3(0.08f, 0.05f, ww), frame);
             }
-            b.Box(new Vector3(c.x, hi.y + 0.05f, c.z), new Vector3(size.x + 1, 0.1f, size.z + 1), EnvMaterials.Wood(new Color(0.3f, 0.2f, 0.13f)), true);
+            b.Box(new Vector3(c.x, hi.y + 0.05f, c.z), new Vector3(size.x + 1, 0.1f, size.z + 1), EnvMaterials.Plain(new Color(0.72f, 0.72f, 0.7f), 0, 0.15f), true);   // ceiling painted light grey
             for (int k = 0; k < 7; k++)
             {
                 float bz = lo.z + 0.6f + k * (size.z - 1.2f) / 6f;
-                b.Box(new Vector3(c.x, hi.y - 0.18f, bz), new Vector3(size.x, 0.32f, 0.22f), EnvMaterials.Wood(new Color(0.33f, 0.21f, 0.12f)));
+                b.Box(new Vector3(c.x, hi.y - 0.18f, bz), new Vector3(size.x, 0.32f, 0.22f), EnvMaterials.Plain(new Color(0.66f, 0.66f, 0.64f), 0, 0.15f));
             }
             var skirt = EnvMaterials.Wood(new Color(0.22f, 0.14f, 0.09f));
             b.Box(new Vector3(c.x, 0.08f, lo.z + 0.015f), new Vector3(size.x, 0.16f, 0.03f), skirt);
@@ -108,7 +112,7 @@ namespace WorkshopWreckage
                     break;
                 case "tipped_crate":
                 {
-                    var m = EnvMaterials.Wood(new Color(0.55f, 0.4f, 0.24f));
+                    var m = EnvMaterials.CrateWood(new Color(1f, 0.95f, 0.9f));
                     var tilt = R(Vector3.right, 1.75f);
                     b.Box(new Vector3(0, size.z / 2, 0), new Vector3(size.x, size.y, size.z), m, true, tilt);
                     break;
@@ -117,7 +121,7 @@ namespace WorkshopWreckage
                     b.Box(new Vector3(0, size.y / 2, 0), new Vector3(size.x, size.y, size.z), EnvMaterials.Metal(new Color(0.18f, 0.35f, 0.62f), 0.3f), true, R(Vector3.forward, 1.5f));
                     break;
                 case "tipped_box":
-                    b.Box(new Vector3(0, size.x / 2, 0), new Vector3(size.x, size.y, size.z), EnvMaterials.Plain(new Color(0.62f, 0.45f, 0.28f), 0, 0.1f), true, R(Vector3.forward, 1.57f));
+                    b.Box(new Vector3(0, size.x / 2, 0), new Vector3(size.x, size.y, size.z), EnvMaterials.Cardboard(new Color(0.62f, 0.45f, 0.28f)), true, R(Vector3.forward, 1.57f));
                     break;
                 case "fallen_drawer":
                 {
@@ -161,7 +165,7 @@ namespace WorkshopWreckage
                 {
                     var wood = EnvMaterials.Wood(new Color(0.55f, 0.4f, 0.24f));
                     var dark = EnvMaterials.Wood(new Color(0.35f, 0.24f, 0.14f));
-                    b.Box(new Vector3(0, 0.01f, 0), new Vector3(size.x, 0.02f, size.z), dark);
+                    b.Box(new Vector3(0, WorkshopLayout.TrayFloor / 2, 0), new Vector3(size.x, WorkshopLayout.TrayFloor, size.z), dark, true);
                     foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(sx * size.x / 2, size.y / 2, 0), new Vector3(0.04f, size.y, size.z + 0.04f), wood, true);
                     foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(0, size.y / 2, sz * size.z / 2), new Vector3(size.x, size.y, 0.04f), wood, true);
                     b.Box(new Vector3(-size.x / 2 + 0.05f, 0.45f, size.z / 2 + 0.03f), new Vector3(0.04f, 0.9f, 0.04f), dark);   // sign post
@@ -170,10 +174,7 @@ namespace WorkshopWreckage
                     b.Quad(new Vector3(-size.x / 2 + 0.3f, 0.82f, size.z / 2 + 0.015f), new Vector2(0.5f, 0.125f), EnvMaterials.Atlas(sign), new Rect(0, 0, 1, 1), R(Vector3.up, Mathf.PI));
                     break;
                 }
-                case "door":
-                    b.Box(new Vector3(0, size.y / 2, 0), new Vector3(size.x, size.y, 0.06f), EnvMaterials.Wood(new Color(0.35f, 0.22f, 0.13f)));
-                    b.Box(new Vector3(0, size.y + 0.05f, 0), new Vector3(size.x + 0.2f, 0.1f, 0.1f), EnvMaterials.Wood(new Color(0.25f, 0.16f, 0.1f)));
-                    break;
+                case "door": Door(g, b, size); break;
                 case "sign": Sign(g, b, size); break;
                 case "clock": Clock(b, size); break;
                 case "blueprint":
@@ -357,6 +358,180 @@ namespace WorkshopWreckage
             lamps.Add(light);
         }
 
+        /// <summary>The entry door (south wall): a battered green steel door in a dark frame
+        /// with a wired-glass window, push bar and kick plate, and a glowing EXIT sign above.
+        /// Aiming at it offers to leave the workshop (quit, with a prompt).</summary>
+        void Door(Transform g, Batch b, Vector3 size)
+        {
+            var frame = EnvMaterials.Metal(new Color(0.16f, 0.17f, 0.17f), 0.25f);
+            var leaf = EnvMaterials.Metal(new Color(0.22f, 0.36f, 0.28f), 0.55f);
+            var steel = EnvMaterials.Plain(new Color(0.6f, 0.6f, 0.58f), 1, 0.6f);
+            var glass = EnvMaterials.Plain(new Color(0.55f, 0.62f, 0.6f), 0.2f, 0.92f, 0.25f);
+            float w = size.x, h = size.y;
+            b.Box(new Vector3(-w / 2 - 0.05f, h / 2 + 0.03f, 0), new Vector3(0.1f, h + 0.06f, 0.16f), frame);
+            b.Box(new Vector3(w / 2 + 0.05f, h / 2 + 0.03f, 0), new Vector3(0.1f, h + 0.06f, 0.16f), frame);
+            b.Box(new Vector3(0, h + 0.06f, 0), new Vector3(w + 0.2f, 0.12f, 0.16f), frame);
+            b.Box(new Vector3(0, h / 2, 0.01f), new Vector3(w, h, 0.05f), leaf);
+            foreach (var y in new[] { h * 0.28f, h * 0.72f })   // pressed panels
+                b.Box(new Vector3(0, y, -0.018f), new Vector3(w * 0.78f, h * 0.36f, 0.01f), leaf);
+            b.Box(new Vector3(0, h * 0.74f, -0.024f), new Vector3(0.36f, 0.5f, 0.01f), frame);
+            b.Box(new Vector3(0, h * 0.74f, -0.03f), new Vector3(0.3f, 0.44f, 0.004f), glass);
+            for (int k = 0; k < 5; k++) b.Box(new Vector3(0, h * 0.74f - 0.2f + k * 0.1f, -0.033f), new Vector3(0.3f, 0.003f, 0.002f), steel);   // wire mesh
+            b.Box(new Vector3(0, 0.12f, -0.02f), new Vector3(w * 0.92f, 0.22f, 0.006f), steel);   // kick plate
+            b.Box(new Vector3(0, 1.0f, -0.07f), new Vector3(w * 0.8f, 0.05f, 0.05f), steel);       // push bar
+            foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(sx * w * 0.38f, 1.0f, -0.045f), new Vector3(0.06f, 0.09f, 0.05f), frame);
+            foreach (var y in new[] { 0.3f, h - 0.3f }) b.Box(new Vector3(-w / 2 + 0.02f, y, -0.02f), new Vector3(0.05f, 0.14f, 0.03f), steel);   // hinges
+            // EXIT sign
+            var sign = TextAtlas.RenderSingle("EXIT", 256, 96, new Color(0.05f, 0.35f, 0.12f), new Color(0.8f, 1f, 0.85f), 64, true);
+            b.Box(new Vector3(0, h + 0.32f, -0.06f), new Vector3(0.46f, 0.2f, 0.08f), frame);
+            var sm = EnvMaterials.Atlas(sign);
+            sm.SetFloat("_Emission", 0.8f);
+            b.Quad(new Vector3(0, h + 0.32f, -0.101f), new Vector2(0.42f, 0.16f), sm, new Rect(0, 0, 1, 1));
+            var lgo = new GameObject("ExitLight");
+            lgo.transform.SetParent(g, false);
+            lgo.transform.localPosition = G(0, h + 0.2f, -0.3f);
+            var l = lgo.AddComponent<Light>();
+            l.type = LightType.Point; l.color = new Color(0.35f, 1f, 0.5f); l.intensity = 0.6f; l.range = 2.2f;
+            var t = new GameObject("Target_Exit") { layer = Layers.Target };
+            t.transform.SetParent(g, false);
+            t.transform.localPosition = G(0, h / 2, -0.1f);
+            t.AddComponent<BoxCollider>().size = new Vector3(w, h, 0.2f);
+            t.AddComponent<StorageTarget>().destId = "EXIT";
+        }
+
+        /// <summary>An industrial twin-tube fluorescent fixture on two chains: emissive tubes,
+        /// white reflector wings, and a wide downward spot light.</summary>
+        void BuildFixture(Vector3 pG, int k)
+        {
+            var g = Group("Fixture", pG);
+            var b = new Batch();
+            var housing = EnvMaterials.Metal(new Color(0.3f, 0.34f, 0.31f), 0.2f);
+            var white = EnvMaterials.Plain(new Color(0.86f, 0.86f, 0.82f), 0.1f, 0.55f);
+            var tube = EnvMaterials.Plain(new Color(1f, 0.97f, 0.9f), 0, 0.5f, 6f);
+            var chain = EnvMaterials.Plain(new Color(0.2f, 0.2f, 0.2f), 0.9f, 0.5f);
+            const float L = 1.5f;
+            b.Box(new Vector3(0, 0.06f, 0), new Vector3(L, 0.06f, 0.24f), housing);
+            foreach (var s in new[] { -1f, 1f })
+            {
+                b.Box(new Vector3(0, 0.01f, s * 0.15f), new Vector3(L, 0.006f, 0.12f), white, false, R(Vector3.right, s * 0.55f));
+                b.Box(new Vector3(s * (L / 2 - 0.02f), 0.01f, 0), new Vector3(0.03f, 0.07f, 0.2f), housing);   // end caps
+            }
+            foreach (var z in new[] { -0.045f, 0.045f }) b.Cylinder(new Vector3(0, -0.005f, z), 0.016f, L - 0.08f, tube, R(Vector3.forward, Mathf.PI / 2), 12);
+            float hang = layout.roomMax.y - pG.y - 0.09f;
+            foreach (var x in new[] { -0.55f, 0.55f }) b.Cylinder(new Vector3(x, 0.09f + hang / 2, 0), 0.006f, hang, chain, null, 5);
+            b.Build(g, "Fixture");
+            var lgo = new GameObject("Light");
+            lgo.transform.SetParent(g, false);
+            lgo.transform.localPosition = new Vector3(0, -0.06f, 0);
+            lgo.transform.localRotation = Quaternion.Euler(90, 0, 0);
+            var light = lgo.AddComponent<Light>();
+            light.type = LightType.Spot;
+            light.spotAngle = 150;
+            light.innerSpotAngle = 70;
+            light.range = 10f;
+            light.intensity = 10f;
+            light.color = new Color(1f, 0.95f, 0.86f);
+            // only a few fixtures cast shadows (performance: shadowed spot lights are the expensive part)
+            light.shadows = k < 3 ? LightShadows.Soft : LightShadows.None;
+            light.shadowStrength = 0.7f;
+            lamps.Add(light);
+        }
+
+        /// <summary>A wall-mounted floodlight on the south wall shining down onto the sorting tray.</summary>
+        void BuildTrayLight()
+        {
+            var t = layout.trayRect;
+            var pG = new Vector3(t.center.x, 2.7f, layout.roomMax.z - 0.12f);
+            var g = Group("TrayFlood", pG);
+            var b = new Batch();
+            var housing = EnvMaterials.Metal(new Color(0.18f, 0.19f, 0.2f), 0.2f);
+            b.Box(new Vector3(0, 0, 0.06f), new Vector3(0.08f, 0.08f, 0.12f), housing);                         // wall bracket
+            b.Box(new Vector3(0, -0.05f, -0.08f), new Vector3(0.34f, 0.24f, 0.12f), housing, false, R(Vector3.right, -0.9f));
+            b.Box(new Vector3(0, -0.1f, -0.13f), new Vector3(0.28f, 0.18f, 0.01f), EnvMaterials.Plain(new Color(1f, 0.96f, 0.88f), 0, 0.6f, 5f), false, R(Vector3.right, -0.9f));
+            b.Build(g, "TrayFlood");
+            var lgo = new GameObject("Light");
+            lgo.transform.SetParent(g, false);
+            lgo.transform.localPosition = G(0, -0.12f, -0.18f);
+            var target = Shared.Pos(t.center.x, 0, t.center.y);
+            var l = lgo.AddComponent<Light>();
+            lgo.transform.rotation = Quaternion.LookRotation(target - lgo.transform.position);
+            l.type = LightType.Spot;
+            l.spotAngle = 75;
+            l.innerSpotAngle = 40;
+            l.range = 6f;
+            l.intensity = 7f;
+            l.color = new Color(1f, 0.95f, 0.86f);
+            l.shadows = LightShadows.None;
+        }
+
+        /// <summary>Sunlight shafts through the west windows (additive prisms along the sun
+        /// direction down to the floor) with dust motes drifting in them.</summary>
+        void BuildShafts()
+        {
+            var dir = sun.transform.forward;
+            if (dir.x < 0.05f || dir.y > -0.05f) return;   // the sun must shine in through the west wall
+            var mat = new Material(Resources.Load<Shader>("WWShaft"));
+            mat.SetColor("_Color", new Color(1f, 0.82f, 0.58f));
+            mat.SetFloat("_Intensity", 0.16f);
+            var dustMat = new Material(Resources.Load<Shader>("WWDust"));
+            float x = layout.roomMin.x;
+            foreach (var w in layout.windows)
+            {
+                float wz = (float)Json.Num(w, "z"), ww = (float)Json.Num(w, "width"), y0 = (float)Json.Num(w, "y0"), y1 = (float)Json.Num(w, "y1");
+                var c = new[] { Shared.Pos(x, y0, wz - ww / 2), Shared.Pos(x, y0, wz + ww / 2), Shared.Pos(x, y1, wz + ww / 2), Shared.Pos(x, y1, wz - ww / 2) };
+                var far = c.Select(p => p + dir * Mathf.Min(p.y / -dir.y, 11f)).ToArray();
+                var verts = new List<Vector3>(); var uvs = new List<Vector2>(); var tris = new List<int>();
+                for (int e = 0; e < 4; e++)
+                {
+                    int a = e, bI = (e + 1) % 4, v0 = verts.Count;
+                    verts.AddRange(new[] { c[a], c[bI], far[bI], far[a] });
+                    uvs.AddRange(new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) });
+                    tris.AddRange(new[] { v0, v0 + 1, v0 + 2, v0, v0 + 2, v0 + 3 });
+                }
+                var mesh = new Mesh { name = "Shaft" };
+                mesh.SetVertices(verts); mesh.SetUVs(0, uvs); mesh.SetTriangles(tris, 0);
+                mesh.RecalculateNormals(); mesh.RecalculateBounds();
+                var go = new GameObject("Shaft");
+                go.transform.SetParent(transform, false);
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var mr = go.AddComponent<MeshRenderer>();
+                mr.sharedMaterial = mat;
+                mr.shadowCastingMode = ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+                // dust motes inside the shaft
+                float len = Mathf.Min(((y0 + y1) / 2) / -dir.y, 11f);
+                var mid = Shared.Pos(x, (y0 + y1) / 2, wz) + dir * len * 0.45f;
+                var dgo = new GameObject("Dust");
+                dgo.transform.SetParent(transform, false);
+                dgo.transform.SetPositionAndRotation(mid, Quaternion.LookRotation(dir, Vector3.up));
+                var ps = dgo.AddComponent<ParticleSystem>();
+                ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                var main = ps.main;
+                main.loop = true; main.prewarm = true; main.playOnAwake = true;
+                main.duration = 10;
+                main.startLifetime = 14;
+                main.startSpeed = 0.01f;
+                main.startSize = new ParticleSystem.MinMaxCurve(0.004f, 0.011f);
+                main.startColor = new Color(1f, 0.88f, 0.7f, 0.9f);
+                main.maxParticles = 220;
+                main.simulationSpace = ParticleSystemSimulationSpace.World;
+                var em = ps.emission; em.rateOverTime = 15;
+                var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Box; sh.scale = new Vector3(ww * 0.8f, (y1 - y0) * 0.7f, len * 0.8f);
+                var nz = ps.noise; nz.enabled = true; nz.strength = 0.03f; nz.frequency = 0.25f; nz.scrollSpeed = 0.05f;
+                var col = ps.colorOverLifetime; col.enabled = true;
+                var grad = new Gradient();
+                grad.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(Color.white, 1) },
+                             new[] { new GradientAlphaKey(0, 0), new GradientAlphaKey(1, 0.2f), new GradientAlphaKey(1, 0.8f), new GradientAlphaKey(0, 1) });
+                col.color = grad;
+                var pr = dgo.GetComponent<ParticleSystemRenderer>();
+                pr.sharedMaterial = dustMat;
+                pr.renderMode = ParticleSystemRenderMode.Billboard;
+                pr.shadowCastingMode = ShadowCastingMode.Off;
+                pr.receiveShadows = false;
+                ps.Play();
+            }
+        }
+
         // ---------------------------------------------------------------- lighting
 
         void BuildLighting()
@@ -374,10 +549,14 @@ namespace WorkshopWreckage
             go.transform.rotation = Quaternion.LookRotation(new Vector3(gdir.x, gdir.y, -gdir.z));
             RenderSettings.sun = sun;
 
-            RenderSettings.ambientMode = AmbientMode.Flat;
+            // light comes from above (fixtures, windows): up-facing surfaces get the most ambient
+            RenderSettings.ambientMode = AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(0.64f, 0.61f, 0.56f) * 0.95f;
+            RenderSettings.ambientEquatorColor = new Color(0.5f, 0.42f, 0.34f) * 0.4f;
+            RenderSettings.ambientGroundColor = new Color(0.3f, 0.27f, 0.24f) * 0.22f;
             // Godot adds screen-space indirect light (SSIL); URP has none, so ambient is a bit stronger.
-            RenderSettings.ambientLight = new Color(0.55f, 0.42f, 0.3f) * 0.5f;
-            RenderSettings.reflectionIntensity = 0.7f;
+            // (trilight ambient set above; the fixtures carry the room)
+            RenderSettings.reflectionIntensity = 0.3f;
             if (RenderSettings.skybox != null)
             {
                 var sky = RenderSettings.skybox = new Material(RenderSettings.skybox);
@@ -387,7 +566,7 @@ namespace WorkshopWreckage
             }
             RenderSettings.defaultReflectionMode = DefaultReflectionMode.Skybox;
 
-            foreach (var p in new[] { new Vector3(-5, 2.5f, 3.5f), new Vector3(5, 2.5f, 3.5f), new Vector3(5, 2.5f, -3) })
+            foreach (var p in new Vector3[0])   // (fill lights replaced by the overhead fixtures)
             {
                 var fill = new GameObject("Fill").AddComponent<Light>();
                 fill.transform.SetParent(transform, false);
@@ -407,29 +586,26 @@ namespace WorkshopWreckage
             var tm = profile.Add<Tonemapping>(true);
             tm.mode.Override(TonemappingMode.ACES);
             var bloom = profile.Add<Bloom>(true);
-            bloom.intensity.Override(0.35f);
-            bloom.threshold.Override(1.3f);
+            bloom.intensity.Override(0.55f);
+            bloom.threshold.Override(1.05f);
+            bloom.scatter.Override(0.72f);
             var ca = profile.Add<ColorAdjustments>(true);
-            ca.saturation.Override(8f);
-            ca.contrast.Override(5f);
-            ca.postExposure.Override(1.0f);   // matches Godot AgX + SSIL brightness at the reference poses
+            ca.saturation.Override(10f);
+            ca.contrast.Override(14f);
+            ca.postExposure.Override(1.0f);
+            var wb = profile.Add<WhiteBalance>(true);
+            wb.temperature.Override(3f);
+            var vig = profile.Add<Vignette>(true);
+            vig.intensity.Override(0.24f);
+            vig.smoothness.Override(0.45f);
+            var smh = profile.Add<ShadowsMidtonesHighlights>(true);
+            smh.shadows.Override(new Vector4(0.96f, 0.98f, 1.04f, -0.04f));   // slightly cool, deep shadows
+            smh.highlights.Override(new Vector4(1.04f, 1.0f, 0.95f, 0f));   // warm highlights
             vol.profile = profile;
 
-            var size = layout.roomMax - layout.roomMin;
-            var center = (layout.roomMin + layout.roomMax) * 0.5f;
-            var pgo = new GameObject("ReflectionProbe");
-            pgo.transform.SetParent(transform, false);
-            pgo.transform.position = Shared.Pos(center.x, 1.4f, center.z + 1.0f);
-            QualitySettings.realtimeReflectionProbes = true;   // off in the URP template's quality levels
-            probe = pgo.AddComponent<ReflectionProbe>();
-            probe.mode = ReflectionProbeMode.Realtime;
-            probe.refreshMode = ReflectionProbeRefreshMode.ViaScripting;
-            probe.timeSlicingMode = ReflectionProbeTimeSlicingMode.NoTimeSlicing;
-            probe.size = size + Vector3.one * 0.2f;
-            probe.center = Shared.Pos(center.x, center.y, center.z) - pgo.transform.position;
-            probe.boxProjection = true;
-            probe.resolution = 256;
-            probe.hdr = true;
+            // no environment reflections: no realtime probe (cheaper), and metals only pick up a
+            // faint, even, light reflection of the sky — never the dark room
+            QualitySettings.realtimeReflectionProbes = false;
         }
 
         public void RefreshProbe()

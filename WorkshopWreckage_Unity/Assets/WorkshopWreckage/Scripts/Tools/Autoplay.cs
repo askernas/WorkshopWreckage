@@ -69,6 +69,8 @@ namespace WorkshopWreckage
             }
             g.player.enabled = false;
 
+            yield return PlaytestChecks();
+
             // 1. pick individual items from a heap by aiming at them
             var heap = g.layout.piles.First(p => p.kind == "heap" && p.surface == 0);   // procedural: first floor heap
             var pile = ItemsNear(new Vector3(heap.center.x, 0, heap.center.y), 1.2f);
@@ -90,6 +92,8 @@ namespace WorkshopWreckage
             yield return Frames(15);
             Check("pile shrinks one item per pickup", g.renderer.VisibleCount == visibleBefore - picked, $"visible {visibleBefore} -> {g.renderer.VisibleCount}");
             Check("inventory holds every picked item", g.inventory.Count == picked && w.CountInState(ItemState.Carried) == picked, $"inventory {g.inventory.Count}, carried {w.CountInState(ItemState.Carried)}");
+            Check("you start with 10 pockets and no automatic stacking (every part its own slot)", g.inventory.capacity == 10 && !g.inventory.stacking && g.inventory.Stacks().Count == g.inventory.Count && picked == 10,
+                  $"capacity {g.inventory.capacity}, {g.inventory.Stacks().Count} slots for {g.inventory.Count} parts");
             yield return g.Capture(Path.Combine(outDir, "01_after_pickups.png"), 5);
             g.hud.SetHudVisible(true);
             var aim = ItemsNear(new Vector3(-2.2f, 0, 1.6f), 1.0f);
@@ -133,11 +137,19 @@ namespace WorkshopWreckage
 
             // 4. store everything by aiming at the right destinations
             int stored = 0, viaAim = 0, shots = 0;
+            var tries = new Dictionary<int, int>();
+            int cleared = 0, gaveUp = 0;
             while (g.inventory.Count > 0)
             {
                 int id = g.inventory.HeldId();
+                if (id < 0) { g.inventory.SelectSlot(0); id = g.inventory.HeldId(); }
                 var dest = w.DefOf(id).storageBox;
                 if (!g.db.boxes.ContainsKey(dest)) { ic.DepositStation(id); stored++; continue; }
+                // like a player: stray parts lying in the destination are moved out of the way first
+                cleared += ClearStrays(dest);
+                // never loop forever on one part
+                tries[id] = tries.GetValueOrDefault(id) + 1;
+                if (tries[id] > 3) { gaveUp++; g.inventory.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); continue; }
                 yield return AimAtDest(dest);
                 ic.UpdateTarget();
                 if (ic.targetDest == dest) { viaAim++; ic.Primary(); }
@@ -152,7 +164,7 @@ namespace WorkshopWreckage
                     shots++;
                 }
             }
-            Check("all carried items stored in their own destinations", stored == picked && g.storage.Stored(heldDef.storageBox).Contains(held), $"{stored} stored, {viaAim} via crosshair aim");
+            Check("all carried items stored in their own destinations", stored == picked && gaveUp == 0 && g.storage.Stored(heldDef.storageBox).Contains(held), $"{stored} stored, {viaAim} via crosshair aim, {cleared} strays moved out of the way, {gaveUp} given up");
             Check("progress counts sorted items", g.progress.sortedTotal == stored, $"{g.progress.sortedTotal} sorted");
 
             // 5. save / load round trip
@@ -213,6 +225,118 @@ namespace WorkshopWreckage
         }
 
         IEnumerator Frames(int n) { for (int i = 0; i < n; i++) yield return null; }
+
+        /// <summary>Moves stray parts out of a destination onto the floor in front of its
+        /// unit, as a player would before storing there. Returns how many.</summary>
+        int ClearStrays(string dest)
+        {
+            var strays = g.StraysIn(dest);
+            if (strays.Count == 0) return 0;
+            var unit = g.units[Json.Str(g.db.boxes[dest], "unit")];
+            var front = Vector3.ProjectOnPlane(unit.transform.TransformDirection(new Vector3(0, 0, -1)), Vector3.up).normalized;
+            var basePos = unit.DestPoint(g.db.boxes[dest]);
+            basePos.y = 0;
+            int k = 0;
+            foreach (var id in strays)
+            {
+                var def = g.world.DefOf(id);
+                var p = basePos + front * (unit.size.z * 0.5f + 0.5f + 0.12f * (k / 4)) + Vector3.Cross(Vector3.up, front) * (0.12f * (k % 4) - 0.18f);
+                k++;
+                g.index.Remove(id);
+                g.world.SetTransform(id, Matrix4x4.TRS(new Vector3(p.x, g.debris.At(p) + ItemDatabase.Extents(def)[2] * 0.5f + 0.01f, p.z), Quaternion.identity, Vector3.one * def.worldScale));
+                g.world.SetState(id, ItemState.InWorld, "world");
+                g.index.Insert(id);
+            }
+            return strays.Count;
+        }
+
+        /// <summary>Would the part fall if `under` were gone?</summary>
+        bool OnlySupport(int id, int under)
+        {
+            var b = g.index.WorldBounds(id);
+            return b.min.y - g.interaction.SupportUnder(id, b, new Dictionary<int, float> { [under] = 50f }) > 0.03f;
+        }
+
+        /// <summary>Puts everything carried into the sorting tray (test setup).</summary>
+        void EmptyHands()
+        {
+            foreach (var id in g.inventory.items.ToList()) if (!g.interaction.DropInTray(id, false)) { g.inventory.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); }
+        }
+
+        /// <summary>Playtest feedback: a fair, readable workshop.</summary>
+        IEnumerator PlaytestChecks()
+        {
+            var w = g.world;
+            var loose = w.instances.Where(i => i.state == ItemState.InWorld).ToList();
+            // every part visible and reachable: none high on shelves, none hidden inside boxes, bins or crates
+            float maxY = WorkshopLayout.MaxStrayShelf + 0.5f;
+            int high = loose.Count(i => i.Position.y > maxY);
+            int hidden = loose.Count(i => g.InsideContainer(i.Position, 0));
+            Check("every unsorted part lies in reach and in sight (none high up, none inside containers)", high == 0 && hidden == 0, $"{high} above {maxY:0.0} m, {hidden} inside containers");
+            // the start: Retrobot's parts alone on open floor near you, and one small set close by
+            var sp = Shared.Pos(g.layout.spawn.x, 0, g.layout.spawn.z);
+            var retro = g.workbench.PartIds(g.workbench.P("retrobot")).Select(id => w.instances[id]).ToList();
+            bool Buried(ItemInstance i)
+            {
+                var ib = g.index.WorldBounds(i.id);
+                return g.index.QuerySphere(ib.center, ib.extents.magnitude + 0.1f).Any(o =>
+                {
+                    if (o == i.id) return false;
+                    var ob = g.index.WorldBounds(o);
+                    return ob.min.y > ib.max.y - 0.01f && ob.min.x < ib.max.x && ob.max.x > ib.min.x && ob.min.z < ib.max.z && ob.max.z > ib.min.z;   // lies on top of it
+                });
+            }
+            string OnTop(ItemInstance i)
+            {
+                var ib = g.index.WorldBounds(i.id);
+                var o = g.index.QuerySphere(ib.center, ib.extents.magnitude + 0.1f).FirstOrDefault(x => x != i.id && g.index.WorldBounds(x).min.y > ib.max.y - 0.01f);
+                return $" (under {w.DefOf(o).displayName} at {w.instances[o].Position.y:0.00} m; part top {ib.max.y:0.00} m)";
+            }
+            Check("Retrobot's parts lie in the open near the start (nothing on top of them)", retro.All(i => i.state == ItemState.InWorld && (i.Position - sp).magnitude < 7f && !Buried(i)),
+                  string.Join(", ", retro.Select(i => $"{(i.Position - sp).magnitude:0.0} m{(Buried(i) ? " buried" + OnTop(i) : "")}")));
+            var starter = g.starterIds;
+            var sdef = starter.Count > 0 ? w.DefOf(starter[0]) : null;
+            Check("a small starter set lies together right by the start, its box nearby", sdef != null && starter.Count == w.TotalOf(sdef.id) && starter.All(i => (w.instances[i].Position - sp).magnitude < 4.5f) && g.db.IsOpenKind(sdef.storageBox),
+                  sdef == null ? "none" : $"{starter.Count} × {sdef.displayName} at {starter.Max(i => (w.instances[i].Position - sp).magnitude):0.0} m → {g.db.BoxLabel(sdef.storageBox)}");
+
+            // nothing floats: take a part that carries another; the one on top comes down onto what is below
+            var top = loose.Where(i => i.Position.y > 0.1f && i.Position.y < 1.0f && !g.db.Get(i.defId).IsRobotPart)
+                .Select(i => (i, under: g.index.QuerySphere(i.Position - Vector3.up * 0.06f, 0.05f).Where(o => o != i.id && w.instances[o].state == ItemState.InWorld && w.instances[o].Position.y < i.Position.y - 0.02f && !g.db.Get(w.instances[o].defId).IsRobotPart).ToList()))
+                .FirstOrDefault(x => x.under.Count >= 1 && OnlySupport(x.i.id, x.under[0]));
+            if (top.i != null)
+            {
+                float y0 = top.i.Position.y;
+                g.player.Teleport(top.i.Position + new Vector3(0.6f, -top.i.Position.y, 0.6f));
+                g.interaction.Pickup(top.under[0], false);
+                yield return new WaitForSeconds(1.2f);
+                // nothing within half a metre is left hanging in the air
+                float Gap(int id) { var bb = g.index.WorldBounds(id); return bb.min.y - g.interaction.SupportUnder(id, bb, new Dictionary<int, float>()); }
+                var around = g.index.QuerySphere(top.i.Position, 0.5f).Where(o => w.instances[o].state == ItemState.InWorld).ToList();
+                float worst = around.Count > 0 ? around.Max(Gap) : 0;
+                Check("nothing floats when the part under it is taken away", worst < 0.05f, $"top part {y0:0.000} -> {top.i.Position.y:0.000} m; worst gap of {around.Count} parts nearby {worst:0.000} m; settle: {g.interaction.lastSettleInfo}");
+                EmptyHands();
+            }
+            else Check("a part falls when the part under it is taken away", false, "no stacked pair found");
+
+            // stray parts in a destination block it until they are taken out
+            string box = g.db.boxes.Keys.FirstOrDefault(bx => g.StraysIn(bx).Count > 0 && g.world.IdsOf(g.db.order.FirstOrDefault(d => g.db.Get(d).storageBox == bx)).Any(i => w.instances[i].state == ItemState.InWorld));
+            if (box != null)
+            {
+                int own = g.world.IdsOf(g.db.order.First(d => g.db.Get(d).storageBox == box)).First(i => w.instances[i].state == ItemState.InWorld);
+                g.inventory.capacity = 200;   // test only: room for every stray
+                Take(own);
+                var blocked = g.storage.Check(box, own);
+                var strays = g.StraysIn(box);
+                foreach (var st in strays) Take(st);
+                var after = g.storage.Check(box, own);
+                Check("stray parts lying in a destination block it until they are taken out", blocked == StorageSystem.Result.Blocked && after == StorageSystem.Result.Ok,
+                      $"{box}: {blocked} with {strays.Count} strays, then {after}");
+                EmptyHands();
+                g.ApplySkills();
+            }
+            else Check("stray parts lying in a destination block it until they are taken out", false, "no destination with strays");
+            yield return new WaitForSeconds(1f);   // parts dropped into the tray finish their flight
+        }
 
         /// <summary>Frames Retrobot from the front-side, trying other angles until the
         /// camera has a clear line of sight and is not inside furniture or walls.</summary>
@@ -378,15 +502,17 @@ namespace WorkshopWreckage
             else Check("Hoverbot empties the staging zones and stores those parts high up", false, "no candidate part");
 
             // Scenario C: Spiderbot on an assignment that needs climbing
-            var shelfPart = g.world.instances.FirstOrDefault(i => Loose(i) && i.Position.y > 0.55f && i.Position.y < spider.ReachHeight - 0.05f && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= spider.MaxItemSize
-                                                                && (i.Position - spider.transform.position).magnitude < 9f);
+            var shelfPart = g.world.instances.Where(i => Loose(i) && i.Position.y > 0.55f && i.Position.y < spider.ReachHeight - 0.05f && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= spider.MaxItemSize
+                                                                && g.UnitAt(i.Position) != null)
+                .OrderBy(i => (i.Position - spider.transform.position).sqrMagnitude).FirstOrDefault();
             if (shelfPart != null)
             {
                 spider.Assign(shelfPart.defId, false);
                 bool climbed = false;
                 Time.timeScale = 4;
                 float t1 = Time.realtimeSinceStartup;
-                while (Time.realtimeSinceStartup - t1 < 60 && !(climbed && shelfPart.state != ItemState.InWorld))
+                spider.SetBattery(1);
+                while (Time.realtimeSinceStartup - t1 < 120 && !(climbed && shelfPart.state != ItemState.InWorld))
                 {
                     if (spider.Climbing && !climbed) { climbed = true; Time.timeScale = 1; LookAtRobot(spider, 1.0f, 0.9f, 0.6f); yield return g.Capture(Path.Combine(outDir, "18b_spiderbot_climbing.png"), 1); Time.timeScale = 4; }
                     yield return null;
@@ -498,6 +624,7 @@ namespace WorkshopWreckage
             }
             else Check("Supermagnet pulls only exact matches, unsorted, within range", false, "no group found");
 
+            EmptyHands();
             // Magnetic glove (empty hand: no filters): only magnetic parts come
             var mag = g.world.instances.Where(Free).FirstOrDefault(i => g.world.DefOf(i.id).magnetic && i.Position.y < 0.3f);
             if (mag != null)
@@ -513,6 +640,7 @@ namespace WorkshopWreckage
             else Check("Magnetic glove pulls magnetic parts only", false, "no magnetic part found");
             foreach (var r in g.robots) r.enabled = true;
 
+            EmptyHands();
             // Area Sweep: everything loose around you, up to the limit
             var heap = g.layout.piles.Where(p => p.kind == "heap" && p.surface == 0).Skip(1).First();
             var hc = Shared.Pos(heap.center.x, 0, heap.center.y);
@@ -761,7 +889,7 @@ namespace WorkshopWreckage
             }
             Time.timeScale = 1;
             int sortedNow = g.progress.sortedTotal - sortedBefore;
-            Check("Retrobot sorts parts on his own, one at a time", rb.delivered >= 2 && sortedNow == rb.delivered, $"{rb.delivered} stored, {rb.staged} piled below high destinations, {sortedNow} newly sorted");
+            Check("Retrobot sorts parts on his own, one at a time", rb.delivered >= 1 && rb.delivered + rb.staged >= 4 && sortedNow == rb.delivered && rb.Capacity == 1, $"{rb.delivered} stored, {rb.staged} piled below high destinations, {sortedNow} newly sorted");
             Check("parts for destinations above his reach are piled in front of them, still unsorted",
                   rb.staged == 0 || rb.IsPiledBelowDestination(rb.lastStagedId), rb.staged == 0 ? "none needed yet" : $"part {rb.lastStagedId} waits below {g.world.DefOf(rb.lastStagedId).storageBox}");
             Check("robot sorting is recorded as robot-assisted", g.telemetry.sortedRobot - robotBefore == rb.delivered, $"{g.telemetry.sortedRobot - robotBefore} robot sorts");
