@@ -171,6 +171,7 @@ namespace WorkshopWreckage
             t.fontSize = 22;
             t.color = Cream;
             b.onClick.AddListener(() => { Sfx.Play("ui_click"); cb(); });
+            if (parent.IsChildOf(_menus)) UiStyle.InkButton(b);
             return b;
         }
 
@@ -181,10 +182,11 @@ namespace WorkshopWreckage
             var panel = Rect("Panel", dim, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero);
             panel.sizeDelta = new Vector2(width, 0);
             Panel(panel, Bg, BrassDim);
+            UiStyle.Blueprint(panel);   // the look: every menu is a taped blueprint sheet
             var fit = panel.gameObject.AddComponent<ContentSizeFitter>();
             fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             var v = panel.gameObject.AddComponent<VerticalLayoutGroup>();
-            v.padding = new RectOffset(18, 18, 14, 14);
+            v.padding = new RectOffset(30, 30, 26, 26);
             v.spacing = 10;
             v.childControlHeight = true; v.childControlWidth = true; v.childForceExpandHeight = false;
             _screens[name] = dim;
@@ -197,7 +199,7 @@ namespace WorkshopWreckage
             var go = new GameObject("Title", typeof(RectTransform), typeof(Text), typeof(LayoutElement));
             go.transform.SetParent(p, false);
             var t = go.GetComponent<Text>();
-            t.text = text; t.font = TextAtlas.Display; t.fontSize = size; t.color = Brass; t.alignment = TextAnchor.MiddleCenter;
+            t.text = text; t.font = TextAtlas.Display; t.fontSize = size; t.color = p.IsChildOf(_menus) ? UiStyle.Ink : Brass; t.alignment = TextAnchor.MiddleCenter;
             t.horizontalOverflow = HorizontalWrapMode.Overflow;
             go.GetComponent<LayoutElement>().preferredHeight = size * (text.Count(c => c == '\n') + 1) * 1.25f;
             return t;
@@ -208,6 +210,8 @@ namespace WorkshopWreckage
             var go = new GameObject("Text", typeof(RectTransform), typeof(Text), typeof(LayoutElement));
             go.transform.SetParent(p, false);
             var t = go.GetComponent<Text>();
+            // on blueprint paper the warm text colours become ink
+            if (p.IsChildOf(_menus)) c = c == Cream ? UiStyle.Ink : c == Muted ? UiStyle.InkDim : c;
             t.text = text; t.font = TextAtlas.Font; t.fontSize = size; t.color = c; t.alignment = TextAnchor.MiddleCenter;
             t.supportRichText = true;
             go.GetComponent<LayoutElement>().preferredHeight = height;
@@ -217,7 +221,8 @@ namespace WorkshopWreckage
         void BuildMenus()
         {
             var m = Screen("main", 560);
-            Title(m, "WORKSHOP\nWRECKAGE", 56);
+            Title(m, "WORKSHOP\nWRECKAGE", 60);
+            Para(m, "EST. 1952   ·   SALVAGE & ROBOTICS   ·   WORKSHOP No. 7", 13, Brass, 20);
             Para(m, "Restore order. Rebuild the robots.", 18, Muted, 28);
             _continue = MakeButton(m, "Continue", () => _g.LoadGame(LatestSlot()));
             // world size: cycles through shared/data/world_presets.json

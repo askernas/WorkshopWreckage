@@ -1048,7 +1048,9 @@ namespace WorkshopWreckage
             bot = g.workbench.RobotOf(g.workbench.P("sorting_arm"));
             arm = bot.arm;
             Check("save/load keeps the arm mounted on its socket", arm.place == SortingArm.Place.Mounted && arm.socket != null && arm.socket.id == sk.id && g.sockets[sk.id].occupant == arm, arm.Describe());
-            arm.PickUp();
+            arm.PickUp();   // a busy arm finishes its part first, then comes into the hands
+            float tw = Time.realtimeSinceStartup;
+            while (arm.place != SortingArm.Place.Carried && Time.realtimeSinceStartup - tw < 20) yield return null;
             g.SaveGame("autotest_arm");
             g.StartWorld(g.world.seed, null);
             g.LoadGame("autotest_arm");

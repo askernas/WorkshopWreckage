@@ -294,6 +294,16 @@ namespace WorkshopWreckage
             b.Box(new Vector3(0, -size.y / 2, 0.06f), new Vector3(size.x, 0.05f, 0.03f), trim);
             var tex = TextAtlas.RenderSingle("WORKSHOP\nWRECKAGE", 1024, 300, new Color(0.22f, 0.14f, 0.09f), new Color(0.93f, 0.68f, 0.3f), 120, true);
             b.Quad(new Vector3(0, 0, 0.056f), new Vector2(size.x * 0.95f, size.y * 0.85f), EnvMaterials.Atlas(tex), new Rect(0, 0, 1, 1));
+            // a warm sign light from above: the workshop's name always reads, even in the dim upper wall
+            var lgo = new GameObject("SignLight");
+            lgo.transform.SetParent(g, false);
+            lgo.transform.localPosition = G(0, size.y * 0.5f + 0.55f, 0.9f);
+            lgo.transform.localRotation = Quaternion.LookRotation(G(0, -0.3f, 0) - lgo.transform.localPosition);
+            var l = lgo.AddComponent<Light>();
+            l.type = LightType.Spot;
+            l.spotAngle = 95; l.innerSpotAngle = 60; l.range = 3.5f; l.intensity = 2.6f;
+            l.color = new Color(1f, 0.8f, 0.55f);
+            l.shadows = LightShadows.None;
         }
 
         void Clock(Batch b, Vector3 size)
@@ -348,11 +358,15 @@ namespace WorkshopWreckage
             bm.shadowCastingMode = ShadowCastingMode.Off;
             var lgo = new GameObject("Light");
             lgo.transform.SetParent(g, false);
-            lgo.transform.localPosition = new Vector3(0, -0.16f, 0);
+            lgo.transform.localPosition = new Vector3(0, -0.12f, 0);
+            lgo.transform.localRotation = Quaternion.Euler(90, 0, 0);
             var light = lgo.AddComponent<Light>();
-            light.type = LightType.Point;
-            light.color = new Color(1f, 0.78f, 0.52f);
-            light.intensity = 3.2f;
+            // an enamel shade only throws light down: a warm pool below, nothing on the ceiling
+            light.type = LightType.Spot;
+            light.spotAngle = 112;
+            light.innerSpotAngle = 58;
+            light.color = new Color(1f, 0.76f, 0.5f);
+            light.intensity = 7f;
             light.range = 7f;
             light.shadows = lamps.Count < 3 ? LightShadows.Soft : LightShadows.None;
             lamps.Add(light);

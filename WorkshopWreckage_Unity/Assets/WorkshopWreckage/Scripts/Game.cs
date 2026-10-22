@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.InputSystem;
 
 namespace WorkshopWreckage
@@ -128,6 +130,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
+            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur)
             else if (args.TryGetValue("bench", out var bp)) { SetState("play"); StartCoroutine(new Benchmark().Run(this, bp)); }
             else if (args.TryGetValue("autoplay", out var ap)) { SetState("play"); StartCoroutine(new Autoplay().Run(this, ap)); }
             else if (args.ContainsKey("play")) SetState("play");
@@ -509,10 +512,28 @@ namespace WorkshopWreckage
 
         readonly Dictionary<Light, (float intensity, int zone)> _lampBase = new();
 
-        /// <summary>Model QA (--robotview=retrobot): the robot fully assembled, frozen in its
-        /// rest pose 1.2 m north of the spawn, facing south, with a soft studio key / fill /
-        /// rim light. Cameras (Godot poses): front spawnX,0.2,spawnZ-0.7,0,-4 ·
-        /// side spawnX+0.5,0.2,spawnZ-1.2,90,-4 · back spawnX,0.2,spawnZ-1.7,180,-4.</summary>
+        const int StudioLayer = 30;
+        (Transform robot, Bounds bounds)? _studio;
+
+        /// <summary>Studio camera pose k (0 front, 1 side with the robot facing right, 2 back,
+        /// 3 three-quarter front left), framing the robot's bounds.</summary>
+        void StudioCamera(int k)
+        {
+            var (rt, bb) = _studio.Value;
+            float yaw = new[] { 0f, -90f, 180f, -35f }[k % 4];
+            var dir = Quaternion.AngleAxis(yaw, Vector3.up) * rt.forward;   // from the robot towards the camera
+            float radius = Mathf.Max(bb.extents.y, Mathf.Max(bb.extents.x, bb.extents.z)) * 1.12f;
+            float dist = radius / Mathf.Tan(player.cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            var target = bb.center;
+            var camPos = target + dir * dist + Vector3.up * dist * 0.06f;
+            player.cam.transform.SetPositionAndRotation(camPos, Quaternion.LookRotation(target - camPos));
+        }
+
+        /// <summary>Model QA (--robotview=retrobot): the robot fully assembled, frozen in its rest
+        /// pose 1.2 m north of the spawn, facing south, alone in a photo studio: only the studio
+        /// layer is drawn (no parts, shelves or walls), a flat light-grey backdrop,
+        /// soft key / fill / rim lights, no fog and a neutral grade, so it can be compared with
+        /// the concept sheets. --shot frames it itself (front, side, back, three-quarter); --cam is ignored.</summary>
         void RobotView(string id)
         {
             var r = robots.Find(x => x.id == id);
@@ -520,14 +541,57 @@ namespace WorkshopWreckage
             workbench.ForceInstall(workbench.P(id));
             r.SetOperational();
             r.enabled = false;
+            if (r.arm != null) r.arm.enabled = false;
             var pos = Shared.Pos(layout.spawn.x, 0, layout.spawn.z - 1.2f);
             r.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(Vector3.back));   // faces south, towards the camera
-            foreach (var (off, col, inten) in new[] { (new Vector3(0.45f, 0.55f, -0.5f), new Color(1f, 0.93f, 0.82f), 0.6f), (new Vector3(-0.5f, 0.35f, -0.4f), new Color(0.75f, 0.82f, 1f), 0.25f), (new Vector3(0.1f, 0.6f, 0.6f), new Color(1f, 0.9f, 0.75f), 0.45f) })
+            foreach (var t in r.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = StudioLayer;
+            // the studio: nothing else is drawn or lit
+            player.cam.cullingMask = 1 << StudioLayer;
+            foreach (var l in FindObjectsByType<Light>()) l.enabled = false;
+            RenderSettings.fog = false;
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.42f, 0.42f, 0.44f);
+            // seamless backdrop: the camera clears to flat studio grey (no sky, no walls)
+            player.cam.clearFlags = CameraClearFlags.SolidColor;
+            player.cam.backgroundColor = new Color(0.9f, 0.9f, 0.89f);
+            player.cam.fieldOfView = 22;   // a long lens: little perspective distortion, like the sheets
+            var bounds = new Bounds(pos + Vector3.up * 0.3f, Vector3.zero);
+            bool any = false;
+            foreach (var rr in r.GetComponentsInChildren<Renderer>())
+            {
+                if (!any) { bounds = rr.bounds; any = true; }
+                else bounds.Encapsulate(rr.bounds);
+            }
+            _studio = (r.transform, bounds);
+            var key = new GameObject("StudioKey").AddComponent<Light>();
+            key.type = LightType.Directional;
+            key.color = new Color(1f, 0.96f, 0.9f);
+            key.intensity = 1.6f;
+            key.shadows = LightShadows.Soft;
+            key.cullingMask = 1 << StudioLayer;
+            key.transform.rotation = Quaternion.Euler(38, 150, 0);   // from the front left, above
+            foreach (var (off, col, inten) in new[] { (new Vector3(-0.55f, 0.35f, -0.45f), new Color(0.8f, 0.86f, 1f), 0.35f), (new Vector3(0.2f, 0.65f, 0.6f), new Color(1f, 0.92f, 0.8f), 0.6f) })
             {
                 var lg = new GameObject("StudioLight").AddComponent<Light>();
                 lg.type = LightType.Point; lg.range = 2.5f; lg.color = col; lg.intensity = inten;
+                lg.cullingMask = 1 << StudioLayer;
                 lg.transform.position = pos + off;
             }
+            // neutral grade: judge the colours as they are
+            var vgo = new GameObject("StudioGrade");
+            var vol = vgo.AddComponent<Volume>();
+            vol.isGlobal = true;
+            vol.priority = 100;
+            var prof = ScriptableObject.CreateInstance<VolumeProfile>();
+            prof.Add<FilmGrain>(true).intensity.Override(0f);
+            prof.Add<SplitToning>(true).balance.Override(0f);
+            var st = prof.components.OfType<SplitToning>().First();
+            st.shadows.Override(Color.gray); st.highlights.Override(Color.gray);
+            prof.Add<Vignette>(true).intensity.Override(0.12f);
+            var ca = prof.Add<ColorAdjustments>(true);
+            ca.saturation.Override(0f); ca.contrast.Override(6f); ca.postExposure.Override(0.6f);
+            prof.Add<WhiteBalance>(true).temperature.Override(0f);
+            vol.profile = prof;
         }
 
         /// <summary>QA tool (--gallery=gear [--lod=0|1]): every mesh whose geometry key starts
@@ -905,6 +969,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            MenuBackdrop();
             if (_labelsDirty.Count > 0 && storage != null)
             {
                 var us = _labelsDirty.Where(db.boxes.ContainsKey).Select(b => Json.Str(db.boxes[b], "unit")).Distinct().ToList();
@@ -949,6 +1014,36 @@ namespace WorkshopWreckage
             if (state == "play" && Cursor.lockState != CursorLockMode.Locked && Mouse.current.leftButton.wasPressedThisFrame) Cursor.lockState = CursorLockMode.Locked;
         }
 
+        Volume _menuBlur;
+        float _menuT;
+
+        /// <summary>Main menu backdrop: the camera pans slowly across the workshop from the
+        /// spawn (no travel, so it never clips furniture) with the background softly blurred.</summary>
+        void MenuBackdrop()
+        {
+            if (_menuBlur == null)
+            {
+                var go = new GameObject("MenuBlur");
+                go.transform.SetParent(transform, false);
+                _menuBlur = go.AddComponent<Volume>();
+                _menuBlur.isGlobal = true;
+                _menuBlur.priority = 20;
+                var prof = ScriptableObject.CreateInstance<VolumeProfile>();
+                var dof = prof.Add<DepthOfField>(true);
+                dof.mode.Override(DepthOfFieldMode.Gaussian);
+                dof.gaussianStart.Override(1.5f);
+                dof.gaussianEnd.Override(9f);
+                dof.gaussianMaxRadius.Override(1.2f);
+                _menuBlur.profile = prof;
+            }
+            bool menu = state == "menu" && !Automated && layout != null;
+            _menuBlur.weight = Mathf.MoveTowards(_menuBlur.weight, menu ? 1 : 0, Time.unscaledDeltaTime * 2);
+            if (!menu) return;
+            _menuT += Time.unscaledDeltaTime;
+            player.Teleport(Shared.Pos(layout.spawn.x, 0, layout.spawn.z));
+            player.SetView((Mathf.Sin(_menuT * 0.06f) * 32f) * Mathf.Deg2Rad, (-5f + Mathf.Sin(_menuT * 0.043f) * 3f) * Mathf.Deg2Rad);
+        }
+
         public void SetState(string s)
         {
             state = s;
@@ -975,6 +1070,13 @@ namespace WorkshopWreckage
             player.head.localPosition = new Vector3(0, PlayerController.Eye, 0);
         }
 
+        IEnumerator MenuShot(string path)
+        {
+            for (float t = 0; t < 6f; t += Time.unscaledDeltaTime) yield return null;
+            yield return Capture(path, 2);
+            Application.Quit();
+        }
+
         public IEnumerator Capture(string path, int frames = 20)
         {
             for (int i = 0; i < frames; i++) yield return null;
@@ -994,7 +1096,8 @@ namespace WorkshopWreckage
             builder.RefreshProbe();
             for (int i = 0; i < outs.Length; i++)
             {
-                PlaceCamera(cams[Mathf.Min(i, cams.Length - 1)]);
+                if (_studio != null) StudioCamera(i);   // --robotview frames the robot itself
+                else PlaceCamera(cams[Mathf.Min(i, cams.Length - 1)]);
                 yield return Capture(outs[i]);
                 Debug.Log("saved " + outs[i]);
             }
