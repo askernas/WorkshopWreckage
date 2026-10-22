@@ -115,9 +115,14 @@ namespace WorkshopWreckage
             lamps.Add(new Vector3(1.8f, 3, north + 0.9f));
             lamps.Add(new Vector3(0.9f, 3, -0.75f));
             lamps.Add(new Vector3(repairBayPos.x + 0.4f, 2.7f, repairBayPos.z - 1.3f));   // over the repair bay and Retrobot
-            for (float x = west + 4f; x < east - 2f; x += 6.5f)
-                for (float z = north + 5f; z < south - 1.5f; z += 5.5f)
-                    if (Mathf.Abs(x - 0.9f) > 2.5f || Mathf.Abs(z + 0.75f) > 2.5f) lamps.Add(new Vector3(x, 3, z));
+            // an even grid from wall to wall (lamp range 7 m), so corners of big rooms aren't dark
+            int nx = Mathf.Max(2, Mathf.CeilToInt((W - 3f) / 5f) + 1), nz = Mathf.Max(2, Mathf.CeilToInt((D - 5f) / 5f) + 1);
+            for (int ix = 0; ix < nx; ix++)
+                for (int iz = 0; iz < nz; iz++)
+                {
+                    var lp = new Vector3(Mathf.Lerp(west + 2f, east - 2f, ix / (float)(nx - 1)), 3, Mathf.Lerp(north + 3.2f, south - 2f, iz / (float)(nz - 1)));
+                    if (lamps.All(l => new Vector2(l.x - lp.x, l.z - lp.z).magnitude > 2.6f)) lamps.Add(lp);
+                }
 
             // --- storage runs: walls first, then freestanding aisles ----------------
             // Godot-space directions (Unity's Vector3.forward/back have the opposite Z meaning)
