@@ -185,6 +185,22 @@ namespace WorkshopWreckage
             yield return AllRobotsChecks();
             // 7b. the Sorting Arm: sockets, assembly, carry, mount, local sorting, save/load
             yield return ArmChecks();
+            {
+                // partial set credit: half a set pays its share of the completion XP, the rest comes at the end
+                var pr = g.progression;
+                long x0 = pr.xp;
+                pr.OnDefinitionHalf(-424242, 6);
+                long half = pr.xp - x0;
+                pr.OnDefinitionHalf(-424242, 6);   // once only
+                long again = pr.xp - x0 - half;
+                pr.OnDefinitionCompleted(-424242, 6);
+                long whole = pr.xp - x0;
+                long x1 = pr.xp;
+                pr.OnDefinitionCompleted(-424243, 6);   // a set finished without the half step
+                long direct = pr.xp - x1;
+                Check("partial set credit: half a set pays half its XP once, completion the rest (same total)", half > 0 && again == 0 && Mathf.Abs(whole - direct) <= 1 && Mathf.Abs(half * 2 - whole) <= 1,
+                      $"half {half}, whole {whole}, without half {direct}");
+            }
             // 8. player tools from skills
             yield return ToolChecks();
             // 9. robots survive a save/load round trip (zone, battery, record, carried parts)
@@ -1007,7 +1023,7 @@ namespace WorkshopWreckage
             while (Time.realtimeSinceStartup - wait < 4) yield return null;   // time to (wrongly) touch the foreign part
             Time.timeScale = 1;
             bool inBoxes = mine.All(i => g.world.instances[i].state == ItemState.Stored && g.storage.Stored(g.world.DefOf(i).storageBox).Contains(i));
-            Check("the arm sorts staged parts into its own drawers through normal storage (sets, XP)", mine.Count == 3 && inBoxes && bot.delivered - deliveredBefore == 3 && g.progress.sortedTotal - sortedBefore >= 3 && g.progression.xp > xpBefore,
+            Check("the arm sorts staged parts into its own drawers through normal storage (sets, XP; loose parts in its piles count too)", mine.Count == 3 && inBoxes && bot.delivered - deliveredBefore >= 3 && g.progress.sortedTotal - sortedBefore >= 3 && g.progression.xp > xpBefore,
                   $"{mine.Count(i => g.world.instances[i].state == ItemState.Stored)}/{mine.Count} stored, delivered {bot.delivered - deliveredBefore}, sorted +{g.progress.sortedTotal - sortedBefore}");
             Check("it never touches the other half of the cabinet", foreign < 0 || g.world.instances[foreign].state == ItemState.InWorld,
                   foreign < 0 ? "no foreign part found" : $"{g.world.DefOf(foreign).displayName}: {g.world.instances[foreign].state}");

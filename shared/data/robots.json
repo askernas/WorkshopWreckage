@@ -82,6 +82,7 @@
 			"can_direct_store": true, "can_climb": false, "can_fly": false,
 			"pick_time": 1.1, "deposit_time": 1.0, "cycle_speed": 1.0,
 			"battery_minutes": 0, "charge_minutes": 0, "radius": 0.2,
+			"limits": {"cycle_speed": 1.6, "max_item_size": 0.45},
 			"strengths": ["Fast local sorting: clears the staging piles below its half of a drawer cabinet", "Works all day on workshop power"],
 			"limitations": ["Stationary: serves only the 18 drawers (3 x 6) of the cabinet half it is mounted on", "Never picks loose parts from the floor or other cabinets", "The player carries it from socket to socket"],
 			"assembly": {"requires": {"shoulder turret": ["docking coupler"], "control unit": ["shoulder turret"], "upper arm": ["shoulder turret"], "motor cartridge": ["upper arm"], "elbow servo": ["upper arm"], "forearm": ["elbow servo"], "wrist rotator": ["forearm"], "sensor head": ["wrist rotator"], "left finger": ["wrist rotator"], "right finger": ["wrist rotator"], "cable harness": ["control unit", "forearm"]}},

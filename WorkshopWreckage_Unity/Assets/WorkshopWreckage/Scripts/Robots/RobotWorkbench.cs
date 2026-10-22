@@ -344,23 +344,27 @@ namespace WorkshopWreckage
                 RobotOf(prev)?.SetOperational();
             }
             _debugUnlocked.Add(p.id);
-            if (p.crafted)
-            {
-                foreach (var kv in MaterialsMissing(p))
-                    foreach (var i in _g.world.instances.Where(i => i.state == ItemState.InWorld && _g.world.DefOf(i.id).CategoryName == kv.Key).Take(kv.Value).ToList())
-                    {
-                        _g.index.Remove(i.id);
-                        _g.world.SetState(i.id, ItemState.Installed, OwnerOf(p.id));
-                    }
-                RobotOf(p)?.RefreshAssembly();
-                Refresh();
-            }
+            if (p.crafted) FillRecipe(p);
             else ForceInstall(p);
             if (!Complete(p)) return $"{p.name}: not enough loose parts to finish it ({InstalledCount(p)}/{Required(p)})";
             return Activate(p) ? $"DEBUG: {p.name} unlocked and starting up" : $"DEBUG: {p.name} unlocked, assembly complete";
         }
 
         readonly HashSet<string> _debugUnlocked = new();
+
+        /// <summary>QA (debug unlock, benchmark): builds a crafted robot's recipe from loose
+        /// ordinary parts of the right categories.</summary>
+        public void FillRecipe(Project p)
+        {
+            foreach (var kv in MaterialsMissing(p))
+                foreach (var i in _g.world.instances.Where(i => i.state == ItemState.InWorld && _g.world.DefOf(i.id).CategoryName == kv.Key).Take(kv.Value).ToList())
+                {
+                    _g.index.Remove(i.id);
+                    _g.world.SetState(i.id, ItemState.Installed, OwnerOf(p.id));
+                }
+            RobotOf(p)?.RefreshAssembly();
+            Refresh();
+        }
 
         public bool CanActivate(Project p) => Complete(p) && !Operational(p) && Unlocked(p) && RobotOf(p) is Robot r && r.mode == Robot.Mode.Assembling;
 

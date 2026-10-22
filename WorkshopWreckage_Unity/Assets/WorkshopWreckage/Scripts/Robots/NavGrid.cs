@@ -105,6 +105,9 @@ namespace WorkshopWreckage
             g[si] = 0;
             var open = new SortedSet<(float f, int i)>(Comparer<(float f, int i)>.Create((p, q) => p.f != q.f ? p.f.CompareTo(q.f) : p.i.CompareTo(q.i)));
             open.Add((H(si, ti), si));
+            // an unreachable target would otherwise flood the whole floor (seconds on Massive):
+            // give up after a bounded search, the robot then treats the part as unreachable
+            int expanded = 0, maxExpand = Mathf.Min(n, 6000);
             while (open.Count > 0)
             {
                 var cur = open.Min;
@@ -113,6 +116,7 @@ namespace WorkshopWreckage
                 if (ci == ti) break;
                 if (closed[ci]) continue;
                 closed[ci] = true;
+                if (++expanded > maxExpand) return null;
                 int cx = ci % w, cz = ci / w;
                 for (int dz = -1; dz <= 1; dz++)
                     for (int dx = -1; dx <= 1; dx++)

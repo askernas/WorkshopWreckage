@@ -127,7 +127,17 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- per frame
 
+        public static double cpuMs;
+        static readonly System.Diagnostics.Stopwatch _sw = new();
+
         void LateUpdate()
+        {
+            _sw.Restart();
+            LateUpdateInner();
+            cpuMs += _sw.Elapsed.TotalMilliseconds;
+        }
+
+        void LateUpdateInner()
         {
             if (_g == null || _g.world == null || !_r.Operational) return;
             if (place == Place.Carried)
@@ -174,7 +184,7 @@ namespace WorkshopWreckage
                     var i = _g.world.instances[id];
                     if (i.state != ItemState.InWorld || _g.robotReserved.Contains(id) || _g.interaction.busy.Contains(id)) continue;
                     var def = _g.world.DefOf(id);
-                    if (def.IsRobotPart || def.storageBox != box || i.Position.y > 0.7f) continue;
+                    if (def.IsRobotPart || def.storageBox != box || i.Position.y > 0.7f || ItemDatabase.Extents(def)[0] > _r.MaxItemSize) continue;   // Wide Gripper raises the size
                     bool staged = i.owner == "stage:" + box || Vector3.ProjectOnPlane(i.Position - spot.Value, Vector3.up).magnitude <= 0.5f;
                     if (!staged) continue;
                     float d = (i.Position - socket.point).sqrMagnitude;
@@ -185,7 +195,8 @@ namespace WorkshopWreckage
             return best;
         }
 
-        float CycleSpeed => Mathf.Max(0.3f, _r.BaseStat("cycle_speed", 1));
+        /// <summary>Cycle speed with the Faster Servos upgrade (never past its limit).</summary>
+        float CycleSpeed => Mathf.Max(0.3f, (float)(_g.progression?.RobotStat(_r.type, "cycle_speed", _r.BaseStat("cycle_speed", 1), _r.LimitOf("cycle_speed")) ?? _r.BaseStat("cycle_speed", 1)));
 
         IEnumerator Move(System.Func<float, (Vector3 wrist, Vector3 dir)> path, float dur)
         {

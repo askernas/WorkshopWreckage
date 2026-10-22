@@ -191,6 +191,7 @@ namespace WorkshopWreckage
         }
 
         Transform _posters;
+        WorkshopLayout _postersFor;
 
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
@@ -231,7 +232,12 @@ namespace WorkshopWreckage
             tools.ResetState();
             StartProgression(seed, save);
             workbench.PrepareOrders();
-            if (_posters == null) _posters = BlueprintPosters.Build(this);   // once: drawings of the real robot models
+            if (_postersFor != layout && !args.ContainsKey("noposters"))   // --noposters: QA (performance comparison)   // per layout: wall sheets follow the room (the drawings themselves are cached)
+            {
+                if (_posters != null) Destroy(_posters.gameObject);
+                _posters = BlueprintPosters.Build(this);
+                _postersFor = layout;
+            }
             workbench.ResetState();
             SpawnRobots();
             workbench.Load(save);
@@ -609,6 +615,7 @@ namespace WorkshopWreckage
                 telemetry.Sorted(robot, playTime, progress.sortedTotal);
             };
             progress.DefinitionCompleted += id => progression.OnDefinitionCompleted(id, world.TotalOf(id));
+            progress.DefinitionHalf += id => progression.OnDefinitionHalf(id, world.TotalOf(id));
             progress.Discovered += id => { progression.OnDiscovered(id, db.Get(id).IsRobotPart); if (progression.Has("reveal_totals")) progress.revealed.Add(id); };
             progress.DefinitionCompleted += id => progress.revealed.Add(id);   // a finished set shows its total
             progress.Milestone += (key, _) =>

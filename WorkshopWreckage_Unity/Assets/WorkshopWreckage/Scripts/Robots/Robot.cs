@@ -493,7 +493,21 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- update
 
+        /// <summary>QA (benchmark): total CPU time spent in robot updates (ms) and the worst single update.</summary>
+        public static double cpuMs, worstMs;
+        public static string worstWhat = "";
+        static readonly System.Diagnostics.Stopwatch _sw = new();
+
         void Update()
+        {
+            _sw.Restart();
+            UpdateInner();
+            double ms = _sw.Elapsed.TotalMilliseconds;
+            cpuMs += ms;
+            if (ms > worstMs) { worstMs = ms; worstWhat = $"{id} {_step}"; }
+        }
+
+        void UpdateInner()
         {
             if (g == null || g.world == null) return;
             if (g.state == "paused" || g.state == "menu") { if (_loop != null) _loop.volume = 0; return; }   // the workshop holds still
@@ -658,11 +672,23 @@ namespace WorkshopWreckage
         /// <summary>Picks the next part with the type's strategy (see the class summary).
         /// Once carrying, only parts close by, within the number of part kinds and the
         /// free cargo slots; then it delivers. Searches are bounded per frame.</summary>
+        double _tNav, _tSort, _tAll;
         void ChooseNext()
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            _tNav = _tSort = 0;
+            ChooseNextInner();
+            _tAll = sw.Elapsed.TotalMilliseconds;
+            if (_tAll > 20) Debug.Log($"[robotcpu] {id} ChooseNext {_tAll:0} ms: nav refresh {_tNav:0}, filter+sort {_tSort:0}, paths {_tAll - _tNav - _tSort:0} ms");
+        }
+
+        void ChooseNextInner()
         {
             var me = transform.position;
             if (SlotsUsed >= _capacity) { _step = Step.ToDest; _path = null; return; }
+            var swn = System.Diagnostics.Stopwatch.StartNew();
             if (!Flies) _nav.RefreshItems(g.world, _stepH);
+            _tNav = swn.Elapsed.TotalMilliseconds;
             var types = carried.Select(c => g.world.instances[c].defId).ToHashSet();
             IEnumerable<ItemInstance> pool = null;
             System.Func<ItemInstance, float> score = i => (i.Position - me).sqrMagnitude;
@@ -723,7 +749,10 @@ namespace WorkshopWreckage
                 }
             }
             int tries = 0, maxTries = 6 + 3 * _searchRank;
-            foreach (var inst in pool.Where(Pickable).OrderBy(score))
+            var prof = System.Diagnostics.Stopwatch.StartNew();
+            var ordered = pool.Where(Pickable).OrderBy(score).ToList();
+            _tSort = prof.Elapsed.TotalMilliseconds;
+            foreach (var inst in ordered)
             {
                 if (carried.Count > 0 && ((inst.Position - me).magnitude > _gather || (!types.Contains(inst.defId) && types.Count >= _types) || SlotsUsed + SlotsOf(inst.id) > _capacity)) break;
                 if (++tries > maxTries) break;   // keep the frame cheap; continue next frame
@@ -825,7 +854,9 @@ namespace WorkshopWreckage
             return v;
         }
 
-        public static int StagingCapacity => Json.Int(RootConfig(), "staging_capacity", 14);
+        static int _stagingCapacity = -1;
+        /// <summary>Parts per staging zone (robots.json staging_capacity), read once: Pickable asks for every candidate.</summary>
+        public static int StagingCapacity => _stagingCapacity >= 0 ? _stagingCapacity : _stagingCapacity = Json.Int(RootConfig(), "staging_capacity", 14);
         public int StagingCount(string box) => g.world.instances.Count(i => i.state == ItemState.InWorld && i.owner == "stage:" + box);
         Dictionary<string, int> _stagedNow;
         static int _stagedFrame = -1;

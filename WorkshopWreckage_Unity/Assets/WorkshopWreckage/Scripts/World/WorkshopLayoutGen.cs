@@ -63,6 +63,10 @@ namespace WorkshopWreckage
         /// <summary>Height of the sorting tray's bottom (parts in the tray rest on it).</summary>
         public const float TrayFloor = 0.04f;
         public readonly List<Rect> keepClear = new();             // no starting piles here, but walkable
+        /// <summary>Clear floor in front of every storage unit (Godot XZ): no furniture or other
+        /// unit may stand there (loose parts may lie there); reachable from the spawn on foot.</summary>
+        public readonly Dictionary<string, Rect> access = new();
+        const float AccessDepth = 0.9f;
         public float repairBayRot;
         readonly List<Dictionary<string, object>> _runs = new();
 
@@ -189,7 +193,7 @@ namespace WorkshopWreckage
                     while (used[i] + w <= (float)run["length"] + 0.001f)
                     {
                         var c = (Vector3)run["start"] + dir * (used[i] + w / 2) + n * (d / 2 + 0.02f);
-                        if (Clear(Footprint(c, w, d, alongX)))
+                        if (Clear(Footprint(c, w, d, alongX)) && AccessOk(c, n, w, d, alongX))
                         {
                             PlaceUnit(db, u, c, n, alongX);
                             used[i] += w + UnitGap;
@@ -260,6 +264,9 @@ namespace WorkshopWreckage
                             string[] kinds = { "tipped_crate", "tipped_bin", "tipped_box", "overturned_chest" };
                             var kindT = kinds[rng.Next(kinds.Length)];
                             var size = kindT switch { "tipped_crate" => new Vector3(0.75f, 0.52f, 0.58f), "tipped_bin" => new Vector3(0.5f, 0.35f, 0.6f), "tipped_box" => new Vector3(0.48f, 0.38f, 0.44f), _ => new Vector3(1.0f, 0.8f, 0.55f) };
+                            // a tipped container never lands in front of storage (the parts may spill there)
+                            var box = new Rect(origin - new Vector2(0.4f, 0.4f), new Vector2(0.8f, 0.8f));
+                            if (access.Values.Any(a => a.Overlaps(box))) break;
                             F(kindT, new Vector3(origin.x, 0, origin.y), size, -p.dir + Mathf.PI / 2);
                             Block(origin, new Vector2(0.8f, 0.8f));
                             break;
@@ -318,6 +325,8 @@ namespace WorkshopWreckage
                 taken.Add(s.Value);
             }
 
+            CheckReachable();
+
             // --- zones -----------------------------------------------------------------
             zones.Add(("North Workbench", new Rect(west, north, W, 3.0f)));
             zones.Add(("Window Bay", new Rect(west, north + 3f, W * 0.27f, D - 3f)));
@@ -332,6 +341,72 @@ namespace WorkshopWreckage
         {
             var s = alongX ? new Vector2(w, d) : new Vector2(d, w);
             return new Rect(new Vector2(c.x, c.z) - s / 2, s);
+        }
+
+        /// <summary>The strip of floor in front of a unit (the side its normal n faces).</summary>
+        static Rect AccessRect(Vector3 c, Vector3 n, float w, float d, bool alongX)
+        {
+            var f = new Vector2(c.x, c.z) + new Vector2(n.x, n.z) * (d / 2 + 0.08f + AccessDepth / 2);
+            var s = alongX ? new Vector2(w, AccessDepth) : new Vector2(AccessDepth, w);
+            return new Rect(f - s / 2, s);
+        }
+
+        static Rect Shrink(Rect r, float m) => new(r.position + Vector2.one * m, r.size - Vector2.one * 2 * m);
+
+        /// <summary>A unit may stand here if it blocks no other unit's front and its own front
+        /// strip is free of furniture and units (and inside the room).</summary>
+        bool AccessOk(Vector3 c, Vector3 n, float w, float d, bool alongX)
+        {
+            var foot = Shrink(Footprint(c, w, d, alongX), 0.02f);
+            if (access.Values.Any(a => a.Overlaps(foot))) return false;
+            var ar = Shrink(AccessRect(c, n, w, d, alongX), 0.08f);
+            if (ar.xMin < roomMin.x || ar.xMax > roomMax.x || ar.yMin < roomMin.z || ar.yMax > roomMax.z) return false;
+            return !floorBlockers.Any(b => b.Overlaps(ar));
+        }
+
+        /// <summary>Every unit's front strip must be reachable on foot from the spawn: a flood
+        /// fill over the floor (0.1 m cells, player-sized clearance) around all blockers.</summary>
+        void CheckReachable()
+        {
+            const float cell = 0.1f, radius = 0.22f;
+            int nx = Mathf.CeilToInt((roomMax.x - roomMin.x) / cell), nz = Mathf.CeilToInt((roomMax.z - roomMin.z) / cell);
+            var blocked = new bool[nx, nz];
+            foreach (var b in floorBlockers)
+            {
+                int x0 = Mathf.Max(0, Mathf.FloorToInt((b.xMin - radius - roomMin.x) / cell)), x1 = Mathf.Min(nx - 1, Mathf.CeilToInt((b.xMax + radius - roomMin.x) / cell));
+                int z0 = Mathf.Max(0, Mathf.FloorToInt((b.yMin - radius - roomMin.z) / cell)), z1 = Mathf.Min(nz - 1, Mathf.CeilToInt((b.yMax + radius - roomMin.z) / cell));
+                for (int x = x0; x <= x1; x++) for (int z = z0; z <= z1; z++) blocked[x, z] = true;
+            }
+            for (int x = 0; x < nx; x++) for (int z = 0; z < nz; z++)
+                    if (x * cell < radius || z * cell < radius || (nx - x) * cell < radius || (nz - z) * cell < radius) blocked[x, z] = true;   // walls
+            var seen = new bool[nx, nz];
+            var q = new Queue<(int, int)>();
+            int sx = Mathf.Clamp((int)((spawn.x - roomMin.x) / cell), 0, nx - 1), sz = Mathf.Clamp((int)((spawn.z - roomMin.z) / cell), 0, nz - 1);
+            if (blocked[sx, sz]) { placementErrors.Add("The spawn point is blocked"); return; }
+            q.Enqueue((sx, sz)); seen[sx, sz] = true;
+            while (q.Count > 0)
+            {
+                var (x, z) = q.Dequeue();
+                foreach (var (dx, dz) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+                {
+                    int a = x + dx, b = z + dz;
+                    if (a < 0 || b < 0 || a >= nx || b >= nz || seen[a, b] || blocked[a, b]) continue;
+                    seen[a, b] = true;
+                    q.Enqueue((a, b));
+                }
+            }
+            foreach (var kv in access)
+            {
+                var r = kv.Value;
+                bool ok = false;
+                for (float x = r.xMin + 0.05f; x < r.xMax && !ok; x += cell)
+                    for (float z = r.yMin + 0.05f; z < r.yMax && !ok; z += cell)
+                    {
+                        int a = (int)((x - roomMin.x) / cell), b = (int)((z - roomMin.z) / cell);
+                        if (a >= 0 && b >= 0 && a < nx && b < nz && seen[a, b]) ok = true;
+                    }
+                if (!ok) placementErrors.Add($"Storage unit {kv.Key} cannot be reached on foot (its front is closed off)");
+            }
         }
 
         /// <summary>No furniture, unit or keep-clear area overlaps this footprint.</summary>
@@ -353,6 +428,7 @@ namespace WorkshopWreckage
             float w = (float)Json.Num(u, "width"), d = (float)Json.Num(u, "depth");
             float rot = Mathf.Atan2(n.x, n.z);
             units[Json.Str(u, "id")] = new Dictionary<string, object> { ["pos"] = L(c.x, c.y, c.z), ["rot_y"] = (double)rot, ["width"] = (double)w, ["depth"] = (double)d, ["type"] = Json.Str(u, "type") };
+            access[Json.Str(u, "id")] = AccessRect(c, n, w, d, alongX);
             Block(new Vector2(c.x, c.z), (alongX ? new Vector2(w, d) : new Vector2(d, w)) + new Vector2(0.12f, 0.12f));
             AddUnitSurfaces(db, u, c, rot, alongX);
         }
@@ -371,7 +447,7 @@ namespace WorkshopWreckage
                     var grown = new Rect(c - foot / 2 - Vector2.one * Walkway, foot + Vector2.one * 2 * Walkway);
                     if (grown.xMin < room.xMin + 0.2f || grown.xMax > room.xMax - 0.2f || grown.yMin < room.yMin + 0.2f || grown.yMax > room.yMax - 0.2f) continue;
                     if (Vector2.Distance(c, new Vector2(spawn.x, spawn.z)) < 2.4f) continue;
-                    if (floorBlockers.Any(b => b.Overlaps(grown))) continue;
+                    if (floorBlockers.Any(b => b.Overlaps(grown)) || access.Values.Any(a => a.Overlaps(grown))) continue;
                     PlaceUnit(db, u, new Vector3(x, 0, z), z < 0 ? Vector3.forward : Vector3.back, true);
                     return true;
                 }

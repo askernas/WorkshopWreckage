@@ -227,10 +227,23 @@ namespace WorkshopWreckage
             Grant(Reward(robotAssisted ? "sort_item_robot_assisted" : "sort_item"), "sorted");
         }
 
+        double HalfShare => _rewards.GetValueOrDefault("half_definition_share");   // a fraction: not preset-scaled
+        double SetXp(int copies) => Reward("complete_definition") + Reward("complete_definition_per_copy") * copies;
+
+        /// <summary>Partial set credit: half of a set's copies stored pays half_definition_share
+        /// of its completion XP (once); the rest comes with the completion.</summary>
+        public void OnDefinitionHalf(int defId, int copies)
+        {
+            double share = HalfShare;
+            if (share <= 0 || copies < 2 || _onceRewarded.Contains("def:" + defId) || !_onceRewarded.Add("half:" + defId)) return;
+            Grant(SetXp(copies) * share, "half a set");
+        }
+
         public void OnDefinitionCompleted(int defId, int copies)
         {
             if (!_onceRewarded.Add("def:" + defId)) return;
-            Grant(Reward("complete_definition") + Reward("complete_definition_per_copy") * copies, "set complete");
+            double share = _onceRewarded.Contains("half:" + defId) ? HalfShare : 0;
+            Grant(SetXp(copies) * (1 - share), "set complete");
         }
 
         public void OnZoneRestored(int zone, int percentStep)

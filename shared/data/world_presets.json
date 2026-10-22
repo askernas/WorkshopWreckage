@@ -138,15 +138,21 @@
 			"Machine Parts": [
 				4,
 				8
+			],
+			"Nuts": [
+				4,
+				10
+			],
+			"Washers": [
+				4,
+				10
 			]
 		},
 		"min_spawn": 3,
 		"max_spawn_default": 10,
 		"max_spawn_high_quantity": 25,
 		"high_quantity_categories": [
-			"Screws",
-			"Nuts",
-			"Washers"
+			"Screws"
 		],
 		"default_box_capacity": 10,
 		"large_box_capacity": 25,

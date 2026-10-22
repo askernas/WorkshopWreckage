@@ -51,10 +51,12 @@ namespace WorkshopWreckage
         static readonly string[] BearingTypes = { "ball", "roller", "flanged", "thrust" };
         static readonly float[] BearingBores = { 3, 4, 5, 6, 8, 10, 12, 15, 17, 20 };
         public static readonly float[] BearingWidths = { 0.28f, 0.35f, 0.45f };
-        static readonly string[] ShaftTypes = { "shaft", "dowel_pin", "clevis_pin", "threaded_rod", "spring_pin" };
+        // Robot Workshop Phase D: "shaft" re-themed in place as the servo output shaft (same index = same ids)
+        static readonly string[] ShaftTypes = { "servo_shaft", "dowel_pin", "clevis_pin", "threaded_rod", "spring_pin" };
         static readonly float[] ShaftDiameters = { 2, 3, 4, 5, 6, 8, 10, 12, 16 };
         static readonly float[] ShaftLengths = { 10, 12, 16, 20, 25, 30, 40, 50, 60, 80, 100, 120 };
-        static readonly string[] ElectronicTypes = { "resistor", "capacitor", "transistor", "ic_chip", "led", "relay", "toggle_switch", "potentiometer" };
+        // Phase D: ic_chip, relay, toggle_switch and potentiometer re-themed in place as robot modules
+        static readonly string[] ElectronicTypes = { "resistor", "capacitor", "transistor", "servo_controller", "led", "motor_driver", "power_connector", "sensor_board" };
         static readonly string[] ElectronicSizes = { "Small", "Medium", "Large" };
         static readonly float[] ElectronicSizeMm = { 6, 9, 13 };
         static readonly Dictionary<string, string[]> ElectronicValues = new()
@@ -62,28 +64,29 @@ namespace WorkshopWreckage
             ["resistor"] = new[] { "10Ω", "47Ω", "100Ω", "220Ω", "470Ω", "1kΩ", "2.2kΩ", "4.7kΩ", "10kΩ", "47kΩ", "100kΩ", "1MΩ" },
             ["capacitor"] = new[] { "1µF", "2.2µF", "4.7µF", "10µF", "22µF", "47µF", "100µF", "220µF", "470µF", "1000µF", "2200µF", "4700µF" },
             ["transistor"] = new[] { "BC547", "BC557", "2N2222", "2N3904", "2N3906", "BD139", "BD140", "TIP31", "TIP32", "S8050", "S8550", "C945" },
-            ["ic_chip"] = new[] { "555", "556", "741", "LM358", "LM386", "4017", "4011", "7400", "7404", "7408", "74595", "ULN2003" },
+            ["servo_controller"] = new[] { "2-ch", "4-ch", "6-ch", "8-ch", "12-ch", "16-ch", "PWM 4-ch", "PWM 8-ch", "CAN 4-ch", "CAN 8-ch", "Smart 4-ch", "Smart 8-ch" },
             ["led"] = new[] { "3V", "3.2V", "2V", "2.1V", "1.8V", "Flash", "Bi-colour", "Diffused", "Clear", "High-bright", "Low-current", "IR" },
-            ["relay"] = new[] { "3V", "5V", "6V", "9V", "12V", "24V", "48V", "5V DPDT", "12V DPDT", "24V DPDT", "Reed 5V", "Reed 12V" },
-            ["toggle_switch"] = new[] { "SPST", "SPDT", "DPDT", "SPST Mini", "SPDT Mini", "DPDT Mini", "ON-OFF-ON", "Momentary", "Locking", "Guarded", "Panel", "Heavy" },
-            ["potentiometer"] = new[] { "1kΩ", "2.2kΩ", "4.7kΩ", "10kΩ", "22kΩ", "47kΩ", "100kΩ", "220kΩ", "470kΩ", "1MΩ", "10k Log", "100k Log" },
+            ["motor_driver"] = new[] { "1A", "2A", "3A", "5A", "10A", "15A", "20A", "Dual 2A", "Dual 5A", "Stepper", "Brushless", "H-bridge" },
+            ["power_connector"] = new[] { "2-pin", "3-pin", "4-pin", "6-pin", "8-pin", "XT30", "XT60", "Barrel", "Molex", "JST", "Anderson", "Locking" },
+            ["sensor_board"] = new[] { "IR", "Ultrasonic", "Hall", "Light", "Proximity", "Encoder", "Gyro", "Accelerometer", "Colour", "Range", "Touch", "Line" },
         };
         static readonly Dictionary<string, string[]> ElectronicColors = new()
         {
             ["resistor"] = new[] { "#d9c49a", "#7fa7c9", "#c9b07f", "#b7a389" },
             ["capacitor"] = new[] { "#2c4f8a", "#1d1d22", "#5a2d6b", "#2f6e4a" },
             ["transistor"] = new[] { "#1b1b1e", "#26262a", "#1e1e24", "#2a2a2e" },
-            ["ic_chip"] = new[] { "#1a1a1d", "#232327", "#1d1f22", "#2b2b30" },
+            ["servo_controller"] = new[] { "#1a1a1d", "#232327", "#1d1f22", "#2b2b30" },
             ["led"] = new[] { "#ff3b2f", "#3cff5a", "#ffd23a", "#3a8bff" },
-            ["relay"] = new[] { "#2a56a8", "#1d1d22", "#c9c2b0", "#2b6b47" },
-            ["toggle_switch"] = new[] { "#b5b8bd", "#1d1d22", "#c23b2b", "#2a56a8" },
-            ["potentiometer"] = new[] { "#2a56a8", "#1d1d22", "#3a7a4a", "#8a6a3a" },
+            ["motor_driver"] = new[] { "#2a56a8", "#1d1d22", "#c9c2b0", "#2b6b47" },
+            ["power_connector"] = new[] { "#b5b8bd", "#1d1d22", "#c23b2b", "#2a56a8" },
+            ["sensor_board"] = new[] { "#2a56a8", "#1d1d22", "#3a7a4a", "#8a6a3a" },
         };
-        static readonly string[] SpecialtyTypes = { "cam", "pulley", "coupling", "hinge", "knob", "u_joint", "flywheel" };
+        // Phase D: pulley, coupling and knob re-themed in place (track idler, wheel hub, sensor lens)
+        static readonly string[] SpecialtyTypes = { "cam", "track_idler", "wheel_hub", "hinge", "sensor_lens", "u_joint", "flywheel" };
         static readonly float[] SpecialtySizes = { 12, 16, 20, 25, 32, 40 };
         // Robot Workshop redesign (Phase B prototype): bracket, valve, pump_housing, pipe_elbow and
         // lever_arm were re-themed in place (same index, so definition ids are unchanged).
-        static readonly string[] MachineTypes = { "chassis_bracket", "motor_housing", "gearbox", "servo_joint", "drive_motor", "camshaft", "crankshaft", "hydraulic_actuator", "limb_housing", "sprocket_hub" };
+        static readonly string[] MachineTypes = { "chassis_bracket", "motor_housing", "gearbox", "servo_joint", "drive_motor", "reduction_cartridge", "shoulder_yoke", "hydraulic_actuator", "limb_housing", "sprocket_hub" };
         static readonly float[] MachineSizes = { 40, 55, 70, 90, 120, 160 };
 
         /// <summary>Axis sizes per category (first axis least significant).</summary>
@@ -309,7 +312,7 @@ namespace WorkshopWreckage
                 case Cat.Shaft:
                 {
                     d.subcategory = ShaftTypes[i[0]];
-                    d.shape = d.subcategory switch { "shaft" => "Drive Shaft", "dowel_pin" => "Dowel Pin", "clevis_pin" => "Clevis Pin", "threaded_rod" => "Threaded Rod", _ => "Spring Pin" };
+                    d.shape = d.subcategory switch { "servo_shaft" => "Servo Output Shaft", "dowel_pin" => "Dowel Pin", "clevis_pin" => "Clevis Pin", "threaded_rod" => "Lead Screw", _ => "Spring Pin" };
                     d.diameterMm = ShaftDiameters[i[1]]; d.lengthMm = ShaftLengths[i[2]];
                     SetMaterial(d, i[3], i[4]);
                     if (d.subcategory == "threaded_rod") { d.threadSize = "M" + Fmt(d.diameterMm); d.threadPitchMm = Snap(0.15f * d.diameterMm + 0.1f, 0.05f); }
@@ -330,8 +333,8 @@ namespace WorkshopWreckage
                     ColorUtility.TryParseHtmlString(ElectronicColors[d.subcategory][i[3]], out d.variantColor);
                     d.diameterMm = size;
                     d.lengthMm = size * (d.subcategory == "resistor" || d.subcategory == "capacitor" ? 2.2f : 1.2f);
-                    d.magnetic = d.subcategory == "relay";
-                    d.rarity = d.subcategory is "ic_chip" or "relay" or "potentiometer" ? 1 : 0;
+                    d.magnetic = d.subcategory == "motor_driver";
+                    d.rarity = d.subcategory is "servo_controller" or "motor_driver" or "sensor_board" ? 1 : 0;
                     d.geometryKey = "elec:" + d.subcategory;
                     d.worldScale = size / 1000f * vs;
                     if (d.subcategory is "resistor" or "capacitor" or "led" or "transistor") d.restMode = RestMode.Long;
@@ -342,14 +345,14 @@ namespace WorkshopWreckage
                 case Cat.Specialty:
                 {
                     d.subcategory = SpecialtyTypes[i[0]];
-                    d.shape = d.subcategory switch { "cam" => "Cam Lobe", "pulley" => "V-Pulley", "coupling" => "Shaft Coupling", "hinge" => "Butt Hinge", "knob" => "Knurled Knob", "u_joint" => "Universal Joint", _ => "Flywheel" };
+                    d.shape = d.subcategory switch { "cam" => "Cam Lobe", "track_idler" => "Track Idler Wheel", "wheel_hub" => "Drive Wheel Hub", "hinge" => "Butt Hinge", "sensor_lens" => "Sensor Lens Module", "u_joint" => "Universal Joint", _ => "Flywheel" };
                     float size = SpecialtySizes[i[1]];
                     d.diameterMm = size;
-                    d.lengthMm = size * (d.subcategory is "coupling" or "u_joint" or "hinge" ? 1.6f : 0.45f);
+                    d.lengthMm = size * (d.subcategory is "u_joint" or "hinge" ? 1.6f : d.subcategory == "wheel_hub" ? 0.8f : 0.45f);
                     SetMaterial(d, i[2], i[3]);
                     d.geometryKey = "spec:" + d.subcategory;
                     d.worldScale = size / 1000f * vs;
-                    if (d.subcategory is "coupling" or "u_joint") d.restMode = RestMode.Long;
+                    if (d.subcategory == "u_joint") d.restMode = RestMode.Long;
                     d.displayName = $"{Fmt(size)}mm {MaterialLabel(d)} {d.shape}";
                     Weight(d, size * size * d.lengthMm * 0.5f);
                     break;
@@ -360,11 +363,11 @@ namespace WorkshopWreckage
                     d.shape = d.subcategory switch
                     {
                         "chassis_bracket" => "Chassis Bracket", "motor_housing" => "Motor Housing", "gearbox" => "Gearbox", "servo_joint" => "Servo Joint",
-                        "drive_motor" => "Drive Motor", "camshaft" => "Camshaft", "crankshaft" => "Crankshaft", "hydraulic_actuator" => "Hydraulic Actuator",
+                        "drive_motor" => "Drive Motor", "reduction_cartridge" => "Reduction Gear Cartridge", "shoulder_yoke" => "Shoulder Yoke", "hydraulic_actuator" => "Hydraulic Actuator",
                         "limb_housing" => "Limb Housing", _ => "Sprocket Hub Assembly",
                     };
                     float size = MachineSizes[i[1]];
-                    bool longPart = d.subcategory is "camshaft" or "crankshaft" or "limb_housing" or "hydraulic_actuator";
+                    bool longPart = d.subcategory is "limb_housing" or "hydraulic_actuator";
                     d.diameterMm = size; d.lengthMm = size * (longPart ? 1.8f : 1f);
                     SetMaterial(d, i[2], i[3]);
                     d.geometryKey = "mach:" + d.subcategory;

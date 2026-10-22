@@ -19,6 +19,15 @@ namespace WorkshopWreckage
             ["mach:drive_motor"] = DriveMotor,
             ["mach:limb_housing"] = LimbHousing,
             ["mach:chassis_bracket"] = ChassisBracket,
+            ["mach:reduction_cartridge"] = ReductionCartridge,
+            ["mach:shoulder_yoke"] = ShoulderYoke,
+            ["spec:wheel_hub"] = WheelHub,
+            ["spec:track_idler"] = TrackIdler,
+            ["spec:sensor_lens"] = SensorLens,
+            ["elec:servo_controller"] = ServoController,
+            ["elec:motor_driver"] = MotorDriver,
+            ["elec:sensor_board"] = SensorBoard,
+            ["elec:power_connector"] = PowerConnector,
             // Sorting Arm unique parts (robot_parts.json, yellow enamel with red joints)
             ["robot:sa_coupler"] = b => { b.Box(new Vector3(0, -0.3f, 0), new Vector3(1f, 0.16f, 0.7f), 0, Part); b.Box(new Vector3(0, -0.14f, -0.3f), new Vector3(0.7f, 0.2f, 0.12f), 2, DarkSteel); b.Cyl(new Vector3(0, -0.22f, 0.05f), new Vector3(0, 0.2f, 0.05f), 0.24f, 2, ArmRed); foreach (float x in new[] { -0.4f, 0.4f }) b.Cyl(new Vector3(x, -0.38f, 0.2f), new Vector3(x, -0.2f, 0.2f), 0.05f, 2, Hole); b.Box(new Vector3(0.3f, -0.21f, 0.25f), new Vector3(0.1f, 0.02f, 0.06f), 2, Lens); },
             ["robot:sa_shoulder"] = b => { b.Cyl(new Vector3(0, -0.4f, 0), new Vector3(0, 0.05f, 0), 0.45f, 2, ArmRed); b.Cyl(new Vector3(0, 0.05f, 0), new Vector3(0, 0.15f, 0), 0.38f, 2, DarkSteel); b.Box(new Vector3(0, 0.3f, 0), new Vector3(0.7f, 0.3f, 0.5f), 0, Part); b.Cyl(new Vector3(-0.38f, 0.32f, 0), new Vector3(0.38f, 0.32f, 0), 0.16f, 2, Chrome); },
@@ -34,6 +43,132 @@ namespace WorkshopWreckage
         };
 
         static readonly Color ArmRed = new(0.7f, 0.12f, 0.08f, 0);
+        static readonly Color Pcb = new(0.1f, 0.32f, 0.16f, 0), Chip = new(0.07f, 0.07f, 0.08f, 0), Ivory = new(0.88f, 0.86f, 0.78f, 0), Alu = new(0.72f, 0.74f, 0.76f, 0);
+
+        // ------------------------------------------------------------------ Phase D families
+
+        /// <summary>A gearbox housing with one side open on a big exposed reduction gear.</summary>
+        static void ReductionCartridge(B b)
+        {
+            b.Box(new Vector3(-0.08f, 0, 0), new Vector3(0.8f, 0.62f, 0.6f), 0, Part);
+            b.Box(new Vector3(-0.08f, -0.34f, 0), new Vector3(0.95f, 0.06f, 0.7f), 0, Part);          // flange
+            b.Cyl(new Vector3(0.34f, 0.04f, 0), new Vector3(0.42f, 0.04f, 0), 0.3f, 2, DarkSteel);   // exposed gear
+            for (int k = 0; k < 14; k++)
+            {
+                float a = k * Mathf.PI * 2 / 14;
+                b.Box(new Vector3(0.38f, 0.04f + Mathf.Sin(a) * 0.32f, Mathf.Cos(a) * 0.32f), new Vector3(0.08f, 0.06f, 0.06f), 2, DarkSteel);
+            }
+            b.Cyl(new Vector3(0.42f, 0.04f, 0), new Vector3(0.56f, 0.04f, 0), 0.07f, 2, Chrome);    // output shaft
+            b.Cyl(new Vector3(-0.48f, 0.12f, 0), new Vector3(-0.58f, 0.12f, 0), 0.12f, 2, DarkSteel);   // input
+            b.Box(new Vector3(-0.1f, 0.18f, 0.305f), new Vector3(0.22f, 0.1f, 0.01f), 2, Warn);       // ratio plate
+        }
+
+        /// <summary>U-shaped shoulder yoke: a base block with two arms and a through pivot.</summary>
+        static void ShoulderYoke(B b)
+        {
+            b.Box(new Vector3(0, -0.3f, 0), new Vector3(0.9f, 0.26f, 0.55f), 0, Part);
+            foreach (float x in new[] { -0.36f, 0.36f })
+            {
+                b.Box(new Vector3(x, 0.05f, 0), new Vector3(0.17f, 0.55f, 0.5f), 0, Part);
+                b.Cyl(new Vector3(x - 0.1f, 0.22f, 0), new Vector3(x + 0.1f, 0.22f, 0), 0.2f, 2, ArmRed);
+            }
+            b.Cyl(new Vector3(-0.52f, 0.22f, 0), new Vector3(0.52f, 0.22f, 0), 0.06f, 2, Chrome);   // pivot pin
+            b.Cyl(new Vector3(0, -0.44f, 0), new Vector3(0, -0.5f, 0), 0.22f, 2, DarkSteel);        // turntable stub
+            foreach (float x in new[] { -0.3f, 0.3f }) b.Cyl(new Vector3(x, -0.17f, 0.18f), new Vector3(x, -0.15f, 0.18f), 0.04f, 2, DarkSteel, 6);
+        }
+
+        static void WheelHub(B b)
+        {
+            b.Cyl(new Vector3(0, -0.4f, 0), new Vector3(0, -0.15f, 0), 0.5f, 0, Part);              // flange
+            b.Cyl(new Vector3(0, -0.15f, 0), new Vector3(0, 0.4f, 0), 0.26f, 0, Part);               // hub
+            b.Cyl(new Vector3(0, 0.4f, 0), new Vector3(0, 0.41f, 0), 0.12f, 2, Hole);
+            for (int k = 0; k < 5; k++)
+            {
+                float a = k * Mathf.PI * 2 / 5;
+                var p = new Vector3(Mathf.Cos(a) * 0.36f, -0.15f, Mathf.Sin(a) * 0.36f);
+                b.Cyl(p, p + Vector3.up * 0.14f, 0.04f, 2, Chrome, 8);                                 // wheel studs
+            }
+            b.Cyl(new Vector3(0, -0.15f, 0), new Vector3(0, -0.12f, 0), 0.3f, 2, DarkSteel);
+        }
+
+        static void TrackIdler(B b)
+        {
+            foreach (float y in new[] { -0.18f, 0.18f }) b.Cyl(new Vector3(0, y - 0.04f, 0), new Vector3(0, y + 0.04f, 0), 0.5f, 0, Part);   // flanges
+            b.Cyl(new Vector3(0, -0.14f, 0), new Vector3(0, 0.14f, 0), 0.4f, 0, Part);               // running rim
+            b.Cyl(new Vector3(0, -0.22f, 0), new Vector3(0, 0.22f, 0), 0.13f, 2, Chrome);            // axle hub
+            for (int k = 0; k < 4; k++)
+            {
+                float a = k * Mathf.PI / 2 + 0.4f;
+                var p = new Vector3(Mathf.Cos(a) * 0.27f, 0.222f, Mathf.Sin(a) * 0.27f);
+                b.Cyl(p, p + Vector3.up * 0.005f, 0.07f, 2, Hole, 10);                                // lightening holes
+            }
+        }
+
+        static void SensorLens(B b)
+        {
+            b.Cyl(new Vector3(0, -0.22f, 0), new Vector3(0, 0.1f, 0), 0.48f, 0, Part);               // housing
+            b.Cyl(new Vector3(0, 0.1f, 0), new Vector3(0, 0.16f, 0), 0.36f, 2, DarkSteel);          // bezel
+            b.Cyl(new Vector3(0, 0.16f, 0), new Vector3(0, 0.2f, 0), 0.28f, 2, Lens);                // lens
+            b.Cyl(new Vector3(0.1f, 0.2f, 0.1f), new Vector3(0.1f, 0.205f, 0.1f), 0.06f, 2, Ivory, 8); // glint
+            for (int k = 0; k < 3; k++) b.Box(new Vector3(-0.3f + k * 0.08f, 0.11f, -0.3f), new Vector3(0.04f, 0.02f, 0.04f), 2, k == 0 ? ArmRed : Lens);
+            b.Cyl(new Vector3(0.45f, -0.1f, 0), new Vector3(0.6f, -0.1f, 0), 0.06f, 2, Rubber);     // cable gland
+        }
+
+        static void ServoController(B b)
+        {
+            b.Box(new Vector3(0, -0.2f, 0), new Vector3(1.6f, 0.08f, 1.0f), 0, Part);                // board (variant colour)
+            b.Box(new Vector3(-0.2f, -0.12f, 0.05f), new Vector3(0.42f, 0.08f, 0.42f), 2, Chip);     // MCU
+            b.Box(new Vector3(0.4f, -0.12f, -0.2f), new Vector3(0.22f, 0.07f, 0.22f), 2, Chip);
+            for (int k = 0; k < 8; k++) b.Box(new Vector3(-0.7f + k * 0.2f, 0.0f, 0.42f), new Vector3(0.06f, 0.36f, 0.06f), 1, Part);   // servo header pins
+            b.Box(new Vector3(0, -0.1f, 0.42f), new Vector3(1.6f, 0.12f, 0.12f), 2, Chip);           // header strip
+            foreach (float x in new[] { 0.55f, 0.7f }) b.Cyl(new Vector3(x, -0.16f, 0.15f), new Vector3(x, 0.08f, 0.15f), 0.07f, 2, Alu, 10);   // caps
+            b.Box(new Vector3(-0.68f, -0.06f, -0.3f), new Vector3(0.22f, 0.2f, 0.3f), 2, Ivory);    // power plug
+        }
+
+        static void MotorDriver(B b)
+        {
+            b.Box(new Vector3(0, -0.45f, 0), new Vector3(1.0f, 0.08f, 0.8f), 0, Part);               // board
+            b.Box(new Vector3(0, -0.3f, 0), new Vector3(0.7f, 0.22f, 0.6f), 2, Alu);                 // heatsink base
+            for (int k = 0; k < 7; k++) b.Box(new Vector3(-0.3f + k * 0.1f, 0.05f, 0), new Vector3(0.035f, 0.5f, 0.6f), 2, Alu);   // fins
+            b.Box(new Vector3(0, -0.36f, 0.36f), new Vector3(0.6f, 0.14f, 0.12f), 2, new Color(0.2f, 0.5f, 0.25f, 0));   // screw terminal
+            for (int k = 0; k < 4; k++) b.Cyl(new Vector3(-0.22f + k * 0.15f, -0.28f, 0.36f), new Vector3(-0.22f + k * 0.15f, -0.27f, 0.36f), 0.035f, 1, Part, 6);
+        }
+
+        static void SensorBoard(B b)
+        {
+            b.Box(new Vector3(0, -0.5f, 0), new Vector3(1.2f, 0.08f, 0.9f), 0, Part);
+            foreach (float x in new[] { -0.3f, 0.3f })
+            {
+                b.Cyl(new Vector3(x, -0.46f, -0.1f), new Vector3(x, 0.15f, -0.1f), 0.24f, 1, Part, 16);   // transducer cans
+                b.Cyl(new Vector3(x, 0.15f, -0.1f), new Vector3(x, 0.17f, -0.1f), 0.2f, 2, Chip, 16);
+            }
+            b.Box(new Vector3(0, -0.42f, 0.3f), new Vector3(0.3f, 0.08f, 0.16f), 2, Chip);
+            for (int k = 0; k < 4; k++) b.Box(new Vector3(-0.15f + k * 0.1f, -0.6f, 0.42f), new Vector3(0.03f, 0.25f, 0.03f), 1, Part);
+        }
+
+        static void PowerConnector(B b)
+        {
+            b.Box(new Vector3(0, -0.15f, 0), new Vector3(0.7f, 1.0f, 0.6f), 0, Part);               // housing
+            b.Box(new Vector3(0, 0.38f, 0), new Vector3(0.5f, 0.06f, 0.4f), 2, Chip);               // mating face
+            for (int k = 0; k < 3; k++) b.Cyl(new Vector3(-0.15f + k * 0.15f, 0.38f, 0), new Vector3(-0.15f + k * 0.15f, 0.55f, 0), 0.04f, 1, Part, 8);   // pins
+            b.Box(new Vector3(0.36f, 0, 0), new Vector3(0.04f, 0.4f, 0.2f), 2, Chip);               // latch
+            foreach (var (x, c) in new[] { (-0.12f, WireRed), (0.0f, Rubber), (0.12f, Warn) })
+                b.Cyl(new Vector3(x, -0.65f, 0), new Vector3(x * 1.4f, -0.95f, 0.05f), 0.045f, 2, c, 8);   // wires
+        }
+
+        /// <summary>Servo output shaft, aspect a (length / diameter): splined top, keyed flat,
+        /// a collar and a red bearing cap at the base.</summary>
+        static void ServoShaft(B b, float a)
+        {
+            float h = a / 2;
+            b.Cyl(new Vector3(0, -h + 0.3f, 0), new Vector3(0, h - 0.35f, 0), 0.5f, 0, Part);
+            b.Cyl(new Vector3(0, h - 0.35f, 0), new Vector3(0, h, 0), 0.42f, 2, Chrome);            // splined end
+            for (int k = 0; k < 8; k++) { float t = k * Mathf.PI / 4; b.Box(new Vector3(Mathf.Cos(t) * 0.42f, h - 0.17f, Mathf.Sin(t) * 0.42f), new Vector3(0.06f, 0.3f, 0.06f), 2, Chrome); }
+            if (a >= 3) b.Box(new Vector3(0.47f, h - 0.9f, 0), new Vector3(0.06f, Mathf.Min(0.9f, a * 0.25f), 0.3f), 2, DarkSteel);   // key flat
+            b.Cyl(new Vector3(0, -h + 0.3f, 0), new Vector3(0, -h + 0.65f, 0), 0.75f, 2, ArmRed);      // bearing cap
+            b.Cyl(new Vector3(0, -h, 0), new Vector3(0, -h + 0.3f, 0), 0.45f, 0, Part);
+            if (a >= 4) b.Cyl(new Vector3(0, h - 1.2f, 0), new Vector3(0, h - 1.0f, 0), 0.65f, 2, DarkSteel);   // collar
+        }
 
         /// <summary>A tapered box-section arm segment with joint bosses at both ends.</summary>
         static void ArmBeam(B b, float len, float w)
@@ -45,13 +180,15 @@ namespace WorkshopWreckage
             b.Cyl(new Vector3(w * 0.9f, -len * 0.3f, 0), new Vector3(w * 0.9f, len * 0.3f, 0), 0.035f, 2, Rubber);   // cable
         }
 
-        public static bool Has(string key) => Builders.ContainsKey(key);
+        const string ServoShaftPrefix = "shaft:servo_shaft:a";
+        public static bool Has(string key) => Builders.ContainsKey(key) || key.StartsWith(ServoShaftPrefix);
         public static IEnumerable<string> Keys => Builders.Keys;
 
         public static MeshLibrary.Entry Build(string key, int lod)
         {
             var b = new B { seg = lod == MeshLibrary.LodInspect ? 24 : 12 };
-            Builders[key](b);
+            if (key.StartsWith(ServoShaftPrefix)) ServoShaft(b, float.Parse(key.Substring(ServoShaftPrefix.Length), System.Globalization.CultureInfo.InvariantCulture));
+            else Builders[key](b);
             return b.Finish(key + "_lod" + lod);
         }
 

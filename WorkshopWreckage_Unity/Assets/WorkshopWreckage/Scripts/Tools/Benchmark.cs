@@ -44,14 +44,29 @@ namespace WorkshopWreckage
             var timings = new FrameTiming[1];
             foreach (var po in Json.Arr(cfg["poses"]))
             {
+                if (g.args.ContainsKey("benchactiveonly")) break;   // QA: only the active pose
                 var pose = Json.Obj(po);
                 var p = Json.Arr(pose["pos"]);
                 g.PlaceCamera(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0},{1},{2},{3},{4}", Json.F(p[0]), Json.F(p[1]), Json.F(p[2]), Json.Num(pose, "yaw"), Json.Num(pose, "pitch")));
+                yield return Measure(Json.Str(pose, "name"));
+            }
+            // active: every mobile robot working and three Sorting Arms sorting staged parts
+            ActivateEverything(g);
+            var sk = g.sockets.Values.OrderBy(x => x.id).First();
+            var eye = sk.point + sk.facing * Vector3.forward * 3.2f + Vector3.down * 0.4f;
+            var look = Quaternion.LookRotation(sk.point + Vector3.down * 1.0f - eye);
+            g.PlaceCamera(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0},{1},{2},{3},{4}", eye.x, eye.y, -eye.z, -look.eulerAngles.y, -NormalAngle(look.eulerAngles.x)));
+            yield return Measure("active_robots_and_arms");
+
+            IEnumerator Measure(string poseName)
+            {
+                Robot.cpuMs = 0; Robot.worstMs = 0; SortingArm.cpuMs = 0;
                 float warm = 0;
                 while (warm < (float)Json.Num(cfg, "warmup_s", 1.5)) { yield return null; warm += Time.unscaledDeltaTime; }
                 var frames = new List<float>();
                 double dc = 0, bt = 0, tr = 0, gpu = 0, cpu = 0;
                 int n = 0, gpuN = 0;
+                Robot.cpuMs = 0; Robot.worstMs = 0; SortingArm.cpuMs = 0;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 long last = sw.ElapsedTicks;
                 int gc0 = System.GC.CollectionCount(0);
@@ -76,7 +91,7 @@ namespace WorkshopWreckage
                 all.AddRange(frames);
                 var pick = MeasurePicking(g, Json.Int(cfg, "picks_per_pose", 300));
                 var e = Stats(frames);
-                e["name"] = Json.Str(pose, "name");
+                e["name"] = poseName;
                 e["draw_calls"] = System.Math.Round(dc / n);
                 e["batches"] = System.Math.Round(bt / n);
                 e["triangles"] = System.Math.Round(tr / n);
@@ -89,6 +104,10 @@ namespace WorkshopWreckage
                 e["pick_max_us"] = pick.max;
                 e["pick_hit_rate"] = pick.hit;
                 e["visible_items"] = (double)g.renderer.VisibleCount;
+                e["robots_cpu_ms_per_frame"] = System.Math.Round(Robot.cpuMs / System.Math.Max(1, n), 3);
+                e["robot_worst_update_ms"] = System.Math.Round(Robot.worstMs, 1);
+                e["robot_worst_update"] = Robot.worstWhat;
+                e["arms_cpu_ms_per_frame"] = System.Math.Round(SortingArm.cpuMs / System.Math.Max(1, n), 3);
                 poses.Add(e);
                 Debug.Log($"[bench] {e["name"]}: {e["fps_avg"]} fps avg, {e["fps_1pct_low"]} 1% low, {e["draw_calls"]} draw calls, gpu {e["gpu_ms"]} ms, pick {pick.avg} us");
             }
@@ -136,6 +155,43 @@ namespace WorkshopWreckage
             }
             return (System.Math.Round(total / count, 1), System.Math.Round(worst, 1), System.Math.Round((double)hits / count, 2));
         }
+        static float NormalAngle(float a) => a > 180 ? a - 360 : a;
+
+        /// <summary>Builds and starts every robot (mobile ones go to work, the first three
+        /// Sorting Arms are mounted on the first sockets, each with parts staged below it).</summary>
+        static void ActivateEverything(Game g)
+        {
+            var wb = g.workbench;
+            g.progression.level = g.progression.maxLevel;
+            foreach (var p in wb.projects)
+            {
+                var r = wb.RobotOf(p);
+                if (r == null || r.Operational) continue;
+                if (p.crafted) wb.FillRecipe(p); else wb.ForceInstall(p);
+                r.SetOperational();
+            }
+            // QA switches: --benchnorobots keeps the mobile robots idle, --benchnoarms leaves the arms unmounted
+            if (g.args.ContainsKey("benchnorobots")) foreach (var r in g.robots.Where(r => r.Mobile)) r.paused = true;
+            var arms = g.args.ContainsKey("benchnoarms") ? new List<SortingArm>() : g.robots.Where(r => r.arm != null).Select(r => r.arm).ToList();
+            var sockets = g.sockets.Values.OrderBy(s => s.id).ToList();
+            for (int k = 0; k < arms.Count && k < sockets.Count; k++)
+            {
+                arms[k].PickUp();
+                arms[k].Mount(sockets[k]);
+                foreach (var box in sockets[k].dests.Take(6))
+                {
+                    var id = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).storageBox == box).Select(i => i.id).DefaultIfEmpty(-1).First();
+                    var spot = g.robots[0].StagingSpot(box);
+                    if (id < 0 || !spot.HasValue) continue;
+                    var def = g.world.DefOf(id);
+                    g.index.Remove(id);
+                    g.world.SetTransform(id, Matrix4x4.TRS(spot.Value + Vector3.up * (ItemDatabase.Extents(def)[2] * 0.5f), Quaternion.identity, Vector3.one * def.worldScale));
+                    g.world.SetState(id, ItemState.InWorld, "stage:" + box);
+                    g.index.Insert(id);
+                }
+            }
+        }
+
         /// <summary>Active mesh renderers in the scene, by top-level owner (draw-call budget).</summary>
         static Dictionary<string, object> SceneRenderers(Game g)
         {

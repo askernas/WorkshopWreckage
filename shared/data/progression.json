@@ -13,6 +13,7 @@
 		"sort_item_robot_assisted": 0.5,
 		"complete_definition": 24,
 		"complete_definition_per_copy": 1.5,
+		"half_definition_share": 0.5,
 		"zone_restored_25": 40,
 		"zone_restored_50": 60,
 		"zone_restored_75": 80,
@@ -22,6 +23,7 @@
 		"robot_repaired": 300,
 		"objective_completed": 100
 	},
+	"half_definition_note": "Partial set credit: when half of a definition's copies (sets of 2+) are stored, this share of its completion XP is paid at once; the rest on completion (total unchanged). Gives set-focused play a moderate, not a large, head start (tools/audit/progression_sim.py: Standard L19 at 51-53% of the work broad vs 39-40% set by set).",
 	"anti_exploit": {
 		"sort_xp_once_per_instance": true,
 		"discover_xp_once_per_definition": true,
@@ -31,7 +33,7 @@
 	"preset_xp_scale": {
 		"standard": 1.0,
 		"large": 0.62,
-		"massive": 0.45,
+		"massive": 0.48,
 		"comment": "Per-item XP shrinks with world size so level 25 is reached at a similar completion fraction in every preset. Balance target: Massive completes in ~1.8x Standard's time (items x2.44)."
 	},
 	"skills": [
@@ -95,7 +97,9 @@
 		{"id": "hover_sorting", "robot": "hoverbot", "name": "Sorting Speed", "description": "Faster pick-up and placement.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "pick_time", "mode": "percent", "effect_per_rank": -0.15, "status": "active"},
 		{"id": "hover_capacity", "robot": "hoverbot", "name": "Carrying Capacity", "description": "Rank 2 adds a second claw hook: two light parts per trip.", "max_rank": 2, "cost_per_rank": [1, 2], "stat": "capacity", "mode": "add", "effect_per_rank": 0.5, "also": {"item_types": 0.5}, "status": "active"},
 		{"id": "hover_staging", "robot": "hoverbot", "name": "Staging Prioritization", "description": "Empties the fullest staging zones first, then the closest.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "staging_priority", "mode": "rank", "effect_per_rank": 1, "status": "active"},
-		{"id": "hover_fleet", "robot": "hoverbot", "name": "Fleet Coordination", "description": "Hoverbots split the staging zones between them instead of crowding the same one.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "fleet_coordination", "mode": "rank", "effect_per_rank": 1, "status": "active"}
+		{"id": "hover_fleet", "robot": "hoverbot", "name": "Fleet Coordination", "description": "Hoverbots split the staging zones between them instead of crowding the same one.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "fleet_coordination", "mode": "rank", "effect_per_rank": 1, "status": "active"},
+		{"id": "arm_servos", "robot": "sorting_arm", "name": "Faster Servos", "description": "Stronger joint servos: each rank makes the whole pick-and-place cycle 15% faster.", "max_rank": 3, "cost_per_rank": [1, 1, 2], "stat": "cycle_speed", "mode": "percent", "effect_per_rank": 0.15, "status": "active"},
+		{"id": "arm_gripper", "robot": "sorting_arm", "name": "Wide Gripper", "description": "Longer fingers: handles bigger parts (0.36 m, then 0.41 m, then 0.45 m). Its reach stays one half-cabinet.", "max_rank": 2, "cost_per_rank": [1, 2], "stat": "max_item_size", "mode": "add", "effect_per_rank": 0.045, "status": "active"}
 	],
 	"respec": {"status": "active", "comment": "From this level the Robots screen can refund every robot upgrade point (player skills stay)."},
 	"restoration": {

@@ -175,7 +175,7 @@ namespace WorkshopWreckage
         public int sortedTotal, robotPartsFound;
         public int CollectedTotal => _collected.Values.Sum();
         public event Action<string, string> Milestone;
-        public event Action<int> Discovered, DefinitionCompleted;
+        public event Action<int> Discovered, DefinitionCompleted, DefinitionHalf;
 
         public ProgressTracker(ItemWorld w, List<string> zones)
         {
@@ -236,7 +236,9 @@ namespace WorkshopWreckage
                         if (pct >= step) Mile($"zone_{inst.zone}_{step}", $"{zoneNames[inst.zone]} {step}% restored");
                 }
                 // unique robot parts follow the workbench's rules, not collection completion
-                if (!def.IsRobotPart && SortedOf(inst.defId) == world.TotalOf(inst.defId)) DefinitionCompleted?.Invoke(inst.defId);
+                int total = world.TotalOf(inst.defId), have = SortedOf(inst.defId);
+                if (!def.IsRobotPart && total >= 2 && have == (total + 1) / 2 && have < total) DefinitionHalf?.Invoke(inst.defId);
+                if (!def.IsRobotPart && have == total) DefinitionCompleted?.Invoke(inst.defId);
                 foreach (var m in SortMilestones)
                     if (sortedTotal == m) Mile("sorted_" + m, m == 1 ? "First part sorted!" : $"{m} parts sorted");
             }
