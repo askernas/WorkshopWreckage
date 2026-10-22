@@ -6,8 +6,9 @@ using UnityEngine.Rendering;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Loads the shared item meshes (OBJ with a vertex-colour extension,
-    /// exported by the Godot reference) and mirrors them into Unity space.
+    /// <summary>Loads the shared item meshes (OBJ with a vertex-colour extension in
+    /// shared/meshes) and mirrors them into Unity space; robot-themed salvage keys are
+    /// built in code (SalvageMeshes).
     /// Submeshes are material slots: 0 = part material, 1 = tinned metal, 2 = accents.</summary>
     public static class MeshLibrary
     {
@@ -25,7 +26,7 @@ namespace WorkshopWreckage
 
         static string FileFor(string key, int lod) => Shared.MeshPath(key.Replace(":", "_") + "__lod" + lod + ".obj.gz");
 
-        public static bool Has(string key) => _cache.ContainsKey(key + "|1") || File.Exists(FileFor(key, LodWorld));
+        public static bool Has(string key) => SalvageMeshes.Has(key) || _cache.ContainsKey(key + "|1") || File.Exists(FileFor(key, LodWorld));
 
         static IEnumerable<string> Lines(string path)
         {
@@ -41,7 +42,7 @@ namespace WorkshopWreckage
             var k = key + "|" + lod;
             if (!_cache.TryGetValue(k, out var e))
             {
-                e = Load(FileFor(key, lod), key);
+                e = SalvageMeshes.Has(key) ? SalvageMeshes.Build(key, lod) : Load(FileFor(key, lod), key);
                 _cache[k] = e;
             }
             return e;

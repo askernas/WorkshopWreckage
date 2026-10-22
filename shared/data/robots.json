@@ -73,6 +73,25 @@
 			],
 			"extra_units_note": "Further Hoverbots are crafted from ordinary parts the player personally carries to the workbench once the first Hoverbot is operational. Materials match by category (any definition of it). A consumed part is INSTALLED: it counts as accounted for in its definition's collection (see DESIGN.md 'Crafting consumption'), so crafting can never make a set impossible to complete.",
 			"personality": "Curious, enthusiastic, slightly overactive. Reaches the high shelves and stores the piles the small robots leave."
+		},
+		"sorting_arm": {
+			"name": "Sorting Arm", "max_instances": 3, "strategy": "stationary",
+			"locomotion": "fixed", "height": 0.84,
+			"capacity": 1, "item_types": 1, "walk_speed": 0, "turn_speed_deg": 0,
+			"reach": 2.1, "reach_height": 2.1, "max_item_size": 0.36,
+			"can_direct_store": true, "can_climb": false, "can_fly": false,
+			"pick_time": 1.1, "deposit_time": 1.0, "cycle_speed": 1.0,
+			"battery_minutes": 0, "charge_minutes": 0, "radius": 0.2,
+			"strengths": ["Fast local sorting: clears the staging piles below its half of a drawer cabinet", "Works all day on workshop power"],
+			"limitations": ["Stationary: serves only the 18 drawers (3 x 6) of the cabinet half it is mounted on", "Never picks loose parts from the floor or other cabinets", "The player carries it from socket to socket"],
+			"assembly": {"requires": {"shoulder turret": ["docking coupler"], "control unit": ["shoulder turret"], "upper arm": ["shoulder turret"], "motor cartridge": ["upper arm"], "elbow servo": ["upper arm"], "forearm": ["elbow servo"], "wrist rotator": ["forearm"], "sensor head": ["wrist rotator"], "left finger": ["wrist rotator"], "right finger": ["wrist rotator"], "cable harness": ["control unit", "forearm"]}},
+			"extra_units": [
+				{"id": "sorting_arm_2", "name": "Sorting Arm #2", "materials": {"Machine Parts": 4, "Gears": 6, "Bearings": 4, "Electronics": 6, "Springs": 2}},
+				{"id": "sorting_arm_3", "name": "Sorting Arm #3", "materials": {"Machine Parts": 6, "Gears": 6, "Bearings": 6, "Electronics": 8, "Shafts & Pins": 4}}
+			],
+			"extra_units_note": "The first arm needs its 12 unique parts; further arms are crafted from ordinary salvage (by category), like Hoverbot #2/#3. At most max_instances arms exist.",
+			"sockets_note": "Arms mount only on fixed sockets: two per 6 x 6 drawer cabinet (storage_layout.json sockets: SK-<unit>-L serves columns 1-3, SK-<unit>-R columns 4-6, 18 drawers each).",
+			"personality": "Patient, precise, a little proud. Ticks its servos while it waits."
 		}
 	}
 }

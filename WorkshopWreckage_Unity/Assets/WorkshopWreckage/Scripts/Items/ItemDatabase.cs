@@ -26,6 +26,8 @@ namespace WorkshopWreckage
         public readonly List<Dictionary<string, object>> units = new();
         public readonly Dictionary<string, Dictionary<string, object>> boxes = new();
         public readonly Dictionary<string, Dictionary<string, object>> stations = new();
+        /// <summary>Sorting Arm sockets (storage_layout.json): id -> (unit, side, served destination ids).</summary>
+        public readonly Dictionary<string, (string unit, string side, List<string> dests)> sockets = new();
         public readonly List<string> errors = new();
         public long catalogHash;
         readonly Dictionary<string, int> _unitIndex = new();
@@ -97,6 +99,13 @@ namespace WorkshopWreckage
             {
                 var d = Json.Obj(s);
                 stations[Json.Str(d, "id")] = d;
+            }
+            foreach (var s in Json.Arr(sto.GetValueOrDefault("sockets")))
+            {
+                var d = Json.Obj(s);
+                var served = Json.Arr(d.GetValueOrDefault("dests")).Select(x => x.ToString()).ToList();
+                foreach (var b in served) if (!boxes.ContainsKey(b)) errors.Add($"Socket '{Json.Str(d, "id")}' serves unknown destination '{b}'");
+                sockets[Json.Str(d, "id")] = (Json.Str(d, "unit"), Json.Str(d, "side"), served);
             }
         }
 

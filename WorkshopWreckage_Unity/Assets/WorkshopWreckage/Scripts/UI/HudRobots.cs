@@ -186,6 +186,14 @@ namespace WorkshopWreckage
             });
             ab.interactable = wb.CanActivate(p);
             ab.GetComponent<LayoutElement>().preferredWidth = 300;
+            if (wb.RobotOf(p) is Robot armBot && armBot.arm != null && armBot.Operational && armBot.arm.place != SortingArm.Place.Carried)
+            {
+                // the finished arm: into the player's hands (also the way to recover a mounted one)
+                var arm = armBot.arm;
+                string label = arm.place == SortingArm.Place.Bench ? $"Carry {p.name} to a socket" : $"Fetch {p.name} from {arm.socket?.id}";
+                var carry = MakeButton(_wbActions, label, () => { if (arm.PickUp()) _g.SetState("play"); });
+                carry.GetComponent<LayoutElement>().preferredWidth = 320;
+            }
             if (Unlocks.DebugMode && !wb.Operational(p))
             {
                 var db = MakeButton(_wbActions, "DEBUG: unlock now", () =>

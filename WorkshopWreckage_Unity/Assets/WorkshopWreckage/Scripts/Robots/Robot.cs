@@ -29,6 +29,10 @@ namespace WorkshopWreckage
         /// <summary>id: this instance ("hoverbot_2"); type: its robots.json entry ("hoverbot").</summary>
         public string id, type, displayName, locomotion, strategy;
         public string Owner => "robot:" + id;
+        /// <summary>The Sorting Arm: never navigates; SortingArm drives it once operational.</summary>
+        public bool Stationary => strategy == "stationary";
+        public bool Mobile => !Stationary;
+        public SortingArm arm;
         public Mode mode = Mode.Assembling;
         Step _step = Step.Choose;
         public readonly List<int> carried = new();
@@ -113,7 +117,7 @@ namespace WorkshopWreckage
             _canClimb = Json.Bool(c, "can_climb");
             _largeItem = (float)Json.Num(RootConfig(), "large_item_size", 0.25);
             ApplyUpgrades();
-            if (!Flies)
+            if (!Flies && !Stationary)
             {
                 _nav = new NavGrid(g.layout, _radius, _height);
                 _nav.RefreshItems(g.world, _stepH);
@@ -127,11 +131,18 @@ namespace WorkshopWreckage
                 "spiderbot" => new GameObject("Model").AddComponent<SpiderbotModel>(),
                 "caterpillarbot" => new GameObject("Model").AddComponent<CaterpillarbotModel>(),
                 "hoverbot" => new GameObject("Model").AddComponent<HoverbotModel>(),
+                "sorting_arm" => new GameObject("Model").AddComponent<SortingArmModel>(),
                 _ => (RobotModel)new GameObject("Model").AddComponent<RetrobotModel>(),
             };
             _model.transform.SetParent(transform, false);
             _model.Init();
             _model.transform.localScale = Vector3.one * (_height / _model.ModelHeight);
+            if (_model is SortingArmModel sam)
+            {
+                sam.SetStanding(true);   // folded on its coupler while on the bench
+                arm = gameObject.AddComponent<SortingArm>();
+                arm.Init(this, g, sam);
+            }
             // locomotion sound: steps for walkers, a motor loop for wheels / tracks / rotor
             _loopName = locomotion switch { "wheel" => "loop_wheel", "tracks" => "loop_tracks", "hover" => "loop_rotor", _ => null };
             if (_loopName != null)
@@ -247,6 +258,7 @@ namespace WorkshopWreckage
             _step = Step.Choose;
             transform.SetPositionAndRotation(home, homeRot);
             if (Flies) _altitude = 0.6f;
+            if (arm != null) { arm.ToBench(); return; }
             AdoptCarried();
         }
 
@@ -278,7 +290,19 @@ namespace WorkshopWreckage
                 });
                 yield return null;
             }
-            // off the bench: a hop down to its charging mat (Hoverbot flies down)
+            // off the bench: a hop down to its charging mat (Hoverbot flies down); the Sorting
+            // Arm waits folded in front of the bench until the player carries it to a socket
+            if (arm != null)
+            {
+                mode = Mode.Working;
+                arm.ToBench();
+                Sfx.Play("complete", transform.position + Vector3.up * 0.3f, -2);
+                g.progression?.OnRobotRepaired(id);
+                g.hud.Toast($"{displayName} is ready — carry it to a socket on a drawer cabinet", true);
+                g.workbench?.Refresh();
+                foreach (var r in g.robots) if (r != this && r.mode == Mode.Assembling) r.RefreshAssembly();
+                yield break;
+            }
             var from = transform.position;
             var to = home + (Flies ? Vector3.up * 0.6f : Vector3.zero);
             float dur = Flies ? 1.6f : 0.9f;
@@ -361,6 +385,7 @@ namespace WorkshopWreckage
                 ["yaw"] = (double)transform.eulerAngles.y,
             };
             if (zoneCenter.HasValue) d["zone"] = new List<object> { (double)zoneCenter.Value.x, (double)zoneCenter.Value.z };
+            if (arm != null) d["arm"] = arm.ToDict();
             return d;
         }
 
@@ -376,6 +401,7 @@ namespace WorkshopWreckage
             assignedDef = Json.Int(d, "assigned", -1);
             autoAssigned = Json.Bool(d, "auto_assigned");
             if (Json.Bool(d, "operational") && !Operational) SetOperational();
+            if (arm != null) { if (Operational) arm.Load(Json.Obj(d.GetValueOrDefault("arm"))); return; }
             if (!Active) return;
             var p = Json.Arr(d.GetValueOrDefault("pos"));
             if (p.Count == 3) transform.SetPositionAndRotation(new Vector3(Json.F(p[0]), Json.F(p[1]), Json.F(p[2])), Quaternion.Euler(0, (float)Json.Num(d, "yaw"), 0));
@@ -473,6 +499,7 @@ namespace WorkshopWreckage
             if (g.state == "paused" || g.state == "menu") { if (_loop != null) _loop.volume = 0; return; }   // the workshop holds still
             float dt = Time.deltaTime;
             _time += dt;
+            if (Stationary) return;   // SortingArm drives the arm
             var fwd0 = transform.forward;
             if (mode == Mode.Working) UpdateWork(dt);
             else if (mode == Mode.Following) UpdateFollow(dt);
@@ -640,7 +667,7 @@ namespace WorkshopWreckage
             IEnumerable<ItemInstance> pool = null;
             System.Func<ItemInstance, float> score = i => (i.Position - me).sqrMagnitude;
             specialistState = "";
-            _stagedNow = strategy == "courier" && _courierRank > 0 ? StagedCounts() : null;
+            _stagedNow = StagedCounts();   // the staging cap holds for every robot (never waits on a full zone)
             if (strategy == "assigned_definition")
             {
                 if (!ChooseAssigned(ref pool, me)) { if (carried.Count > 0) { _step = Step.ToDest; _path = null; } else _idleT = 1.5f; return; }
@@ -658,7 +685,8 @@ namespace WorkshopWreckage
                 if (pool == null && strategy == "staging_first")
                 {
                     // Hoverbot: finish what the others left in the staging zones first
-                    var staged = g.world.instances.Where(i => i.state == ItemState.InWorld && i.owner.StartsWith("stage:") && Pickable(i)).ToList();
+                    // ...except the piles below a working Sorting Arm's drawers: those are the arm's
+                    var staged = g.world.instances.Where(i => i.state == ItemState.InWorld && i.owner.StartsWith("stage:") && !g.ArmServes(i.owner.Substring(6)) && Pickable(i)).ToList();
                     if (_fleetRank > 0)
                     {
                         // fleet coordination: leave zones another Hoverbot is already working on
@@ -677,8 +705,11 @@ namespace WorkshopWreckage
                     }
                 }
                 pool ??= g.world.instances;
-                if (strategy == "opportunistic" && _targetRank > 0)
-                    score = i => (i.Position - me).magnitude - (g.progress.SortedOf(i.defId) > 0 ? 1.5f : 0);   // sets already started come first
+                if (strategy == "opportunistic")
+                    // parts it can store itself first (a part for a high destination is worth 1.5 m of
+                    // walking less); with Better Targeting, sets already started come first too
+                    score = i => (i.Position - me).magnitude + (ReachableDest(g.db.Get(i.defId).storageBox) ? 0 : 1.5f)
+                                 - (_targetRank > 0 && g.progress.SortedOf(i.defId) > 0 ? 1.5f : 0);
                 if (strategy == "multi_stop" && _routeRank > 0 && carried.Count > 0)
                 {
                     // route planning: next pickups whose destinations lie near the ones already on board
@@ -797,11 +828,16 @@ namespace WorkshopWreckage
         public static int StagingCapacity => Json.Int(RootConfig(), "staging_capacity", 14);
         public int StagingCount(string box) => g.world.instances.Count(i => i.state == ItemState.InWorld && i.owner == "stage:" + box);
         Dictionary<string, int> _stagedNow;
+        static int _stagedFrame = -1;
+        static Dictionary<string, int> _stagedCache;
+        /// <summary>Parts per staging zone; counted once per frame for all robots.</summary>
         Dictionary<string, int> StagedCounts()
         {
+            if (_stagedFrame == Time.frameCount && _stagedCache != null) return _stagedCache;
             var d = new Dictionary<string, int>();
             foreach (var i in g.world.instances) if (i.state == ItemState.InWorld && i.owner.StartsWith("stage:")) d[i.owner] = d.GetValueOrDefault(i.owner) + 1;
-            return d;
+            _stagedFrame = Time.frameCount;
+            return _stagedCache = d;
         }
 
         /// <summary>Floor point in front of a destination (where ground robots stand and pile parts).</summary>
@@ -1234,6 +1270,7 @@ namespace WorkshopWreckage
 
         public string Describe()
         {
+            if (arm != null && Operational) return arm.Describe();
             switch (mode)
             {
                 case Mode.Assembling: return $"{displayName}: {status}";

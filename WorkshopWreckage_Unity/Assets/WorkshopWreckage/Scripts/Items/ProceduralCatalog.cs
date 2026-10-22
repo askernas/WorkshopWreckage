@@ -81,7 +81,9 @@ namespace WorkshopWreckage
         };
         static readonly string[] SpecialtyTypes = { "cam", "pulley", "coupling", "hinge", "knob", "u_joint", "flywheel" };
         static readonly float[] SpecialtySizes = { 12, 16, 20, 25, 32, 40 };
-        static readonly string[] MachineTypes = { "bracket", "motor_housing", "gearbox", "valve", "pump_housing", "camshaft", "crankshaft", "pipe_elbow", "lever_arm", "sprocket_hub" };
+        // Robot Workshop redesign (Phase B prototype): bracket, valve, pump_housing, pipe_elbow and
+        // lever_arm were re-themed in place (same index, so definition ids are unchanged).
+        static readonly string[] MachineTypes = { "chassis_bracket", "motor_housing", "gearbox", "servo_joint", "drive_motor", "camshaft", "crankshaft", "hydraulic_actuator", "limb_housing", "sprocket_hub" };
         static readonly float[] MachineSizes = { 40, 55, 70, 90, 120, 160 };
 
         /// <summary>Axis sizes per category (first axis least significant).</summary>
@@ -357,12 +359,12 @@ namespace WorkshopWreckage
                     d.subcategory = MachineTypes[i[0]];
                     d.shape = d.subcategory switch
                     {
-                        "bracket" => "Mounting Bracket", "motor_housing" => "Motor Housing", "gearbox" => "Gearbox", "valve" => "Gate Valve",
-                        "pump_housing" => "Pump Housing", "camshaft" => "Camshaft", "crankshaft" => "Crankshaft", "pipe_elbow" => "Flanged Pipe Elbow",
-                        "lever_arm" => "Lever Arm", _ => "Sprocket Hub Assembly",
+                        "chassis_bracket" => "Chassis Bracket", "motor_housing" => "Motor Housing", "gearbox" => "Gearbox", "servo_joint" => "Servo Joint",
+                        "drive_motor" => "Drive Motor", "camshaft" => "Camshaft", "crankshaft" => "Crankshaft", "hydraulic_actuator" => "Hydraulic Actuator",
+                        "limb_housing" => "Limb Housing", _ => "Sprocket Hub Assembly",
                     };
                     float size = MachineSizes[i[1]];
-                    bool longPart = d.subcategory is "camshaft" or "crankshaft" or "lever_arm";
+                    bool longPart = d.subcategory is "camshaft" or "crankshaft" or "limb_housing" or "hydraulic_actuator";
                     d.diameterMm = size; d.lengthMm = size * (longPart ? 1.8f : 1f);
                     SetMaterial(d, i[2], i[3]);
                     d.geometryKey = "mach:" + d.subcategory;

@@ -22,7 +22,7 @@ namespace WorkshopWreckage
     /// states / owners plus the small dictionary in ToDict, so saves rebuild it exactly.</summary>
     public class RobotWorkbench : MonoBehaviour
     {
-        public static readonly string[] Types = { "retrobot", "unibot", "spiderbot", "caterpillarbot", "hoverbot" };
+        public static readonly string[] Types = { "retrobot", "unibot", "spiderbot", "caterpillarbot", "hoverbot", "sorting_arm" };
         public enum Status { NotStarted, AwaitingBlueprint, ReadyToAssemble, PartiallyAssembled, ReadyForActivation, Operational }
         public enum PartState { Missing, Discovered, Carried, Delivered, Installed }
 
@@ -37,7 +37,7 @@ namespace WorkshopWreckage
             public List<string> partOrder = new();                // part keys in a valid build order
         }
 
-        public static readonly Vector3 Bench = new(2.9f, 0.86f, 0.9f);
+        public static readonly Vector3 Bench = new(3.45f, 0.86f, 0.9f);   // six mats (the Sorting Arm is the sixth)
         const float RobotZ = -0.04f, TrayZ = 0.31f;
         public readonly List<Project> projects = new();
         public string selected = "retrobot";
@@ -45,7 +45,7 @@ namespace WorkshopWreckage
         Game _g;
         readonly Dictionary<int, Transform> _trays = new();
         TextAtlas _labels;
-        Renderer[] _boards = new Renderer[5];
+        Renderer[] _boards = new Renderer[Types.Length];
         public event System.Action Changed;
 
         public static string StationOf(string type) => "RS-" + type;

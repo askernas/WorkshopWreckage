@@ -32,6 +32,16 @@ namespace WorkshopWreckage
         public RobotWorkbench workbench;
         public readonly List<Robot> robots = new();
         public Robot retrobot => robots.Find(r => r.id == "retrobot");
+        /// <summary>Sorting Arm sockets of the current layout (two per drawer cabinet).</summary>
+        public readonly Dictionary<string, ArmSocket> sockets = new();
+        /// <summary>The Sorting Arm in the player's hands (two-handed carry), if any.</summary>
+        public SortingArm CarriedArm => robots.Select(r => r.arm).FirstOrDefault(a => a != null && a.place == SortingArm.Place.Carried);
+        /// <summary>Is this destination served by a mounted, working Sorting Arm?</summary>
+        public bool ArmServes(string box)
+        {
+            foreach (var s in sockets.Values) if (s.occupant != null && s.occupant.Working && s.dests.Contains(box)) return true;
+            return false;
+        }
         public readonly HashSet<int> robotReserved = new();
         /// <summary>The starter set placed in plain sight near the spawn (see WorldGenerator).</summary>
         public List<int> starterIds = new();   // parts a robot is on its way to: no one else takes them
@@ -180,6 +190,8 @@ namespace WorkshopWreckage
             return true;
         }
 
+        Transform _posters;
+
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
             if (_layoutSeed != seed && !BuildWorkshop(seed)) return false;
@@ -219,6 +231,7 @@ namespace WorkshopWreckage
             tools.ResetState();
             StartProgression(seed, save);
             workbench.PrepareOrders();
+            if (_posters == null) _posters = BlueprintPosters.Build(this);   // once: drawings of the real robot models
             workbench.ResetState();
             SpawnRobots();
             workbench.Load(save);
@@ -439,6 +452,7 @@ namespace WorkshopWreckage
             foreach (var r in robots) if (r != null) Destroy(r.gameObject);
             robots.Clear();
             robotReserved.Clear();
+            foreach (var s in sockets.Values) { s.occupant = null; s.SetLamp(); }
             var bench = workbench.transform;
             var front = workbench.Front;
             foreach (var p in workbench.projects)
@@ -489,7 +503,7 @@ namespace WorkshopWreckage
         public Robot NearestActiveRobot()
         {
             var p = player.transform.position;
-            return robots.Where(r => r.Active).OrderBy(r => (r.transform.position - p).sqrMagnitude).FirstOrDefault();
+            return robots.Where(r => r.Active && r.Mobile).OrderBy(r => (r.transform.position - p).sqrMagnitude).FirstOrDefault();
         }
 
         /// <summary>H (Automatic Storage Delivery): the nearest free robot comes over,
@@ -504,7 +518,7 @@ namespace WorkshopWreckage
                 var p = player.transform.position;
                 // prefer a free robot; otherwise the nearest one comes right after its delivery
                 // whoever can be here soonest: travel time, plus a penalty while busy; not robots about to charge
-                var r = robots.Where(x => x.Active && !x.handoverPending && x.Battery >= 0.2f)
+                var r = robots.Where(x => x.Active && x.Mobile && !x.handoverPending && x.Battery >= 0.2f)
                     .OrderBy(x => Vector3.Distance(x.transform.position, p) / Mathf.Max(0.1f, x.WalkSpeed) + (x.Free ? 0 : 15 + x.carried.Count * 2)).FirstOrDefault();
                 msg = r != null && r.RequestHandover() ? (r.Free ? $"{r.displayName} is coming for your parts" : $"{r.displayName} is coming for your parts after its delivery") : "No robot is running yet";
             }
@@ -529,7 +543,7 @@ namespace WorkshopWreckage
                 else if (robots.Count(r => r.zoneCenter.HasValue) >= slots) msg = $"All {slots} command slot{(slots == 1 ? "" : "s")} in use (J on a zone to release it)";
                 else
                 {
-                    var r = robots.Where(x => x.Active && !x.zoneCenter.HasValue).OrderBy(x => (x.transform.position - p).sqrMagnitude).FirstOrDefault();
+                    var r = robots.Where(x => x.Active && x.Mobile && !x.zoneCenter.HasValue).OrderBy(x => (x.transform.position - p).sqrMagnitude).FirstOrDefault();
                     if (r == null) msg = "No free robot to assign";
                     else { r.AssignZone(p); msg = $"{r.displayName} now works within {r.zoneRadius:0} m of this spot"; telemetry?.SkillUsed("robot_coordination"); }
                 }
@@ -700,6 +714,7 @@ namespace WorkshopWreckage
 
         void BuildStorage()
         {
+            sockets.Clear();
             foreach (var u in db.units)
             {
                 var id = Json.Str(u, "id");
@@ -714,6 +729,7 @@ namespace WorkshopWreckage
                 var su = go.AddComponent<StorageUnit>();
                 su.Setup(u, dests);
                 units[id] = su;
+                if (su.type == "drawer_cabinet") SortingArm.BuildSockets(this, su, id);
             }
         }
 

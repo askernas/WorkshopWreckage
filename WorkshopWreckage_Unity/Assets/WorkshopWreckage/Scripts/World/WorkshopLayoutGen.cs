@@ -119,9 +119,9 @@ namespace WorkshopWreckage
             Block(new Vector2(-1.3f, north + 1.7f), new Vector2(0.4f, 0.4f));
             F("blueprint", new Vector3(east - 0.05f, 3.6f, -1.0f), new Vector3(0.02f, 0.8f, 1.1f), -Mathf.PI / 2);
             F("blueprint", new Vector3(west + 8.6f, 3.3f, south - 0.05f), new Vector3(1.0f, 0.75f, 0.02f), Mathf.PI);
-            repairBayPos = new Vector3(west + 1.55f, 0, south - 0.5f);
+            repairBayPos = new Vector3(west + 1.83f, 0, south - 0.5f);   // 3.45 m bench, 0.1 m from the west wall
             repairBayRot = Mathf.PI;
-            Block(new Vector2(repairBayPos.x, repairBayPos.z), new Vector2(3.0f, 1.0f));
+            Block(new Vector2(repairBayPos.x, repairBayPos.z), new Vector2(3.55f, 1.0f));
             // sorting tray in front of the repair bay: drop any parts here and the robots sort them
             // against the south wall beside the door: out of the way of the workbench and the walkways
             // a metre out from the wall so robots reach it from both long sides; 0.6 m deep so every

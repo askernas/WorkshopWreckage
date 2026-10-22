@@ -40,6 +40,7 @@ namespace WorkshopWreckage
         public int inspectWorldId = -1;
         public double lastActionMicros;
         public readonly HashSet<int> busy = new();
+        public string targetSocket;
         public event Action<TargetInfo> TargetChanged;
         public event Action<string, bool> Feedback;
         public event Action<bool, ItemDefinition> InspectChanged;
@@ -114,6 +115,17 @@ namespace WorkshopWreckage
                 return;
             }
             UpdateTarget();
+            // two hands on the Sorting Arm: no parts in or out until it is mounted or set down
+            if (game.CarriedArm is SortingArm carriedArm)
+            {
+                if (lmbDown)
+                {
+                    if (targetType == "socket") Primary();
+                    else Feedback?.Invoke("Both hands on the Sorting Arm — mount it on a cabinet socket, or [Z] set it down at the workbench", false);
+                }
+                if (kb.zKey.wasPressedThisFrame) { carriedArm.ToBench(); Feedback?.Invoke("Sorting Arm set down at the workbench", true); }
+                return;
+            }
             _repeatT -= Time.deltaTime;
             if (lmbDown) { _repeatT = Repeat * 2.5f; Primary(); }
             else if (lmbHeld && _repeatT <= 0) { _repeatT = Repeat; Primary(); }
@@ -164,6 +176,7 @@ namespace WorkshopWreckage
                 if (st != null && st.station) { targetType = "station"; targetPoint = hit.Value.point; }
                 else if (st != null && st.destId == "TRAY") targetType = "tray";
                 else if (st != null && st.destId == "EXIT") targetType = "exit";
+                else if (st != null && st.destId.StartsWith("SOCKET:")) { targetType = "socket"; targetSocket = st.destId.Substring(7); }
                 else if (st != null) { targetType = "dest"; targetDest = st.destId; targetUnit = st.unit; }
             }
             ShowHover();
@@ -271,6 +284,17 @@ namespace WorkshopWreckage
                 }
                 case "exit":
                     return new TargetInfo { title = "Workshop door", sub = "Out to the yard — leaving ends the game", hint = "[LMB] Leave the workshop", tone = 0 };
+                case "socket":
+                {
+                    if (!game.sockets.TryGetValue(targetSocket, out var sk)) break;
+                    var arm = sk.occupant;
+                    string sub = $"Serves {sk.Label} (18 drawers)" + (arm != null ? $"  ·  {arm.Describe()}" : "  ·  empty");
+                    if (game.CarriedArm != null)
+                        return arm == null ? new TargetInfo { title = "Sorting Arm socket " + sk.id, sub = sub, hint = "[LMB] Mount the Sorting Arm here", tone = 1 }
+                                           : new TargetInfo { title = "Sorting Arm socket " + sk.id, sub = sub, hint = "Taken — find an empty socket (green lamp)", tone = -1 };
+                    return new TargetInfo { title = "Sorting Arm socket " + sk.id, sub = sub,
+                        hint = arm != null ? "[LMB] Detach the arm and carry it" : "Build a Sorting Arm at the Robot Workbench to mount here", tone = 0 };
+                }
                 case "station":
                 {
                     var wb = game.workbench;
@@ -315,6 +339,15 @@ namespace WorkshopWreckage
                 case "exit":
                     game.SetState("exit");
                     break;
+                case "socket":
+                    if (!game.sockets.TryGetValue(targetSocket, out var sk)) break;
+                    if (game.CarriedArm is SortingArm ca)
+                    {
+                        string why = ca.Mount(sk);
+                        Feedback?.Invoke(why == "" ? $"Sorting Arm mounted on {sk.id} — it sorts the staging piles below {sk.Label}" : why, why == "");
+                    }
+                    else if (sk.occupant != null) sk.occupant.PickUp();
+                    break;
             }
         }
 
@@ -323,6 +356,11 @@ namespace WorkshopWreckage
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             var inst = World.instances[id];
             if (inst.state != ItemState.InWorld) return false;
+            if (game.CarriedArm != null)
+            {
+                Feedback?.Invoke("Both hands on the Sorting Arm — mount it or set it down first", false);
+                return false;
+            }
             if (Inv.IsFull)
             {
                 Feedback?.Invoke($"Your hands are full ({Inv.Count}/{Inv.capacity}) — store what you carry first", false);
@@ -599,28 +637,35 @@ namespace WorkshopWreckage
             var drops = new Dictionary<int, float>();
             foreach (var nid in game.index.QuerySphere(ro, r + 0.3f))
                 if (World.instances[nid].Position.y > ro.y - 0.01f) queue.Enqueue((nid, 0));
-            int settled = 0, considered = 0;
-            for (int guard = 0; queue.Count > 0 && guard < 400 && settled < 120; guard++)
+            // 1. final drops, to a fixed point: a part is checked again whenever something under it
+            //    falls further (a part resting on two others must follow the lower one down)
+            var depthOf = new Dictionary<int, int>();
+            int considered = 0;
+            for (int guard = 0; queue.Count > 0 && guard < 1500 && drops.Count < 120; guard++)
             {
                 var (id, depth) = queue.Dequeue();
-                if (drops.ContainsKey(id) || busy.Contains(id)) continue;
+                if (busy.Contains(id)) continue;
                 var inst = World.instances[id];
                 if (inst.state != ItemState.InWorld) continue;
-                var b = game.index.WorldBounds(id);
-                float support = SupportUnder(id, b, drops);
-                float dy = b.min.y - support;
+                var b = game.index.WorldBounds(id);   // where it lies now (drops are measured from here)
+                float dy = b.min.y - SupportUnder(id, b, drops);
                 considered++;
-                if (dy < 0.012f) continue;
+                if (dy - drops.GetValueOrDefault(id) < 0.012f) continue;
                 drops[id] = dy;
-                busy.Add(id);
-                settled++;
-                StartCoroutine(Settle(id, inst.transform, inst.Position.y - dy, Mathf.Clamp(Mathf.Sqrt(dy) * 0.45f, 0.12f, 0.45f), depth * 0.05f));
+                depthOf[id] = Mathf.Max(depthOf.GetValueOrDefault(id), depth);
                 // whatever rested on this part comes down after it
                 foreach (var m in game.index.QuerySphere(b.center + Vector3.up * b.extents.y, Mathf.Max(b.extents.x, b.extents.z) + 0.2f))
-                    if (m != id && !drops.ContainsKey(m) && World.instances[m].Position.y > inst.Position.y) queue.Enqueue((m, depth + 1));
+                    if (m != id && World.instances[m].Position.y > inst.Position.y) queue.Enqueue((m, depth + 1));
             }
-            if (settled > 0) Sfx.Play("settle", ro, -10);
-            lastSettleInfo = $"{considered} checked, {settled} fell";
+            // 2. every part falls once, straight to its final support
+            foreach (var (id, dy) in drops)
+            {
+                var inst = World.instances[id];
+                busy.Add(id);
+                StartCoroutine(Settle(id, inst.transform, inst.Position.y - dy, Mathf.Clamp(Mathf.Sqrt(dy) * 0.45f, 0.12f, 0.45f), depthOf[id] * 0.05f));
+            }
+            if (drops.Count > 0) Sfx.Play("settle", ro, -10);
+            lastSettleInfo = $"{considered} checked, {drops.Count} fell";
         }
 
         public string lastSettleInfo = "";

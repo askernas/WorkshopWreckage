@@ -183,6 +183,8 @@ namespace WorkshopWreckage
             yield return RetrobotChecks();
             // 7. the other four robots, all working together
             yield return AllRobotsChecks();
+            // 7b. the Sorting Arm: sockets, assembly, carry, mount, local sorting, save/load
+            yield return ArmChecks();
             // 8. player tools from skills
             yield return ToolChecks();
             // 9. robots survive a save/load round trip (zone, battery, record, carried parts)
@@ -306,14 +308,20 @@ namespace WorkshopWreckage
             if (top.i != null)
             {
                 float y0 = top.i.Position.y;
+                float Gap(int id) { var bb = g.index.WorldBounds(id); return bb.min.y - g.interaction.SupportUnder(id, bb, new Dictionary<int, float>()); }
+                // gaps that were there before (a long part bridging two supports reads as a gap
+                // under its middle) are not what this checks: only what the removal causes
+                var before = g.index.QuerySphere(top.i.Position, 0.5f).ToDictionary(o => o, Gap);
                 g.player.Teleport(top.i.Position + new Vector3(0.6f, -top.i.Position.y, 0.6f));
                 g.interaction.Pickup(top.under[0], false);
                 yield return new WaitForSeconds(1.2f);
                 // nothing within half a metre is left hanging in the air
-                float Gap(int id) { var bb = g.index.WorldBounds(id); return bb.min.y - g.interaction.SupportUnder(id, bb, new Dictionary<int, float>()); }
                 var around = g.index.QuerySphere(top.i.Position, 0.5f).Where(o => w.instances[o].state == ItemState.InWorld).ToList();
-                float worst = around.Count > 0 ? around.Max(Gap) : 0;
-                Check("nothing floats when the part under it is taken away", worst < 0.05f, $"top part {y0:0.000} -> {top.i.Position.y:0.000} m; worst gap of {around.Count} parts nearby {worst:0.000} m; settle: {g.interaction.lastSettleInfo}");
+                float Worse(int o) => Gap(o) - before.GetValueOrDefault(o, 0f);
+                int worstId = around.Count > 0 ? around.OrderByDescending(Worse).First() : -1;
+                float worst = worstId >= 0 ? Worse(worstId) : 0;
+                string who = worstId >= 0 ? $" ({w.DefOf(worstId).displayName}: gap {Gap(worstId):0.000} m, before {before.GetValueOrDefault(worstId, -1f):0.000} m)" : "";
+                Check("nothing floats when the part under it is taken away", worst < 0.05f, $"top part {y0:0.000} -> {top.i.Position.y:0.000} m; worst new gap of {around.Count} parts nearby {worst:0.000} m{who}; settle: {g.interaction.lastSettleInfo}");
                 EmptyHands();
             }
             else Check("a part falls when the part under it is taken away", false, "no stacked pair found");
@@ -367,15 +375,16 @@ namespace WorkshopWreckage
         IEnumerator AllRobotsChecks()
         {
             var wb = g.workbench;
-            var others = g.robots.Where(r => r.id != "retrobot" && !wb.P(r.id).crafted).ToList();
+            var others = g.robots.Where(r => r.id != "retrobot" && !wb.P(r.id).crafted && r.Mobile).ToList();
             Check("base capacities follow the capability matrix (1 / 1 / 1 / 3 / 1, not scaled by world size)",
                   g.robots.First(r => r.id == "retrobot").Capacity == 1 && g.robots.First(r => r.id == "unibot").Capacity == 1 && g.robots.First(r => r.id == "spiderbot").Capacity == 1
                   && g.robots.First(r => r.id == "caterpillarbot").Capacity == 3 && g.robots.First(r => r.id == "hoverbot").Capacity == 1,
                   string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Capacity}")));
             var retro = g.retrobot; var uni = g.robots.First(r => r.id == "unibot");
             Check("Unibot is about twice as fast as Retrobot", uni.WalkSpeed / retro.BaseStat("walk_speed") is > 1.8f and < 2.2f, $"{uni.WalkSpeed:0.00} vs {retro.BaseStat("walk_speed"):0.00} m/s");
-            Check("five robot types at toy scale, up to three Hoverbots", g.robots.Count(r => !wb.P(r.id).crafted) == 5 && g.robots.Count(r => r.type == "hoverbot") == 3 && g.robots.All(r => r.Height <= 0.31f),
-                  string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Height:0.00} m")));
+            var mobile = g.robots.Where(r => r.Mobile).ToList();
+            Check("five robot types at toy scale, up to three Hoverbots", mobile.Count(r => !wb.P(r.id).crafted) == 5 && g.robots.Count(r => r.type == "hoverbot") == 3 && mobile.All(r => r.Height <= 0.31f),
+                  string.Join(", ", mobile.Select(r => $"{r.displayName} {r.Height:0.00} m")));
             LevelTo(g.progression.maxLevel);
             // half-built on the bench: ghosts show what is still to find
             foreach (var r in others) wb.ForceInstall(wb.P(r.id), wb.Required(wb.P(r.id)) / 2);
@@ -448,9 +457,10 @@ namespace WorkshopWreckage
             var sp = g.robots.First(r => r.id == "spiderbot");
             sp.SetBattery(0.05f);
             Time.timeScale = 4;
-            float tc = Time.realtimeSinceStartup;
+            float tc = Time.realtimeSinceStartup, gc = Time.time;
             bool charged = false, wentHome = false;
-            while (Time.realtimeSinceStartup - tc < 60 && !charged)
+            // a game-time budget (trip home + a full charge), so a slow frame rate on Massive doesn't fail it
+            while (Time.time - gc < 240 && Time.realtimeSinceStartup - tc < 180 && !charged)
             {
                 if (sp.StepName == "Charging") wentHome = (new Vector2(sp.transform.position.x - sp.home.x, sp.transform.position.z - sp.home.z)).magnitude < 0.4f;
                 if (wentHome && sp.StepName != "Charging" && sp.Battery >= 0.99f) charged = true;
@@ -920,6 +930,119 @@ namespace WorkshopWreckage
                 yield return g.Capture(Path.Combine(outDir, name + ".png"), 1);
                 yield return new WaitForSeconds(1.2f);
             }
+        }
+
+        /// <summary>Sorting Arm vertical slice (docs/ROBOT_WORKSHOP_ASSET_AUDIT.md §5). The
+        /// mobile robots are paused so only the arm touches the test parts.</summary>
+        IEnumerator ArmChecks()
+        {
+            var wb = g.workbench;
+            var cabinets = g.units.Values.Where(u => u.type == "drawer_cabinet").ToList();
+            var drawerIds = g.db.boxes.Values.Where(d => Json.Str(d, "kind") == "drawer").Select(d => Json.Str(d, "id")).ToHashSet();
+            bool halves = g.sockets.Values.All(s => s.dests.Count == 18) && g.sockets.Values.GroupBy(s => s.unit).All(gr => gr.Count() == 2 && !gr.First().dests.Intersect(gr.Last().dests).Any())
+                          && g.sockets.Values.SelectMany(s => s.dests).ToHashSet().SetEquals(drawerIds);
+            Check("two fixed sockets per 6 x 6 drawer cabinet, each serving exactly its own 18-drawer half", g.sockets.Count == cabinets.Count * 2 && halves,
+                  $"{g.sockets.Count} sockets on {cabinets.Count} cabinets");
+            var p = wb.P("sorting_arm");
+            var bot = wb.RobotOf(p);
+            var arm = bot?.arm;
+            if (arm == null) { Check("the Sorting Arm exists as the sixth workbench project", false, ""); yield break; }
+            Check("the Sorting Arm is the sixth workbench project with 12 unique parts", RobotWorkbench.Types.Length == 6 && wb.Required(p) == 12 && p.level == Unlocks.Robot("sorting_arm"),
+                  $"{wb.Required(p)} parts, blueprint level {p.level}");
+            var paused = g.robots.Where(r => r.Mobile && r.Active).ToList();
+            foreach (var r in paused) r.paused = true;
+            wb.ForceInstall(p);
+            wb.Activate(p);
+            float t0 = Time.realtimeSinceStartup;
+            while (!bot.Operational && Time.realtimeSinceStartup - t0 < 15) yield return null;
+            Check("an activated arm waits folded at the workbench (it never roams)", bot.Operational && arm.place == SortingArm.Place.Bench && (bot.transform.position - bot.home).magnitude < 0.05f, arm.Describe());
+
+            // carry: two-handed, no pocket slot, no pickups meanwhile
+            int pockets = g.inventory.items.Count;
+            arm.PickUp();
+            var loose = g.world.instances.First(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart);
+            bool refused = !g.interaction.Pickup(loose.id, false);
+            Check("the arm is carried in both hands: no inventory slot, no part pickups", g.CarriedArm == arm && g.inventory.items.Count == pockets && refused, arm.Describe());
+
+            // mount on the left half of the first cabinet
+            var sk = g.sockets.Values.OrderBy(s => s.id).First(s => s.side == "L");
+            var other = g.sockets.Values.First(s => s.unit == sk.unit && s.side == "R");
+            string why = arm.Mount(sk);
+            Check("the arm mounts on an empty socket and serves exactly that half", why == "" && arm.place == SortingArm.Place.Mounted && sk.occupant == arm && arm.Served.SetEquals(sk.dests) && g.ArmServes(sk.dests[0]) && !g.ArmServes(other.dests[0]),
+                  why == "" ? arm.Describe() : why);
+
+            // stage three parts below its drawers (rows above the floor row) and one below the other half
+            var mine = new List<int>();
+            foreach (var box in sk.dests.Where(b => Json.Int(g.db.boxes[b], "row") < 5 && g.StraysIn(b).Count == 0 && g.storage.Stored(b).Count < g.db.BoxCapacity(b)))
+            {
+                var id = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).storageBox == box).Select(i => i.id).DefaultIfEmpty(-1).First();
+                if (id >= 0) mine.Add(id);
+                if (mine.Count == 3) break;
+            }
+            int foreign = -1;
+            foreach (var box in other.dests)
+            {
+                foreign = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).storageBox == box).Select(i => i.id).DefaultIfEmpty(-1).First();
+                if (foreign >= 0) break;
+            }
+            foreach (var id in mine.Append(foreign).Where(i => i >= 0)) StageAt(id, g.world.DefOf(id).storageBox, bot);
+            int sortedBefore = g.progress.sortedTotal, deliveredBefore = bot.delivered;
+            long xpBefore = g.progression.xp;
+            Time.timeScale = 3;
+            t0 = Time.realtimeSinceStartup;
+            bool shot = false;
+            while (mine.Any(i => g.world.instances[i].state != ItemState.Stored) && Time.realtimeSinceStartup - t0 < 60)
+            {
+                if (!shot && arm.heldId >= 0)
+                {
+                    shot = true;
+                    Time.timeScale = 1;
+                    LookFrom(sk.point + sk.facing * Vector3.forward * 1.9f + Vector3.down * 0.5f, sk.point + Vector3.down * 0.9f);
+                    yield return g.Capture(Path.Combine(outDir, "18_sorting_arm_working.png"), 2);
+                    Time.timeScale = 3;
+                }
+                yield return null;
+            }
+            float wait = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - wait < 4) yield return null;   // time to (wrongly) touch the foreign part
+            Time.timeScale = 1;
+            bool inBoxes = mine.All(i => g.world.instances[i].state == ItemState.Stored && g.storage.Stored(g.world.DefOf(i).storageBox).Contains(i));
+            Check("the arm sorts staged parts into its own drawers through normal storage (sets, XP)", mine.Count == 3 && inBoxes && bot.delivered - deliveredBefore == 3 && g.progress.sortedTotal - sortedBefore >= 3 && g.progression.xp > xpBefore,
+                  $"{mine.Count(i => g.world.instances[i].state == ItemState.Stored)}/{mine.Count} stored, delivered {bot.delivered - deliveredBefore}, sorted +{g.progress.sortedTotal - sortedBefore}");
+            Check("it never touches the other half of the cabinet", foreign < 0 || g.world.instances[foreign].state == ItemState.InWorld,
+                  foreign < 0 ? "no foreign part found" : $"{g.world.DefOf(foreign).displayName}: {g.world.instances[foreign].state}");
+            LookFrom(sk.point + sk.facing * Vector3.forward * 2.2f + Vector3.down * 0.3f, sk.point + Vector3.down * 0.8f);
+            yield return g.Capture(Path.Combine(outDir, "19_sorting_arm_parked.png"), 2);
+
+            // save / load: mounted stays mounted on the same socket; a carried arm comes back to the bench
+            g.SaveGame("autotest_arm");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_arm");
+            yield return Frames(5);
+            bot = g.workbench.RobotOf(g.workbench.P("sorting_arm"));
+            arm = bot.arm;
+            Check("save/load keeps the arm mounted on its socket", arm.place == SortingArm.Place.Mounted && arm.socket != null && arm.socket.id == sk.id && g.sockets[sk.id].occupant == arm, arm.Describe());
+            arm.PickUp();
+            g.SaveGame("autotest_arm");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_arm");
+            yield return Frames(5);
+            bot = g.workbench.RobotOf(g.workbench.P("sorting_arm"));
+            Check("an arm saved while carried is set down at the workbench on load (nothing lost)", bot.arm.place == SortingArm.Place.Bench && g.sockets.Values.All(s => s.occupant == null) && g.CarriedArm == null, bot.arm.Describe());
+            File.Delete(SaveSystem.PathOf("autotest_arm"));
+            foreach (var r in g.robots.Where(r => r.Mobile)) r.paused = false;
+        }
+
+        /// <summary>Puts a part on the staging pile of its destination (as a robot would).</summary>
+        void StageAt(int id, string box, Robot r)
+        {
+            var spot = r.StagingSpot(box).Value;
+            var def = g.world.DefOf(id);
+            var e = ItemDatabase.Extents(def);
+            g.index.Remove(id);
+            g.world.SetTransform(id, Matrix4x4.TRS(spot + Vector3.up * (e[2] * 0.5f), Quaternion.identity, Vector3.one * def.worldScale));
+            g.world.SetState(id, ItemState.InWorld, "stage:" + box);
+            g.index.Insert(id);
         }
 
         void Check(string name, bool ok, string detail)
