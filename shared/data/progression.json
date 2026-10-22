@@ -64,6 +64,11 @@
 		"line_of_sight_required": true,
 		"comment": "Matches the held item's exact definition id; only UNSORTED instances lying in the world (state InWorld, not reserved by robots). Works on non-magnetic materials."
 	},
+	"restoration": {
+		"lamp_boost_at_100": 0.45,
+		"machine_zone_percent": 60,
+		"comment": "Visible restoration: each zone's lamps brighten up to +lamp_boost_at_100 as the zone is restored; the lathe runs again (spindle turns, work lamp, hum) once its zone reaches machine_zone_percent."
+	},
 	"telemetry": {
 		"enabled": true,
 		"sample_interval_s": 60,

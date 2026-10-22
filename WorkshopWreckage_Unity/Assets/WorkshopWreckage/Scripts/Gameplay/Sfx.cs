@@ -46,6 +46,7 @@ namespace WorkshopWreckage
             _clips["loop_wheel"] = Loop("wheel");
             _clips["loop_tracks"] = Loop("tracks");
             _clips["loop_rotor"] = Loop("rotor");
+            _clips["loop_machine"] = Loop("machine");
             _clips["supermagnet"] = Sweep(0.9f, 140, 1250, 0.6f);
             for (int k = 0; k < 12; k++) _2d.Add(gameObject.AddComponent<AudioSource>());
             for (int k = 0; k < 10; k++)
@@ -82,6 +83,9 @@ namespace WorkshopWreckage
                     case "tracks":   // clattering links at 14 per second over a low rumble
                         float link = Mathf.Exp(-((t * 14) % 1) * 30);
                         s[i] = Mathf.Sin(2 * Mathf.PI * 55 * t) * 0.18f + lp * 0.5f * link + Mathf.Sin(2 * Mathf.PI * 2400 * t) * 0.08f * link;
+                        break;
+                    case "machine":  // lathe: mains hum with a belt whir
+                        s[i] = Mathf.Sin(2 * Mathf.PI * 100 * t) * 0.16f + Mathf.Sin(2 * Mathf.PI * 300 * t) * 0.05f + lp * 0.12f * (0.6f + 0.4f * Mathf.Sin(2 * Mathf.PI * 8 * t));
                         break;
                     default:         // two-blade rotor: 24 blade passes per second over a motor hum
                         float blade = 0.5f + 0.5f * Mathf.Sin(2 * Mathf.PI * 24 * t);

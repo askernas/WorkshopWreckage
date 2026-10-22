@@ -156,7 +156,7 @@ namespace WorkshopWreckage
                         b.Cylinder(new Vector3(0, size.y * yy, 0), size.x * 0.51f, 0.03f, EnvMaterials.Plain(new Color(0.15f, 0.15f, 0.16f), 0.8f, 0.5f), null, 24);
                     b.colliders.Add((G(0, size.y / 2, 0), new Vector3(size.x, size.y, size.x), Quaternion.identity));
                     break;
-                case "machine": Machine(b, size); break;
+                case "machine": Machine(g, b, size); break;
                 case "door":
                     b.Box(new Vector3(0, size.y / 2, 0), new Vector3(size.x, size.y, 0.06f), EnvMaterials.Wood(new Color(0.35f, 0.22f, 0.13f)));
                     b.Box(new Vector3(0, size.y + 0.05f, 0), new Vector3(size.x + 0.2f, 0.1f, 0.1f), EnvMaterials.Wood(new Color(0.25f, 0.16f, 0.1f)));
@@ -227,7 +227,11 @@ namespace WorkshopWreckage
             }
         }
 
-        void Machine(Batch b, Vector3 size)
+        public Transform machineSpindle, machineHandwheel;
+        public Light machineLamp;
+        public AudioSource machineHum;
+
+        void Machine(Transform g, Batch b, Vector3 size)
         {
             var iron = EnvMaterials.Metal(new Color(0.2f, 0.28f, 0.24f), 0.4f);
             var steel = EnvMaterials.Plain(new Color(0.6f, 0.6f, 0.62f), 1, 0.7f);
@@ -236,9 +240,36 @@ namespace WorkshopWreckage
             b.Box(new Vector3(0, 0.86f, 0), new Vector3(size.x, 0.12f, size.z * 0.5f), iron, true);
             b.Box(new Vector3(-size.x * 0.35f, 1.08f, 0), new Vector3(0.45f, 0.34f, 0.4f), iron);
             b.Box(new Vector3(size.x * 0.32f, 1.02f, 0), new Vector3(0.3f, 0.22f, 0.3f), iron);
-            b.Cylinder(new Vector3(0, 1.08f, 0), 0.03f, size.x * 0.5f, steel, R(Vector3.forward, Mathf.PI / 2), 12);
-            b.Cylinder(new Vector3(-size.x * 0.12f, 1.08f, 0), 0.08f, 0.06f, steel, R(Vector3.forward, Mathf.PI / 2), 6);
-            b.Cylinder(new Vector3(-size.x * 0.58f, 1.2f, 0), 0.2f, 0.06f, EnvMaterials.Plain(new Color(0.55f, 0.12f, 0.08f), 0.2f, 0.5f), R(Vector3.forward, Mathf.PI / 2), 24);
+            // spindle + chuck and the handwheel turn once the machine is repaired (restoration)
+            machineSpindle = new GameObject("Spindle").transform;
+            machineSpindle.SetParent(g, false);
+            machineSpindle.localPosition = G(0, 1.08f, 0);
+            var sb = new Batch();
+            sb.Cylinder(Vector3.zero, 0.03f, size.x * 0.5f, steel, R(Vector3.forward, Mathf.PI / 2), 12);
+            sb.Cylinder(new Vector3(-size.x * 0.12f, 0, 0), 0.08f, 0.06f, steel, R(Vector3.forward, Mathf.PI / 2), 6);
+            for (int k = 0; k < 3; k++)
+            {
+                float a = k * Mathf.PI * 2 / 3;
+                sb.Box(new Vector3(-size.x * 0.12f - 0.035f, Mathf.Sin(a) * 0.06f, Mathf.Cos(a) * 0.06f), new Vector3(0.03f, 0.025f, 0.025f), EnvMaterials.Plain(new Color(0.3f, 0.3f, 0.32f), 1, 0.5f));   // chuck jaws
+            }
+            sb.Build(machineSpindle, "spindle");
+            machineHandwheel = new GameObject("Handwheel").transform;
+            machineHandwheel.SetParent(g, false);
+            machineHandwheel.localPosition = G(-size.x * 0.58f, 1.2f, 0);
+            var hb = new Batch();
+            hb.Cylinder(Vector3.zero, 0.2f, 0.06f, EnvMaterials.Plain(new Color(0.55f, 0.12f, 0.08f), 0.2f, 0.5f), R(Vector3.forward, Mathf.PI / 2), 24);
+            hb.Box(new Vector3(-0.04f, 0.14f, 0), new Vector3(0.03f, 0.03f, 0.03f), EnvMaterials.Plain(new Color(0.2f, 0.2f, 0.2f), 0.8f, 0.5f));   // grip
+            hb.Build(machineHandwheel, "handwheel");
+            var lg = new GameObject("WorkLamp");
+            lg.transform.SetParent(g, false);
+            lg.transform.localPosition = G(size.x * 0.1f, 1.6f, 0.1f);
+            machineLamp = lg.AddComponent<Light>();
+            machineLamp.type = LightType.Point;
+            machineLamp.color = new Color(1f, 0.85f, 0.6f);
+            machineLamp.range = 2.5f;
+            machineLamp.intensity = 0;
+            machineHum = g.gameObject.AddComponent<AudioSource>();
+            machineHum.spatialBlend = 1; machineHum.minDistance = 1; machineHum.maxDistance = 12; machineHum.loop = true; machineHum.volume = 0;
         }
 
         void Sign(Transform g, Batch b, Vector3 size)

@@ -187,6 +187,18 @@ namespace WorkshopWreckage
                 File.Delete(SaveSystem.PathOf("autotest2"));
             }
 
+            // 10. restoration: with its zone mostly restored the lathe runs again
+            {
+                foreach (var r in g.robots) r.enabled = false;
+                g.Presort(0.7f);
+                yield return new WaitForSeconds(3f);
+                var sp = g.builder.machineSpindle.position;
+                Check("restoring a zone repairs the lathe (it runs, lamp on)", g.MachineRunning && g.builder.machineLamp.intensity > 0.5f,
+                      $"zone {g.layout.zones[g.layout.ZoneAt(sp)].name} {g.progress.ZonePercent(g.layout.ZoneAt(sp)):0}% restored");
+                LookFrom(sp + new Vector3(0.9f, 0.4f, 1.7f), sp);   // from inside the room (Unity +z = north here)
+                yield return g.Capture(Path.Combine(outDir, "21_lathe_running.png"), 3);
+            }
+
             g.PlaceCamera("0.6,1.65,3.6,0,-18");
             g.hud.SetHudVisible(true);
             yield return g.Capture(Path.Combine(outDir, "04_hud_overview.png"), 10);

@@ -139,6 +139,7 @@ namespace WorkshopWreckage
         bool BuildWorkshop(int seed)
         {
             _lampBase.Clear();
+            _machineRunning = false; _machineSpin = 0;
             var l = WorkshopLayout.Generate(db, seed);
             if (l.placementErrors.Count > 0) { hud.ShowFatal("The workshop layout is invalid:\n\n" + string.Join("\n", l.placementErrors.Take(20))); return false; }
             layout = l;
@@ -243,15 +244,32 @@ namespace WorkshopWreckage
             _lightT -= Time.deltaTime;
             bool step = _lightT <= 0;
             if (step) _lightT = 0.25f;
+            var rcfg = Json.Obj(_progressionCfg?.GetValueOrDefault("restoration")) ?? new Dictionary<string, object>();
+            float boost = (float)Json.Num(rcfg, "lamp_boost_at_100", 0.45);
             foreach (var l in builder.lamps)
             {
                 if (l == null) continue;
                 if (!_lampBase.TryGetValue(l, out var b)) _lampBase[l] = b = (l.intensity, layout.ZoneAt(l.transform.position));
                 if (!step) continue;
-                float want = b.intensity * (1f + 0.45f * progress.ZonePercent(b.zone) / 100f);
+                float want = b.intensity * (1f + boost * progress.ZonePercent(b.zone) / 100f);
                 l.intensity = Mathf.MoveTowards(l.intensity, want, 0.25f * 0.4f);
             }
+            // the lathe runs again once its zone is restored enough
+            if (builder.machineSpindle == null) return;
+            int mz = layout.ZoneAt(builder.machineSpindle.position);
+            bool running = progress.ZonePercent(mz) >= (float)Json.Num(rcfg, "machine_zone_percent", 60);
+            if (running && !_machineRunning) { hud.Toast("The lathe runs again!", true); Sfx.Play("complete", builder.machineSpindle.position, -4); if (builder.machineHum.clip == null) { builder.machineHum.clip = Sfx.Clip("loop_machine"); builder.machineHum.Play(); } }
+            _machineRunning = running;
+            _machineSpin = Mathf.MoveTowards(_machineSpin, running ? 1 : 0, Time.deltaTime * 0.5f);
+            builder.machineSpindle.localRotation *= Quaternion.Euler(_machineSpin * 900f * Time.deltaTime, 0, 0);
+            builder.machineHandwheel.localRotation *= Quaternion.Euler(_machineSpin * 40f * Time.deltaTime, 0, 0);
+            builder.machineLamp.intensity = 1.6f * _machineSpin;
+            builder.machineHum.volume = 0.35f * _machineSpin * Sfx.masterVolume;
         }
+
+        bool _machineRunning;
+        float _machineSpin;
+        public bool MachineRunning => _machineRunning;
 
         readonly Dictionary<Light, (float intensity, int zone)> _lampBase = new();
 
