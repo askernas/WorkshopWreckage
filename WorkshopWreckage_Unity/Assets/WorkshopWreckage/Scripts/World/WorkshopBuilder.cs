@@ -426,11 +426,12 @@ namespace WorkshopWreckage
             lgo.transform.localRotation = Quaternion.Euler(90, 0, 0);
             var light = lgo.AddComponent<Light>();
             light.type = LightType.Spot;
-            light.spotAngle = 150;
-            light.innerSpotAngle = 70;
+            // look: warm tungsten pools of light (not a flat white flood), cooler daylight between
+            light.spotAngle = 140;
+            light.innerSpotAngle = 56;
             light.range = 10f;
             light.intensity = 10f;
-            light.color = new Color(1f, 0.95f, 0.86f);
+            light.color = new Color(1f, 0.84f, 0.64f);
             // only a few fixtures cast shadows (performance: shadowed spot lights are the expensive part)
             light.shadows = k < 3 ? LightShadows.Soft : LightShadows.None;
             light.shadowStrength = 0.7f;
@@ -541,8 +542,8 @@ namespace WorkshopWreckage
             var go = new GameObject("Sun");
             sun = go.AddComponent<Light>();
             sun.type = LightType.Directional;
-            sun.color = new Color(1f, 0.82f, 0.6f);
-            sun.intensity = 3.2f;
+            sun.color = new Color(1f, 0.74f, 0.46f);   // late-afternoon gold through the windows
+            sun.intensity = 3.8f;
             sun.shadows = LightShadows.Soft;
             // Godot: Basis.from_euler(-32°, -75°) (YXZ); the light shines along -Z.
             var gdir = Quaternion.AngleAxis(-75f, Vector3.up) * Quaternion.AngleAxis(-32f, Vector3.right) * Vector3.back;
@@ -551,9 +552,15 @@ namespace WorkshopWreckage
 
             // light comes from above (fixtures, windows): up-facing surfaces get the most ambient
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.64f, 0.61f, 0.56f) * 0.95f;
-            RenderSettings.ambientEquatorColor = new Color(0.5f, 0.42f, 0.34f) * 0.4f;
-            RenderSettings.ambientGroundColor = new Color(0.3f, 0.27f, 0.24f) * 0.22f;
+            // cool bounce light from the windows against the warm lamps: the look's warm / cool contrast
+            RenderSettings.ambientSkyColor = new Color(0.5f, 0.56f, 0.62f) * 0.9f;
+            RenderSettings.ambientEquatorColor = new Color(0.42f, 0.4f, 0.38f) * 0.42f;
+            RenderSettings.ambientGroundColor = new Color(0.28f, 0.25f, 0.22f) * 0.18f;
+            // dusty air: a warm haze gives the long room depth
+            RenderSettings.fog = true;
+            RenderSettings.fogMode = FogMode.ExponentialSquared;
+            RenderSettings.fogColor = new Color(0.46f, 0.39f, 0.31f);
+            RenderSettings.fogDensity = 0.018f;
             // Godot adds screen-space indirect light (SSIL); URP has none, so ambient is a bit stronger.
             // (trilight ambient set above; the fixtures carry the room)
             RenderSettings.reflectionIntensity = 0.3f;
@@ -586,18 +593,29 @@ namespace WorkshopWreckage
             var tm = profile.Add<Tonemapping>(true);
             tm.mode.Override(TonemappingMode.ACES);
             var bloom = profile.Add<Bloom>(true);
-            bloom.intensity.Override(0.55f);
-            bloom.threshold.Override(1.05f);
-            bloom.scatter.Override(0.72f);
+            bloom.intensity.Override(0.7f);
+            bloom.threshold.Override(1.0f);
+            bloom.scatter.Override(0.75f);
+            bloom.tint.Override(new Color(1f, 0.86f, 0.7f));
+            // the look: worn industrial film. Slightly desaturated, firm contrast, teal shadows and
+            // amber highlights (rust against blueprint), fine grain, a soft vignette
             var ca = profile.Add<ColorAdjustments>(true);
-            ca.saturation.Override(10f);
-            ca.contrast.Override(14f);
-            ca.postExposure.Override(1.0f);
+            ca.saturation.Override(-6f);
+            ca.contrast.Override(10f);
+            ca.postExposure.Override(2.0f);
             var wb = profile.Add<WhiteBalance>(true);
-            wb.temperature.Override(3f);
+            wb.temperature.Override(2f);
+            var split = profile.Add<SplitToning>(true);
+            split.shadows.Override(new Color(0.32f, 0.5f, 0.56f));
+            split.highlights.Override(new Color(0.96f, 0.74f, 0.48f));
+            split.balance.Override(-12f);
+            var grain = profile.Add<FilmGrain>(true);
+            grain.type.Override(FilmGrainLookup.Thin1);
+            grain.intensity.Override(0.16f);
+            grain.response.Override(0.85f);
             var vig = profile.Add<Vignette>(true);
-            vig.intensity.Override(0.24f);
-            vig.smoothness.Override(0.45f);
+            vig.intensity.Override(0.3f);
+            vig.smoothness.Override(0.5f);
             var smh = profile.Add<ShadowsMidtonesHighlights>(true);
             smh.shadows.Override(new Vector4(0.96f, 0.98f, 1.04f, -0.04f));   // slightly cool, deep shadows
             smh.highlights.Override(new Vector4(1.04f, 1.0f, 0.95f, 0f));   // warm highlights

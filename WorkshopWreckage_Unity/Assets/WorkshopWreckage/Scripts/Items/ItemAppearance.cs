@@ -26,11 +26,35 @@ namespace WorkshopWreckage
 
         public static bool Known(string material) => Materials.ContainsKey(material);
 
+        // the workshop's palette: vintage industrial enamel instead of toy primaries
+        static readonly (Color from, Color to)[] Enamel =
+        {
+            (new Color(0.72f, 0.12f, 0.09f), new Color(0.56f, 0.17f, 0.11f)),   // red -> oxide red
+            (new Color(0.17f, 0.33f, 0.62f), new Color(0.2f, 0.36f, 0.42f)),    // blue -> faded teal
+            (new Color(0.24f, 0.45f, 0.25f), new Color(0.34f, 0.39f, 0.24f)),   // green -> olive
+            (new Color(0.86f, 0.62f, 0.12f), new Color(0.74f, 0.54f, 0.18f)),   // yellow -> mustard
+        };
+
+        /// <summary>Maps a catalog paint to its vintage enamel, keeping the part's own shade.</summary>
+        public static Color Vintage(Color c)
+        {
+            int best = 0; float bd = float.MaxValue;
+            for (int k = 0; k < Enamel.Length; k++)
+            {
+                var f = Enamel[k].from;
+                float d = (f.r - c.r) * (f.r - c.r) + (f.g - c.g) * (f.g - c.g) + (f.b - c.b) * (f.b - c.b);
+                if (d < bd) { bd = d; best = k; }
+            }
+            var (from, to) = Enamel[best];
+            float shade = (c.r + c.g + c.b) / Mathf.Max(0.05f, from.r + from.g + from.b);
+            return to * Mathf.Clamp(shade, 0.6f, 1.4f);
+        }
+
         /// <summary>(albedo, (metallic, roughness, wear, 0)) — the albedo in sRGB.</summary>
         public static (Color albedo, Vector4 custom) Params(ItemDefinition def)
         {
             var p = Materials.TryGetValue(def.material, out var m) ? m : Materials["steel"];
-            if (def.material == "painted") p.albedo = def.variantColor * 0.85f;   // worn paint, never bright
+            if (def.material == "painted") p.albedo = Vintage(def.variantColor) * 0.85f;   // worn enamel, never bright
             if (def.material == "electronic") p.albedo = def.variantColor;
             switch (def.finish)
             {
