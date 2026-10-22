@@ -138,9 +138,9 @@ namespace WorkshopWreckage
         /// first), up to the glove's limit per hold.</summary>
         public int MagnetTick(float dt)
         {
-            float range = (float)P.Effect("magnet_range_m");
+            float range = (float)P.Effect("magnet_range_m") * g.Scale("tool_range");
             if (range <= 0) { if (_magnetT <= 0) { g.hud.OnFeedback("You need the Magnetic Glove skill (Esc → Skills)", false); _magnetT = 2; } _magnetT -= dt; return 0; }
-            int max = (int)P.Effect("magnet_max_items");
+            int max = Mathf.RoundToInt((float)P.Effect("magnet_max_items") * g.Scale("tool_items"));
             _magnetT -= dt;
             if (_magnetT > 0 || _magnetTaken >= max) return 0;
             _magnetT = 0.11f;
@@ -223,7 +223,11 @@ namespace WorkshopWreckage
             int def = HeldDef;
             if (def < 0) { g.hud.OnFeedback("Supermagnet: hold the part you want more of", false); return 0; }
             if (Time.time < _superReady) { g.hud.OnFeedback($"Supermagnet recharging ({_superReady - Time.time:0} s)", false); return 0; }
-            var cfg = P.supermagnet;
+            var cfg = new Dictionary<string, object>(P.supermagnet)
+            {
+                ["radius_m"] = Json.Num(P.supermagnet, "radius_m", 6) * g.Scale("tool_range"),
+                ["max_items_per_activation"] = (double)Mathf.RoundToInt(Json.Int(P.supermagnet, "max_items_per_activation", 25) * g.Scale("tool_items")),
+            };
             var hand = Hand;
             bool los = Json.Bool(cfg, "line_of_sight_required", true);
             float radius = (float)Json.Num(cfg, "radius_m", 6);
@@ -255,10 +259,10 @@ namespace WorkshopWreckage
         /// hands, nearest first, up to the sweep limit and free inventory space.</summary>
         public int AreaSweep()
         {
-            float r = (float)P.Effect("area_collect_radius_m");
+            float r = (float)P.Effect("area_collect_radius_m") * g.Scale("tool_range");
             if (r <= 0) { g.hud.OnFeedback("You need the Area Sweep skill (Esc → Skills)", false); return 0; }
             if (Time.time < _sweepReady) { g.hud.OnFeedback($"Area Sweep recharging ({_sweepReady - Time.time:0} s)", false); return 0; }
-            int max = Mathf.Min((int)P.Effect("area_collect_max_items"), Inv.capacity - Inv.Count);
+            int max = Mathf.Min(Mathf.RoundToInt((float)P.Effect("area_collect_max_items") * g.Scale("tool_items")), Inv.capacity - Inv.Count);
             if (max <= 0) { g.hud.OnFeedback("Area Sweep: your hands are full", false); return 0; }
             var me = g.player.transform.position + Vector3.up * 0.5f;
             var ids = g.index.QuerySphere(me, r).Where(Takeable).Where(i => LineOfSight(Hand, g.world.instances[i].Position))

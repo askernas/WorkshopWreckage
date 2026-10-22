@@ -44,6 +44,7 @@ namespace WorkshopWreckage
         Step _lastStep;
         float _bend, _armHold, _armReach, _armLift;
         int _capacity, _types;
+        public int Capacity => _capacity;
         float _walk, _turn, _reach, _maxPickH, _followDist, _radius, _pickTime, _depositTime, _height, _maxItem, _stepH, _gather, _cruise;
         bool Flies => locomotion == "hover";
         readonly HashSet<int> _unreachable = new();
@@ -58,7 +59,7 @@ namespace WorkshopWreckage
         public string StepName => _step.ToString();
         public float Speed => _speedNow;
         public float WalkSpeed => _walk;
-        float Walk => _walk * (1f + (float)(g.progression?.Effect("robot_speed") ?? 0));   // Shift Planner
+        float Walk => _walk * g.Scale("robot_speed") * (1f + (float)(g.progression?.Effect("robot_speed") ?? 0));   // preset scaling, Shift Planner
         public float Height => _height;
         public int StationCapacity => g.db.BoxCapacity("RS-" + id);
 
@@ -72,7 +73,9 @@ namespace WorkshopWreckage
             displayName = Json.Str(c, "name", id);
             locomotion = Json.Str(c, "locomotion", "biped");
             _height = (float)Json.Num(c, "height", 0.3);
-            _capacity = Json.Int(c, "capacity", 1);
+            int baseCap = Json.Int(c, "capacity", 1);
+            // bigger worlds give bigger loads — except Retrobot, who always carries one part at a time
+            _capacity = baseCap <= 1 ? 1 : Mathf.RoundToInt(baseCap * g.Scale("robot_capacity"));
             _types = Json.Int(c, "item_types", 1);
             _walk = (float)Json.Num(c, "walk_speed", 0.7);
             _turn = (float)Json.Num(c, "turn_speed_deg", 260);

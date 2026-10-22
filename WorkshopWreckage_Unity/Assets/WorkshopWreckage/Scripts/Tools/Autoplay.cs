@@ -238,6 +238,9 @@ namespace WorkshopWreckage
         IEnumerator AllRobotsChecks()
         {
             var others = g.robots.Where(r => r.id != "retrobot").ToList();
+            var cfgR = Robot.AllConfig();
+            Check("robot capacity scales with world size (Retrobot stays at one)", g.robots.All(r => r.Capacity == (Json.Int(Json.Obj(cfgR[r.id]), "capacity") <= 1 ? 1 : Mathf.RoundToInt(Json.Int(Json.Obj(cfgR[r.id]), "capacity") * g.Scale("robot_capacity")))) && g.retrobot.Capacity == 1,
+                  string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Capacity}")) + $" (×{g.Scale("robot_capacity")})");
             Check("five robots at toy scale", g.robots.Count == 5 && g.robots.All(r => r.Height <= 0.31f), string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Height:0.00} m")));
             // half-built: ghosts show what is missing
             foreach (var r in others)

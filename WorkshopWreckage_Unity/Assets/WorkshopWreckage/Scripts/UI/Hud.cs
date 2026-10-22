@@ -568,7 +568,7 @@ namespace WorkshopWreckage
             var near = _g.NearestActiveRobot() ?? _g.retrobot;
             if (near == null) return "";
             int active = _g.robots.Count(r => r.Active);
-            return "     " + near.Describe() + (active > 1 ? $"  (+{active - 1} more robots working)" : "");
+            return "     " + near.Describe() + (active > 1 ? $"  (+{active - 1} robots)" : "");
         }
 
         void UpdateHeld()

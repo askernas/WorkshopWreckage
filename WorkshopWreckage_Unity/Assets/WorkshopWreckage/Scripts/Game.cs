@@ -35,6 +35,9 @@ namespace WorkshopWreckage
         public readonly HashSet<int> robotReserved = new();   // parts a robot is on its way to: no one else takes them
         public DebrisField debris;
         public PlayerTools tools;
+        /// <summary>Per-preset multipliers (world_presets.json "scaling"): bigger worlds get stronger robots and tools.</summary>
+        public Dictionary<string, object> presetScaling = new();
+        public float Scale(string key) => (float)Json.Num(presetScaling, key, 1);
         public Objectives objectives;
         public readonly Dictionary<string, StorageUnit> units = new();
         public int itemCount = -1;   // -1 = the preset's full population
@@ -129,6 +132,7 @@ namespace WorkshopWreckage
             if (db.IsValid) db.Validate();
             if (!db.IsValid) return false;
             presetId = preset;
+            presetScaling = Json.Obj(ItemDatabase.Presets().Find(p => p.id == preset).cfg?.GetValueOrDefault("scaling")) ?? new Dictionary<string, object>();
             _assignments = db.Assignments();
             _layoutSeed = int.MinValue;
             return true;
