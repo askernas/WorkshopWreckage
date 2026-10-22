@@ -13,8 +13,8 @@ namespace WorkshopWreckage
     /// and top, orthographic, WWBlueprintCapture) and WWPoster turns the views into ink on
     /// aged paper. The drawings are shared textures; the sheets on the walls (rebuilt with
     /// each layout) only choose size, tilt and curl. Wall sheets hang at eye height on bare
-    /// wall and above whatever stands against the wall (shelving and its name board, cabinets
-    /// with their arm sockets), never over windows, the door, signs or the tray floodlight.</summary>
+    /// wall and above pallet zones, never above shelving or cabinets (their name boards hang in
+    /// front of the wall), windows, the door, signs or the tray floodlight.</summary>
     public static class BlueprintPosters
     {
         /// <summary>The six machines above the workbench: type, drawing code, blue paper?,
@@ -82,8 +82,8 @@ namespace WorkshopWreckage
             smr.shadowCastingMode = ShadowCastingMode.Off;
         }
 
-        /// <summary>Sheets along all four walls, spaced 1.7–2.5 m, at a height clear of what
-        /// stands against the wall below them.</summary>
+        /// <summary>Sheets along all four walls, spaced 1.3–1.9 m, only where no storage unit's
+        /// name board can overlap them (bare wall, above pallet zones).</summary>
         static void BuildWalls(Game g, Transform root)
         {
             var L = g.layout;
@@ -107,12 +107,12 @@ namespace WorkshopWreckage
             int placed = 0;
             foreach (var wall in walls)
             {
-                for (float t = 1.0f + (float)rng.NextDouble() * 0.8f; t < wall.len - 1.0f; t += 1.7f + (float)rng.NextDouble() * 0.8f)
+                for (float t = 1.0f + (float)rng.NextDouble() * 0.6f; t < wall.len - 1.0f; t += 1.3f + (float)rng.NextDouble() * 0.6f)
                 {
-                    if (rng.NextDouble() < 0.15) continue;   // a gap now and then
+                    if (rng.NextDouble() < 0.1) continue;   // a gap now and then
                     float w = 0.75f + (float)rng.NextDouble() * 0.3f, h = w * 0.75f;
                     var c = wall.a + wall.dir * t;
-                    float bottom = BottomAt(L, wall.name, c, wall.dir, w);
+                    float bottom = BottomAt(L, wall.name, c, wall.dir, w, h);
                     if (bottom < 0 || bottom + h > 4.3f) continue;
                     var tex = pool[order[next++ % order.Count]]();
                     if (tex == null) continue;
@@ -129,7 +129,7 @@ namespace WorkshopWreckage
 
         /// <summary>Lowest clear sheet bottom (m) at wall point c (Godot XZ) for a sheet of width
         /// w, or -1 where none may hang (window, door, sign, existing board, workbench, corner).</summary>
-        static float BottomAt(WorkshopLayout L, string wall, Vector2 c, Vector2 dir, float w)
+        static float BottomAt(WorkshopLayout L, string wall, Vector2 c, Vector2 dir, float w, float h)
         {
             float half = w / 2 + 0.25f;
             bool Near(Vector2 p, float along, float reach) => Mathf.Abs(Vector2.Dot(p - c, dir)) < along + half && DistToWall(L, wall, p) < reach;
@@ -141,6 +141,7 @@ namespace WorkshopWreckage
             var tray = L.trayRect;
             if (wall == "south" && c.x > tray.xMin - half && c.x < tray.xMax + half) return -1;   // the tray's floodlight
             float bottom = 1.45f;   // bare wall: at eye level
+            var mounted = new List<float>();   // lower edges of signs and clocks above this spot
             foreach (var f in L.furniture)
             {
                 string type = Json.Str(f, "type");
@@ -152,8 +153,12 @@ namespace WorkshopWreckage
                 if (!Near(fp, ext, 1.3f)) continue;
                 switch (type)
                 {
-                    case "sign": case "clock": case "blueprint": case "pegboard": case "door": return -1;
+                    case "door": case "blueprint": return -1;
                     case "plant": continue;
+                    case "pegboard": bottom = Mathf.Max(bottom, p.y + s.y / 2 + 0.15f); break;   // above the tool board
+                    case "sign": case "clock":
+                        mounted.Add(p.y - s.y / 2);   // wall-mounted: checked once the height is known
+                        break;
                     default: bottom = Mathf.Max(bottom, p.y + s.y + 0.3f); break;
                 }
             }
@@ -163,13 +168,13 @@ namespace WorkshopWreckage
                 bool alongX = Mathf.Abs(Mathf.Sin((float)Json.Num(u, "rot_y"))) < 0.5f;
                 float ext = (alongX == (Mathf.Abs(dir.x) > 0.5f) ? (float)Json.Num(u, "width") : (float)Json.Num(u, "depth")) / 2;
                 if (!Near(new Vector2(p.x, p.z), ext, 1.2f)) continue;
-                bottom = Mathf.Max(bottom, Json.Str(u, "type") switch
-                {
-                    "shelving" => 3.2f,           // 2.66 m frame + its name board
-                    "drawer_cabinet" => 3.25f,    // name board, arm socket and a parked arm
-                    _ => 2.0f,                    // pallet zone: parts piled on it
-                });
+                // shelving and cabinets carry their name boards at the front, in front of the wall:
+                // from the floor they would always overlap a sheet above them, so none hangs there
+                if (Json.Str(u, "type") != "pallet_zone") return -1;
+                bottom = Mathf.Max(bottom, 2.0f);   // pallet zone: parts piled on it, its sign is a low post
             }
+            // the sheet may hang below a wall sign or clock, never across it
+            foreach (var lower in mounted) if (bottom + h > lower - 0.1f) return -1;
             return bottom;
         }
 

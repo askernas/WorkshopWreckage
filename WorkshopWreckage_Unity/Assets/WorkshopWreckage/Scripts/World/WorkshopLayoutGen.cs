@@ -121,8 +121,6 @@ namespace WorkshopWreckage
             Block(new Vector2(west + 9.6f, south - 0.6f), new Vector2(0.65f, 0.65f));
             F("stool", new Vector3(-1.3f, 0, north + 1.7f), new Vector3(0.4f, 0.65f, 0.4f));
             Block(new Vector2(-1.3f, north + 1.7f), new Vector2(0.4f, 0.4f));
-            F("blueprint", new Vector3(east - 0.05f, 3.6f, -1.0f), new Vector3(0.02f, 0.8f, 1.1f), -Mathf.PI / 2);
-            F("blueprint", new Vector3(west + 8.6f, 3.3f, south - 0.05f), new Vector3(1.0f, 0.75f, 0.02f), Mathf.PI);
             repairBayPos = new Vector3(west + 1.83f, 0, south - 0.5f);   // 3.45 m bench, 0.1 m from the west wall
             repairBayRot = Mathf.PI;
             Block(new Vector2(repairBayPos.x, repairBayPos.z), new Vector2(3.55f, 1.0f));
