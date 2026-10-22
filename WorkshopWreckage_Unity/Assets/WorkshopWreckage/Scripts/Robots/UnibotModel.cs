@@ -16,7 +16,7 @@ namespace WorkshopWreckage
         Transform _wheel, _lean, _leanGeo, _armL, _armR, _gyro;
         float _spin, _lean01, _lastSpeed;
         public override float ModelHeight => 1.2f;
-        const float WheelR = 0.2f, Axle = 0.2f, TorsoY = 0.58f, ShoulderY = 0.63f, NeckY = 0.71f;
+        const float WheelR = 0.215f, Axle = 0.215f, TorsoY = 0.58f, ShoulderY = 0.63f, NeckY = 0.71f;
 
         protected override void CreatePivots()
         {
@@ -71,7 +71,7 @@ namespace WorkshopWreckage
             foreach (var (arm, s, part) in new[] { (_armL, -1f, "left arm"), (_armR, 1f, "right arm") })
             {
                 var b = new Batch();
-                DetailedArm(b, s, part, part, ToyGreen, ToyGreenDeep, ToyRed, 0.92f);
+                DetailedArm(b, s, part, part, ToyGreen, ToyGreenDeep, ToyRed, 1f);
                 Done(b, arm);
             }
             DetailedHead(head, ToyGreen, new Vector3(0.36f, 0.32f, 0.32f), 1, 0.078f,
@@ -83,26 +83,27 @@ namespace WorkshopWreckage
             var b = new Batch();
             const string Tire = "tire", Hub = "wheel hub";
             // fat tyre: rounded cross-section revolved around the axle (X)
-            var tire = new[] { new Vector2(0.13f, -0.072f), new Vector2(0.175f, -0.075f), new Vector2(0.192f, -0.065f), new Vector2(0.2f, -0.04f), new Vector2(0.2f, 0.04f), new Vector2(0.192f, 0.065f), new Vector2(0.175f, 0.075f), new Vector2(0.13f, 0.072f) };
-            b.Lathe(Vector3.zero, tire, M(Tire, Rubber), RightRot, 32);
-            for (int k = 0; k < 20; k++)   // tread blocks in two staggered rows
+            // a fat balloon tyre (rounded shoulders), shallow staggered tread: a tyre, not a cog
+            var tire = new[] { new Vector2(0.135f, -0.083f), new Vector2(0.18f, -0.086f), new Vector2(0.203f, -0.074f), new Vector2(0.213f, -0.045f), new Vector2(0.213f, 0.045f), new Vector2(0.203f, 0.074f), new Vector2(0.18f, 0.086f), new Vector2(0.135f, 0.083f) };
+            b.Lathe(Vector3.zero, tire, M(Tire, Rubber), RightRot, 40);
+            for (int k = 0; k < 30; k++)
             {
-                float a = k * Mathf.PI / 10;
-                foreach (var x in new[] { -0.035f, 0.035f })
+                float a = k * Mathf.PI / 15;
+                foreach (var x in new[] { -0.036f, 0.036f })
                 {
-                    float aa = a + (x > 0 ? Mathf.PI / 20 : 0);
-                    b.RoundedBox(new Vector3(x, Mathf.Sin(aa) * 0.203f, Mathf.Cos(aa) * 0.203f), new Vector3(0.06f, 0.016f, 0.03f), 0.005f, M(Tire, Rubber), 1, Batch.R(Vector3.right, -aa));
+                    float aa = a + (x > 0 ? Mathf.PI / 30 : 0);
+                    b.RoundedBox(new Vector3(x, Mathf.Sin(aa) * 0.214f, Mathf.Cos(aa) * 0.214f), new Vector3(0.064f, 0.008f, 0.026f), 0.003f, M(Tire, Rubber), 1, Batch.R(Vector3.right, -aa + Mathf.PI / 2));   // lying flat on the tread
                 }
             }
             foreach (var s in new[] { -1f, 1f })
             {
-                b.Lathe(new Vector3(s * 0.045f, 0, 0), Disc(0.13f, 0.025f, 0.008f), M(Hub, ToyRed), SideRot(s), 28);
-                b.Lathe(new Vector3(s * 0.07f, 0, 0), Disc(0.055f, 0.012f, 0.004f), M(Hub, Gunmetal), SideRot(s), 20);
-                b.Lathe(new Vector3(s * 0.082f, 0, 0), Dome(0.035f, 0.018f), M(Hub, Brass), SideRot(s), 16);
+                b.Lathe(new Vector3(s * 0.05f, 0, 0), Disc(0.135f, 0.028f, 0.008f), M(Hub, ToyRed), SideRot(s), 32);
+                b.Lathe(new Vector3(s * 0.078f, 0, 0), Disc(0.055f, 0.012f, 0.004f), M(Hub, Gunmetal), SideRot(s), 20);
+                b.Lathe(new Vector3(s * 0.09f, 0, 0), Dome(0.035f, 0.018f), M(Hub, Brass), SideRot(s), 16);
                 for (int k = 0; k < 6; k++)
                 {
                     float a = k * Mathf.PI / 3;
-                    b.Rivet(new Vector3(s * 0.07f, Mathf.Sin(a) * 0.09f, Mathf.Cos(a) * 0.09f), new Vector3(s, 0, 0), 0.009f, M(Hub, Gunmetal));
+                    b.Rivet(new Vector3(s * 0.078f, Mathf.Sin(a) * 0.095f, Mathf.Cos(a) * 0.095f), new Vector3(s, 0, 0), 0.009f, M(Hub, Gunmetal));
                 }
             }
             Done(b, _wheel);
@@ -114,9 +115,9 @@ namespace WorkshopWreckage
             // fork: olive arms from the hub up into the undercarriage, with dark bearings
             foreach (var s in new[] { -1f, 1f })
             {
-                b.RoundedBox(new Vector3(s * 0.115f, Axle + 0.12f, 0.01f), new Vector3(0.03f, 0.27f, 0.06f), 0.012f, M("wheel hub", ToyGreen), 2);
-                b.Lathe(new Vector3(s * 0.1f, Axle, 0), Disc(0.035f, 0.03f, 0.006f), M("wheel hub", Gunmetal), SideRot(s), 16);
-                b.Rivet(new Vector3(s * 0.131f, Axle + 0.17f, 0.01f), new Vector3(s, 0, 0), 0.008f, M("wheel hub", Brass));
+                b.RoundedBox(new Vector3(s * 0.125f, Axle + 0.11f, 0.01f), new Vector3(0.03f, 0.25f, 0.06f), 0.012f, M("wheel hub", ToyGreen), 2);
+                b.Lathe(new Vector3(s * 0.105f, Axle, 0), Disc(0.035f, 0.03f, 0.006f), M("wheel hub", Gunmetal), SideRot(s), 16);
+                b.Rivet(new Vector3(s * 0.141f, Axle + 0.16f, 0.01f), new Vector3(s, 0, 0), 0.008f, M("wheel hub", Brass));
                 // springs between fork and body
                 for (int k = 0; k < 6; k++)
                     b.Lathe(new Vector3(s * 0.07f, 0.4f + k * 0.012f, 0.05f), Disc(0.014f, 0.006f, 0.002f), M("gyro stabilizer", Brass), null, 10);
@@ -153,8 +154,8 @@ namespace WorkshopWreckage
             float empty = 1 - Mathf.Max(a.armHold, a.armReach);
             float pitch = -70 * a.armHold - 40 * a.armLift - 45 * a.armReach;
             float flap = Mathf.Sin(a.time * 2.7f) * 8 * empty;
-            _armL.localRotation = Quaternion.Euler(pitch + flap, 0, 8 * a.armHold - 10 * empty);
-            _armR.localRotation = Quaternion.Euler(pitch - flap, 0, -8 * a.armHold + 10 * empty);
+            _armL.localRotation = Quaternion.Euler(pitch + flap, 0, 8 * a.armHold - 20 * empty);   // at rest the arms swing wide beside the wheel
+            _armR.localRotation = Quaternion.Euler(pitch - flap, 0, -8 * a.armHold + 20 * empty);
             LookHead(a);
         }
     }

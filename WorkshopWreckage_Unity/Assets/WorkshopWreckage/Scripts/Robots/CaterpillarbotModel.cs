@@ -5,7 +5,7 @@ namespace WorkshopWreckage
     /// <summary>Caterpillarbot after resources/catbot.png: a long, low, weathered
     /// industrial-yellow tracked hauler. Rubber track loops with moving cleats, big red
     /// bolted drive sprockets at both ends, brass road wheels below a yellow side skirt
-    /// with a slot and rivets; a front block with a slotted plate under the head; the
+    /// with a slot and rivets; a wide front block with a slotted plate under the head; the
     /// family head (one bezel eye, mouth grille, red ears, antennas, red siren); two
     /// articulated arms with red claws reaching forward; three open riveted cargo boxes
     /// lengthwise behind the head (brass trims, red slot handles). Treads run with its
@@ -20,7 +20,7 @@ namespace WorkshopWreckage
         float _offL, _offR;
         public override float ModelHeight => 0.9f;
         const float ArmRest = -62f;
-        const float TrackX = 0.21f, TrackW = 0.15f, EndZ = 0.47f, EndR = 0.13f, EndY = 0.135f, Cleat = 0.06f, SprocketR = 0.1f;
+        const float TrackX = 0.25f, TrackW = 0.17f, EndZ = 0.47f, EndR = 0.145f, EndY = 0.145f, Cleat = 0.06f, SprocketR = 0.118f;
         static readonly float[] BoxZ = { -0.07f, 0.2f, 0.47f };   // Godot z (front = -z)
         static readonly string[] BoxPart = { "front cargo box", "middle cargo box", "rear cargo box" };
 
@@ -33,10 +33,10 @@ namespace WorkshopWreckage
             _sprocketLR = Pivot("SprLR", body, new Vector3(-TrackX - TrackW / 2, EndY, -EndZ));
             _sprocketRF = Pivot("SprRF", body, new Vector3(TrackX + TrackW / 2, EndY, EndZ));
             _sprocketRR = Pivot("SprRR", body, new Vector3(TrackX + TrackW / 2, EndY, -EndZ));
-            head = Pivot("Head", _chassis, new Vector3(0, 0.555f, 0.38f));
+            head = Pivot("Head", _chassis, new Vector3(0, 0.49f, 0.38f));
             // arms are mounted at the front corners and reach forward, as in the reference
-            _armL = Pivot("ArmL", _chassis, new Vector3(-0.2f, 0.47f, 0.56f));
-            _armR = Pivot("ArmR", _chassis, new Vector3(0.2f, 0.47f, 0.56f));
+            _armL = Pivot("ArmL", _chassis, new Vector3(-0.27f, 0.43f, 0.55f));
+            _armR = Pivot("ArmR", _chassis, new Vector3(0.27f, 0.43f, 0.55f));
             _armL.localRotation = _armR.localRotation = Quaternion.Euler(ArmRest, 0, 0);
             for (int i = 0; i < 3; i++) _boxes[i] = Pivot("Cargo" + i, _chassis, new Vector3(0, 0.335f, -BoxZ[i]));
             carry = _boxes[0];
@@ -84,10 +84,10 @@ namespace WorkshopWreckage
                     b.Lathe(new Vector3(side * (TrackX + TrackW / 2 + 0.002f), 0.065f, z), Disc(0.05f, 0.016f, 0.004f), M(set, Brass), SideRot(side), 18);
                     b.Lathe(new Vector3(side * (TrackX + TrackW / 2 + 0.018f), 0.065f, z), Dome(0.02f, 0.01f), M(set, Gunmetal), SideRot(side), 12);
                 }
-                b.RoundedBox(new Vector3(side * (TrackX + TrackW / 2 + 0.008f), 0.17f, 0), new Vector3(0.016f, 0.11f, 0.62f), 0.006f, M("chassis", ToyYellow), 2);
-                b.RoundedBox(new Vector3(side * (TrackX + TrackW / 2 + 0.017f), 0.17f, 0), new Vector3(0.006f, 0.02f, 0.16f), 0.003f, M("chassis", Dark), 1);
+                b.RoundedBox(new Vector3(side * (TrackX + TrackW / 2 + 0.008f), 0.18f, 0), new Vector3(0.016f, 0.13f, 0.62f), 0.006f, M("chassis", ToyYellow), 2);
+                b.RoundedBox(new Vector3(side * (TrackX + TrackW / 2 + 0.017f), 0.18f, 0), new Vector3(0.006f, 0.02f, 0.16f), 0.003f, M("chassis", Dark), 1);
                 foreach (var z in new[] { -0.28f, -0.1f, 0.1f, 0.28f })
-                    foreach (var y in new[] { 0.13f, 0.21f })
+                    foreach (var y in new[] { 0.13f, 0.225f })
                         b.Rivet(new Vector3(side * (TrackX + TrackW / 2 + 0.016f), y, z), new Vector3(side, 0, 0), 0.007f, M("chassis", Gunmetal));
                 Done(b, body);
                 // top-run cleats: their pivot slides to make the tread move
@@ -112,26 +112,28 @@ namespace WorkshopWreckage
             {
                 var b = new Batch();
                 // chassis deck between the tracks, front block under the head, motor and battery
-                b.RoundedBox(new Vector3(0, 0.2f, 0), new Vector3(0.27f, 0.26f, 1.0f), 0.03f, M("chassis", ToyYellow), 2);
-                b.RoundedBox(new Vector3(0, 0.322f, 0.02f), new Vector3(0.58f, 0.025f, 0.96f), 0.008f, M("chassis", ToyYellowDeep), 2);
-                b.RoundedBox(new Vector3(0, 0.44f, -0.39f), new Vector3(0.36f, 0.22f, 0.36f), 0.03f, M("chassis", ToyYellow), 3);
-                b.RoundedBox(new Vector3(0, 0.42f, -0.573f), new Vector3(0.18f, 0.07f, 0.014f), 0.006f, M("chassis", ToyYellowDeep), 2);
-                b.RoundedBox(new Vector3(0, 0.42f, -0.581f), new Vector3(0.09f, 0.018f, 0.006f), 0.003f, M("chassis", Dark), 1);
-                foreach (var x in new[] { -0.15f, 0.15f })
-                    foreach (var y in new[] { 0.35f, 0.53f })
-                        b.Rivet(new Vector3(x, y, -0.57f), new Vector3(0, 0, -1), 0.008f, M("chassis", Gunmetal));
+                b.RoundedBox(new Vector3(0, 0.2f, 0), new Vector3(0.33f, 0.26f, 1.0f), 0.03f, M("chassis", ToyYellow), 2);
+                b.RoundedBox(new Vector3(0, 0.322f, 0.02f), new Vector3(0.68f, 0.025f, 0.96f), 0.008f, M("chassis", ToyYellowDeep), 2);
+                // the front block: as wide as the head, the arms on its corners (the sheet)
+                b.RoundedBox(new Vector3(0, 0.41f, -0.39f), new Vector3(0.48f, 0.16f, 0.36f), 0.03f, M("chassis", ToyYellow), 3);
+                b.RoundedBox(new Vector3(0, 0.41f, -0.573f), new Vector3(0.24f, 0.07f, 0.014f), 0.006f, M("chassis", ToyYellowDeep), 2);
+                b.RoundedBox(new Vector3(0, 0.41f, -0.581f), new Vector3(0.12f, 0.018f, 0.006f), 0.003f, M("chassis", ToyRed), 1);
+                b.RoundedBox(new Vector3(0, 0.41f, -0.584f), new Vector3(0.1f, 0.008f, 0.004f), 0.002f, M("chassis", Dark), 1);
+                foreach (var x in new[] { -0.21f, -0.07f, 0.07f, 0.21f })
+                    foreach (var y in new[] { 0.35f, 0.47f })
+                        b.Rivet(new Vector3(x, y, -0.57f), new Vector3(0, 0, -1), 0.0075f, M("chassis", Gunmetal));
                 Grille(b, "chassis", new Vector3(0, 0.2f, -0.501f), 0.16f, 0.08f, 5, false, -1);
                 b.RoundedBox(new Vector3(0, 0.2f, 0.505f), new Vector3(0.16f, 0.1f, 0.02f), 0.008f, M("battery pack", Gunmetal), 2);
                 b.Lathe(new Vector3(-0.08f, 0.26f, 0.38f), Disc(0.045f, 0.16f, 0.008f), M("drive motor", Gunmetal), RightRot, 16);
-                b.Lathe(new Vector3(-0.2f, 0.47f, -0.56f), Disc(0.026f, 0.4f, 0.005f), M("chassis", Gunmetal), RightRot, 12);   // shoulder axle across the front
-                for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.548f + k * 0.006f, -0.38f), Disc(0.06f - k * 0.005f, 0.006f, 0.002f), M("chassis", Gunmetal), null, 16);
+                b.Lathe(new Vector3(-0.27f, 0.43f, -0.55f), Disc(0.026f, 0.54f, 0.005f), M("chassis", Gunmetal), RightRot, 12);   // shoulder axle across the front
+                for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.488f + k * 0.006f, -0.38f), Disc(0.07f - k * 0.006f, 0.006f, 0.002f), M("chassis", Gunmetal), null, 16);
                 Done(b, _chassis);
             }
             for (int i = 0; i < 3; i++)
             {
                 var b = new Batch();
                 string P = BoxPart[i];
-                float w = 0.42f, d = 0.25f, h = 0.24f, t = 0.016f;
+                float w = 0.5f, d = 0.25f, h = 0.22f, t = 0.016f;
                 b.RoundedBox(new Vector3(0, 0.01f, 0), new Vector3(w, 0.02f, d), 0.005f, M(P, ToyYellowDeep), 1);
                 foreach (var s in new[] { -1f, 1f })
                 {
@@ -157,7 +159,7 @@ namespace WorkshopWreckage
                 DetailedArm(b, s, part, claw, ToyYellow, ToyYellowDeep, ToyRed, 0.95f);
                 Done(b, arm);
             }
-            DetailedHead(head, ToyYellow, new Vector3(0.38f, 0.26f, 0.34f), 1, 0.07f,
+            DetailedHead(head, ToyYellow, new Vector3(0.42f, 0.28f, 0.34f), 1, 0.075f,
                 "head", "optical eye", null, "antenna pair", "antenna pair", "head", "head", "siren light", false, true);
         }
 

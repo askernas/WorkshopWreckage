@@ -74,7 +74,7 @@ namespace WorkshopWreckage
         public void Init()
         {
             _eyeOff ??= EnvMaterials.Plain(new Color(0.22f, 0.17f, 0.1f), 0.2f, 0.85f);
-            _eyeOn ??= EnvMaterials.Plain(new Color(1f, 0.82f, 0.45f), 0f, 0.9f, 4f);
+            _eyeOn ??= EnvMaterials.Plain(new Color(1f, 0.8f, 0.42f), 0f, 0.9f, 2.2f);   // warm lamp; the bezels must still read
             _beaconOff ??= EnvMaterials.Plain(new Color(0.55f, 0.06f, 0.04f), 0.1f, 0.8f);
             _beaconOn ??= EnvMaterials.Plain(new Color(1f, 0.15f, 0.08f), 0f, 0.9f, 5f);
             body = Pivot("Body", transform, Vector3.zero);

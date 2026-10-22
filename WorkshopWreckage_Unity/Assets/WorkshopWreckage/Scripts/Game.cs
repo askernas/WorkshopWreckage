@@ -544,13 +544,14 @@ namespace WorkshopWreckage
             if (r.arm != null) r.arm.enabled = false;
             var pos = Shared.Pos(layout.spawn.x, 0, layout.spawn.z - 1.2f);
             r.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(Vector3.back));   // faces south, towards the camera
+            r.PoseRest();
             foreach (var t in r.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = StudioLayer;
             // the studio: nothing else is drawn or lit
             player.cam.cullingMask = 1 << StudioLayer;
             foreach (var l in FindObjectsByType<Light>()) l.enabled = false;
             RenderSettings.fog = false;
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.42f, 0.42f, 0.44f);
+            RenderSettings.ambientLight = new Color(0.36f, 0.36f, 0.38f);
             // seamless backdrop: the camera clears to flat studio grey (no sky, no walls)
             player.cam.clearFlags = CameraClearFlags.SolidColor;
             player.cam.backgroundColor = new Color(0.9f, 0.9f, 0.89f);
@@ -569,8 +570,8 @@ namespace WorkshopWreckage
             key.intensity = 1.6f;
             key.shadows = LightShadows.Soft;
             key.cullingMask = 1 << StudioLayer;
-            key.transform.rotation = Quaternion.Euler(38, 150, 0);   // from the front left, above
-            foreach (var (off, col, inten) in new[] { (new Vector3(-0.55f, 0.35f, -0.45f), new Color(0.8f, 0.86f, 1f), 0.35f), (new Vector3(0.2f, 0.65f, 0.6f), new Color(1f, 0.92f, 0.8f), 0.6f) })
+            key.transform.rotation = Quaternion.Euler(35, 30, 0);   // from the camera's front left, above (the robot faces -z)
+            foreach (var (off, col, inten) in new[] { (new Vector3(0.6f, 0.3f, -0.5f), new Color(0.82f, 0.88f, 1f), 0.5f), (new Vector3(-0.2f, 0.7f, 0.6f), new Color(1f, 0.94f, 0.84f), 0.9f) })
             {
                 var lg = new GameObject("StudioLight").AddComponent<Light>();
                 lg.type = LightType.Point; lg.range = 2.5f; lg.color = col; lg.intensity = inten;

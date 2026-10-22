@@ -248,6 +248,9 @@ namespace WorkshopWreckage
             StartCoroutine(Activate());
         }
 
+        /// <summary>Model QA: one neutral animation frame, the standing rest pose.</summary>
+        public void PoseRest() => _model.Animate(new RobotAnim { dt = 1, altitude = Flies ? 0.6f : 0 });
+
         /// <summary>Loading a save (or a legacy save's finished robot): operational at once, at home.</summary>
         public void SetOperational()
         {

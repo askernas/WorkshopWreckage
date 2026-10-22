@@ -174,16 +174,18 @@ namespace WorkshopWreckage
             {
                 tex = Tex(512, key, (u, v) =>
                 {
+                    // the concept sheets: clean, saturated enamel; wear is small and local
+                    // (rust specks, chips to dark metal, fine scratches), never broad brown patches
                     float grain = Noise(u * 22f + 0.37f, v * 22f, 2);
-                    float rust = SS(0.5f, 0.74f, Noise(u * 3f + 1.3f, v * 3f, 4));
-                    float grime = SS(0.4f, 0.78f, Noise(u * 1.6f + 7.1f, v * 1.6f, 3));
-                    float scratch = SS(0.93f, 0.98f, Noise(u * 40f, v * 3f, 2));
-                    float chip = SS(0.78f, 0.84f, Noise(u * 7f + 3.3f, v * 7f, 3) * 0.75f + grain * 0.35f);
-                    var c = paint * (0.86f + 0.22f * grain);
-                    c = Color.Lerp(c, c * new Color(0.6f, 0.48f, 0.36f), grime * 0.55f);
-                    c = Color.Lerp(c, new Color(0.4f, 0.21f, 0.09f), rust * 0.85f);
-                    c = Color.Lerp(c, new Color(0.25f, 0.2f, 0.17f), scratch * 0.6f);
-                    c = Color.Lerp(c, new Color(0.48f, 0.46f, 0.43f), chip);
+                    float rust = SS(0.66f, 0.8f, Noise(u * 6f + 1.3f, v * 6f, 4) * 0.8f + grain * 0.25f);
+                    float grime = SS(0.5f, 0.85f, Noise(u * 1.6f + 7.1f, v * 1.6f, 3));
+                    float scratch = SS(0.94f, 0.985f, Noise(u * 40f, v * 3f, 2));
+                    float chip = SS(0.8f, 0.85f, Noise(u * 9f + 3.3f, v * 9f, 3) * 0.75f + grain * 0.35f);
+                    var c = paint * (0.92f + 0.14f * grain);
+                    c = Color.Lerp(c, c * new Color(0.7f, 0.6f, 0.5f), grime * 0.3f);
+                    c = Color.Lerp(c, new Color(0.42f, 0.2f, 0.08f), rust * 0.75f);
+                    c = Color.Lerp(c, new Color(0.25f, 0.2f, 0.17f), scratch * 0.5f);
+                    c = Color.Lerp(c, new Color(0.22f, 0.2f, 0.18f), chip * 0.85f);
                     c.a = 1;
                     return c;
                 });
