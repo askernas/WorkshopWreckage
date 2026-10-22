@@ -71,7 +71,7 @@ namespace WorkshopWreckage
                 var req = new Dictionary<string, List<string>>();
                 foreach (var kv in Json.Obj(Json.Obj(c.GetValueOrDefault("assembly"))?.GetValueOrDefault("requires")) ?? new Dictionary<string, object>())
                     req[kv.Key] = Json.Arr(kv.Value).Select(x => x.ToString()).ToList();
-                var p = new Project { id = Types[i], type = Types[i], name = Json.Str(c, "name", Types[i]), level = Json.Int(c, "blueprint_level", 1), mat = i, requires = req };
+                var p = new Project { id = Types[i], type = Types[i], name = Json.Str(c, "name", Types[i]), level = Unlocks.Robot(Types[i]), mat = i, requires = req };
                 projects.Add(p);
                 string after = p.id;
                 foreach (var e in Json.Arr(c.GetValueOrDefault("extra_units")))
@@ -79,7 +79,7 @@ namespace WorkshopWreckage
                     var ed = Json.Obj(e);
                     var x = new Project
                     {
-                        id = Json.Str(ed, "id"), type = Types[i], name = Json.Str(ed, "name"), level = Json.Int(ed, "level", p.level), mat = i,
+                        id = Json.Str(ed, "id"), type = Types[i], name = Json.Str(ed, "name"), level = Unlocks.Robot(Json.Str(ed, "id"), p.level), mat = i,
                         crafted = true, after = after, requires = req,
                     };
                     foreach (var kv in Json.Obj(ed["materials"])) x.materials[kv.Key] = (int)(double)kv.Value;
@@ -115,7 +115,8 @@ namespace WorkshopWreckage
 
         /// <summary>The blueprint: player level reached (and, for a crafted robot, the
         /// previous unit of its type operational — they share one bench mat).</summary>
-        public bool Unlocked(Project p) => _g.progression != null && _g.progression.level >= p.level && (p.after == null || Operational(P(p.after)));
+        public bool Unlocked(Project p) => _debugUnlocked.Contains(p.id)
+            || _g.progression != null && _g.progression.level >= p.level && (p.after == null || Operational(P(p.after)));
 
         public string LockReason(Project p)
         {
@@ -328,6 +329,39 @@ namespace WorkshopWreckage
             Refresh();
         }
 
+        /// <summary>Debug mode (Unlocks.DebugMode) only: unlocks the blueprint regardless of
+        /// level, installs every part (crafted: recipe materials taken from the floor),
+        /// makes a crafted robot's predecessor operational and starts the activation.
+        /// Returns the feedback text.</summary>
+        public string DebugUnlock(Project p)
+        {
+            if (!Unlocks.DebugMode) return "Debug mode is off";
+            if (Operational(p)) return $"{p.name} is already operational";
+            if (p.after != null && !Operational(P(p.after)))
+            {
+                var prev = P(p.after);
+                DebugUnlock(prev);
+                RobotOf(prev)?.SetOperational();
+            }
+            _debugUnlocked.Add(p.id);
+            if (p.crafted)
+            {
+                foreach (var kv in MaterialsMissing(p))
+                    foreach (var i in _g.world.instances.Where(i => i.state == ItemState.InWorld && _g.world.DefOf(i.id).CategoryName == kv.Key).Take(kv.Value).ToList())
+                    {
+                        _g.index.Remove(i.id);
+                        _g.world.SetState(i.id, ItemState.Installed, OwnerOf(p.id));
+                    }
+                RobotOf(p)?.RefreshAssembly();
+                Refresh();
+            }
+            else ForceInstall(p);
+            if (!Complete(p)) return $"{p.name}: not enough loose parts to finish it ({InstalledCount(p)}/{Required(p)})";
+            return Activate(p) ? $"DEBUG: {p.name} unlocked and starting up" : $"DEBUG: {p.name} unlocked, assembly complete";
+        }
+
+        readonly HashSet<string> _debugUnlocked = new();
+
         public bool CanActivate(Project p) => Complete(p) && !Operational(p) && Unlocked(p) && RobotOf(p) is Robot r && r.mode == Robot.Mode.Assembling;
 
         public bool Activate(Project p)
@@ -389,6 +423,7 @@ namespace WorkshopWreckage
         public void ResetState()
         {
             _announced.Clear();
+            _debugUnlocked.Clear();
             selected = "retrobot";
         }
 

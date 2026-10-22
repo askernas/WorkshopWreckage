@@ -70,7 +70,7 @@ namespace WorkshopWreckage
                 var s = new SkillDef
                 {
                     id = Json.Str(d, "id"), name = Json.Str(d, "name"), group = Json.Str(d, "group"), status = Json.Str(d, "status", "planned"),
-                    unlockLevel = Json.Int(d, "unlock_level", 1), cost = Json.Int(d, "cost", 1),
+                    unlockLevel = Unlocks.Skill(Json.Str(d, "id")), cost = Json.Int(d, "cost", 1),
                     requires = Json.Arr(d.GetValueOrDefault("requires")).Select(x => x.ToString()).ToList(),
                 };
                 foreach (var kv in Json.Obj(d["effects"])) s.effects[kv.Key] = (double)kv.Value;
@@ -92,7 +92,7 @@ namespace WorkshopWreckage
                 robotUpgrades.Add(u);
             }
             var rs = Json.Obj(cfg.GetValueOrDefault("respec")) ?? new Dictionary<string, object>();
-            respecLevel = Json.Str(rs, "status", "planned") == "active" ? Json.Int(rs, "unlock_level", 12) : int.MaxValue;
+            respecLevel = Json.Str(rs, "status", "planned") == "active" ? Unlocks.Respec : int.MaxValue;
         }
 
         // ------------------------------------------------------------------ robot upgrades

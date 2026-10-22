@@ -1,11 +1,11 @@
 {
 	"version": 3,
-	"note": "Robot definitions (docs/specs/robots_and_levels.md §3, §15; docs/specs/robot_blueprints_and_assembly.md). All robots are toys at Retrobot's scale (~30 cm). Distances/heights in metres, speeds in m/s, times in seconds. Player: walk 3.0 m/s, eye height 1.62 m.\nBlueprints: a robot can be assembled at the Robot Workbench only once the player reaches blueprint_level; its unique parts (robot_parts.json) may be found and delivered earlier (they wait in the holding tray). assembly.requires: part -> parts that must be installed first (real mechanical dependencies only; everything else installs in any order).\nCapabilities: capacity = cargo slots (a part whose longest side is >= large_item_size takes two); item_types = different part kinds per trip; reach_height = highest point it can pick from / store into standing on the floor; climb_height (climbers only) = highest point it can reach by climbing furniture and shelving; can_direct_store false = it always leaves parts in the staging zone in front of the destination (still UNSORTED); heap_step_height = parts piled higher than this are obstacles; strategy: opportunistic | courier | assigned_definition | multi_stop | staging_first.\nlimits: permanent ceilings the upgrade trees (progression.json robot_upgrades) can never raise a stat beyond. battery_minutes: working time on a full charge; charge_minutes: time on its charging mat to recharge fully.",
+	"note": "Robot definitions (docs/specs/robots_and_levels.md §3, §15; docs/specs/robot_blueprints_and_assembly.md). All robots are toys at Retrobot's scale (~30 cm). Distances/heights in metres, speeds in m/s, times in seconds. Player: walk 3.0 m/s, eye height 1.62 m.\nBlueprints: a robot can be assembled at the Robot Workbench only once the player reaches its unlock level (unlocks.json robots); its unique parts (robot_parts.json) may be found and delivered earlier (they wait in the holding tray). assembly.requires: part -> parts that must be installed first (real mechanical dependencies only; everything else installs in any order).\nCapabilities: capacity = cargo slots (a part whose longest side is >= large_item_size takes two); item_types = different part kinds per trip; reach_height = highest point it can pick from / store into standing on the floor; climb_height (climbers only) = highest point it can reach by climbing furniture and shelving; can_direct_store false = it always leaves parts in the staging zone in front of the destination (still UNSORTED); heap_step_height = parts piled higher than this are obstacles; strategy: opportunistic | courier | assigned_definition | multi_stop | staging_first.\nlimits: permanent ceilings the upgrade trees (progression.json robot_upgrades) can never raise a stat beyond. battery_minutes: working time on a full charge; charge_minutes: time on its charging mat to recharge fully.",
 	"large_item_size": 0.25,
 	"staging_capacity": 14,
 	"robots": {
 		"retrobot": {
-			"name": "Retrobot", "blueprint_level": 2, "max_instances": 1, "strategy": "opportunistic",
+			"name": "Retrobot", "max_instances": 1, "strategy": "opportunistic",
 			"battery_minutes": 8, "charge_minutes": 0.75, "locomotion": "biped", "height": 0.3,
 			"capacity": 1, "item_types": 1, "walk_speed": 0.7, "turn_speed_deg": 260,
 			"reach": 0.32, "reach_height": 0.35, "max_item_size": 0.33, "heap_step_height": 0.18,
@@ -18,7 +18,7 @@
 			"personality": "Earnest, enthusiastic, slightly clumsy. One part at a time, always knows where it belongs."
 		},
 		"unibot": {
-			"name": "Unibot", "blueprint_level": 5, "max_instances": 1, "strategy": "courier",
+			"name": "Unibot", "max_instances": 1, "strategy": "courier",
 			"battery_minutes": 6, "charge_minutes": 0.75, "locomotion": "wheel", "height": 0.29,
 			"capacity": 1, "item_types": 1, "walk_speed": 1.4, "turn_speed_deg": 300,
 			"reach": 0.3, "reach_height": 0.35, "max_item_size": 0.28, "heap_step_height": 0.12,
@@ -31,7 +31,7 @@
 			"personality": "Energetic, slightly nervous, constantly balancing. A fast courier."
 		},
 		"spiderbot": {
-			"name": "Spiderbot", "blueprint_level": 9, "max_instances": 1, "strategy": "assigned_definition",
+			"name": "Spiderbot", "max_instances": 1, "strategy": "assigned_definition",
 			"battery_minutes": 10, "charge_minutes": 1.0, "locomotion": "hexapod", "height": 0.24,
 			"capacity": 1, "item_types": 1, "walk_speed": 0.85, "turn_speed_deg": 220,
 			"reach": 0.34, "reach_height": 0.4, "climb_height": 1.35, "climb_speed": 0.35, "max_item_size": 0.3, "heap_step_height": 0.55, "gather_radius": 2.5, "scan_radius": 6,
@@ -44,7 +44,7 @@
 			"personality": "Curious, methodical, precise. Clambers over heaps and up the shelving."
 		},
 		"caterpillarbot": {
-			"name": "Caterpillarbot", "blueprint_level": 14, "max_instances": 1, "strategy": "multi_stop",
+			"name": "Caterpillarbot", "max_instances": 1, "strategy": "multi_stop",
 			"battery_minutes": 14, "charge_minutes": 1.5, "locomotion": "tracks", "height": 0.3,
 			"capacity": 3, "item_types": 3, "walk_speed": 0.45, "turn_speed_deg": 70,
 			"reach": 0.36, "reach_height": 0.4, "max_item_size": 0.45, "heap_step_height": 0.32, "gather_radius": 3.0,
@@ -57,7 +57,7 @@
 			"personality": "Slow, determined, dependable. Hauls loads in three cargo boxes."
 		},
 		"hoverbot": {
-			"name": "Hoverbot", "blueprint_level": 19, "max_instances": 3, "strategy": "staging_first",
+			"name": "Hoverbot", "max_instances": 3, "strategy": "staging_first",
 			"battery_minutes": 5, "charge_minutes": 1.0, "locomotion": "hover", "height": 0.3,
 			"capacity": 1, "item_types": 1, "walk_speed": 1.2, "turn_speed_deg": 280,
 			"reach": 0.2, "reach_height": 2.5, "max_item_size": 0.3, "gather_radius": 2.5, "cruise_altitude": 2.95,
@@ -68,8 +68,8 @@
 			"limitations": ["One part at a time (two at most)", "Light parts only", "Cannot dig parts out from under a heap", "Not a bulk transporter"],
 			"assembly": {"requires": {"upper saucer shell": ["lower saucer shell"], "rim light 1": ["upper saucer shell"], "rim light 2": ["upper saucer shell"], "rim light 3": ["upper saucer shell"], "rim light 4": ["upper saucer shell"], "head": ["upper saucer shell"], "left eye lens": ["head"], "right eye lens": ["head"], "left antenna": ["head"], "right antenna": ["head"], "left ear cap": ["head"], "right ear cap": ["head"], "rotor mast": ["head"], "rotor hub": ["rotor mast"], "propeller blade a": ["rotor hub"], "propeller blade b": ["rotor hub"], "left claw": ["left arm"], "right claw": ["right arm"], "thruster glow plate": ["thruster ring"]}},
 			"extra_units": [
-				{"id": "hoverbot_2", "name": "Hoverbot #2", "level": 21, "materials": {"Gears": 6, "Bearings": 4, "Springs": 4, "Electronics": 6, "Shafts & Pins": 4}},
-				{"id": "hoverbot_3", "name": "Hoverbot #3", "level": 23, "materials": {"Gears": 8, "Bearings": 6, "Springs": 6, "Electronics": 8, "Machine Parts": 2}}
+				{"id": "hoverbot_2", "name": "Hoverbot #2", "materials": {"Gears": 6, "Bearings": 4, "Springs": 4, "Electronics": 6, "Shafts & Pins": 4}},
+				{"id": "hoverbot_3", "name": "Hoverbot #3", "materials": {"Gears": 8, "Bearings": 6, "Springs": 6, "Electronics": 8, "Machine Parts": 2}}
 			],
 			"extra_units_note": "Further Hoverbots are crafted from ordinary parts the player personally carries to the workbench once the first Hoverbot is operational. Materials match by category (any definition of it). A consumed part is INSTALLED: it counts as accounted for in its definition's collection (see DESIGN.md 'Crafting consumption'), so crafting can never make a set impossible to complete.",
 			"personality": "Curious, enthusiastic, slightly overactive. Reaches the high shelves and stores the piles the small robots leave."

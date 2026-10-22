@@ -1,6 +1,6 @@
 {
 	"version": 2,
-	"note": "Player levels, XP, skills and robot upgrades. The player carries 10 parts at first (Game.BaseInventory), 15 at most with both pocket skills. Engine independent; read by Progression.cs. XP is only ever granted once per instance/definition/zone/robot (see anti_exploit). Completing a whole ordinary item definition (every copy stored) is the main source of XP; sorting single parts gives a little. Robot blueprints unlock at levels set in robots.json (blueprint_level). 'status' marks what the current build implements: active = effect applied in game, planned = data reserved for a later milestone (see docs/ROADMAP.md).",
+	"note": "Player levels, XP, skills and robot upgrades. The player carries 10 parts at first (Game.BaseInventory), 15 at most with both pocket skills. Engine independent; read by Progression.cs. XP is only ever granted once per instance/definition/zone/robot (see anti_exploit). Completing a whole ordinary item definition (every copy stored) is the main source of XP; sorting single parts gives a little. All unlock levels (robot blueprints, skills, respec) are in unlocks.json. 'status' marks what the current build implements: active = effect applied in game, planned = data reserved for a later milestone (see docs/ROADMAP.md).",
 	"levels": {
 		"max_level": 25,
 		"xp_curve": {"type": "power", "base": 19, "exponent": 1.55, "comment": "XP needed to go from level L to L+1 = round(base * L^exponent)"},
@@ -35,24 +35,24 @@
 		"comment": "Per-item XP shrinks with world size so level 25 is reached at a similar completion fraction in every preset. Balance target: Massive completes in ~1.8x Standard's time (items x2.44)."
 	},
 	"skills": [
-		{"id": "pockets_1", "name": "Deeper Pockets", "group": "inventory", "unlock_level": 5, "cost": 1, "requires": [], "effects": {"inventory_capacity": 2}, "status": "active"},
-		{"id": "pockets_2", "name": "Tool Belt", "group": "inventory", "unlock_level": 12, "cost": 2, "requires": ["pockets_1"], "effects": {"inventory_capacity": 3}, "status": "active"},
-		{"id": "organiser", "name": "Parts Organiser", "group": "inventory", "unlock_level": 6, "cost": 1, "requires": [], "effects": {"inventory_stacking": 1}, "status": "active", "comment": "Identical parts stack in one slot and the pockets are sorted by type. Before this every part is its own slot, in pickup order."},
-		{"id": "quick_hands", "name": "Quick Hands", "group": "collection", "unlock_level": 3, "cost": 1, "requires": [], "effects": {"pickup_speed": 0.25}, "status": "active"},
-		{"id": "inventory_manifest", "name": "Inventory Manifest", "group": "scanning", "unlock_level": 4, "cost": 1, "requires": [], "effects": {"reveal_totals": 1}, "status": "active"},
-		{"id": "long_reach", "name": "Long Reach", "group": "collection", "unlock_level": 4, "cost": 1, "requires": [], "effects": {"reach_m": 0.8}, "status": "active"},
-		{"id": "bulk_pickup", "name": "Handful", "group": "collection", "unlock_level": 5, "cost": 1, "requires": [], "effects": {"bulk_pickup_count": 4, "bulk_pickup_radius_m": 0.25}, "status": "active"},
-		{"id": "magnet_1", "name": "Magnetic Glove", "group": "magnet", "unlock_level": 7, "cost": 1, "requires": [], "effects": {"magnet_range_m": 0.8, "magnet_max_items": 12}, "status": "active"},
-		{"id": "magnet_2", "name": "Stronger Coils", "group": "magnet", "unlock_level": 10, "cost": 1, "requires": ["magnet_1"], "effects": {"magnet_range_m": 0.7, "magnet_max_items": 12}, "status": "active"},
-		{"id": "filter_material", "name": "Material Filter", "group": "magnet", "unlock_level": 9, "cost": 1, "requires": ["magnet_1"], "effects": {"filter_material": 1}, "status": "active"},
-		{"id": "filter_category", "name": "Category Filter", "group": "magnet", "unlock_level": 11, "cost": 1, "requires": ["magnet_1"], "effects": {"filter_category": 1}, "status": "active"},
-		{"id": "scanner_1", "name": "Parts Scanner", "group": "scanning", "unlock_level": 3, "cost": 1, "requires": [], "effects": {"scan_radius_m": 4.0, "scan_highlights_destination": 1}, "status": "active"},
-		{"id": "scanner_2", "name": "Advanced Scanning", "group": "scanning", "unlock_level": 13, "cost": 1, "requires": ["scanner_1"], "effects": {"scan_radius_m": 8.0, "scan_shows_remaining": 1}, "status": "active"},
-		{"id": "supermagnet", "name": "Supermagnet — Exact Match", "group": "magnet", "unlock_level": 18, "cost": 3, "requires": ["magnet_2"], "effects": {"supermagnet": 1}, "status": "active"},
-		{"id": "robot_coordination", "name": "Robot Task Coordination", "group": "robots", "unlock_level": 8, "cost": 1, "requires": [], "effects": {"robot_command_slots": 1}, "status": "active"},
-		{"id": "robot_coordination_2", "name": "Shift Planner", "group": "robots", "unlock_level": 16, "cost": 2, "requires": ["robot_coordination"], "effects": {"robot_command_slots": 2, "robot_speed": 0.2}, "status": "active"},
-		{"id": "auto_delivery", "name": "Automatic Storage Delivery", "group": "automation", "unlock_level": 20, "cost": 3, "requires": ["robot_coordination"], "effects": {"auto_delivery": 1}, "status": "active"},
-		{"id": "area_collection", "name": "Area Sweep", "group": "automation", "unlock_level": 22, "cost": 3, "requires": ["bulk_pickup", "magnet_2"], "effects": {"area_collect_radius_m": 2.5, "area_collect_max_items": 40}, "status": "active"}
+		{"id": "pockets_1", "name": "Deeper Pockets", "group": "inventory", "cost": 1, "requires": [], "effects": {"inventory_capacity": 2}, "status": "active"},
+		{"id": "pockets_2", "name": "Tool Belt", "group": "inventory", "cost": 2, "requires": ["pockets_1"], "effects": {"inventory_capacity": 3}, "status": "active"},
+		{"id": "organiser", "name": "Parts Organiser", "group": "inventory", "cost": 1, "requires": [], "effects": {"inventory_stacking": 1}, "status": "active", "comment": "Identical parts stack in one slot and the pockets are sorted by type. Before this every part is its own slot, in pickup order."},
+		{"id": "quick_hands", "name": "Quick Hands", "group": "collection", "cost": 1, "requires": [], "effects": {"pickup_speed": 0.25}, "status": "active"},
+		{"id": "inventory_manifest", "name": "Inventory Manifest", "group": "scanning", "cost": 1, "requires": [], "effects": {"reveal_totals": 1}, "status": "active"},
+		{"id": "long_reach", "name": "Long Reach", "group": "collection", "cost": 1, "requires": [], "effects": {"reach_m": 0.8}, "status": "active"},
+		{"id": "bulk_pickup", "name": "Handful", "group": "collection", "cost": 1, "requires": [], "effects": {"bulk_pickup_count": 4, "bulk_pickup_radius_m": 0.25}, "status": "active"},
+		{"id": "magnet_1", "name": "Magnetic Glove", "group": "magnet", "cost": 1, "requires": [], "effects": {"magnet_range_m": 0.8, "magnet_max_items": 12}, "status": "active"},
+		{"id": "magnet_2", "name": "Stronger Coils", "group": "magnet", "cost": 1, "requires": ["magnet_1"], "effects": {"magnet_range_m": 0.7, "magnet_max_items": 12}, "status": "active"},
+		{"id": "filter_material", "name": "Material Filter", "group": "magnet", "cost": 1, "requires": ["magnet_1"], "effects": {"filter_material": 1}, "status": "active"},
+		{"id": "filter_category", "name": "Category Filter", "group": "magnet", "cost": 1, "requires": ["magnet_1"], "effects": {"filter_category": 1}, "status": "active"},
+		{"id": "scanner_1", "name": "Parts Scanner", "group": "scanning", "cost": 1, "requires": [], "effects": {"scan_radius_m": 4.0, "scan_highlights_destination": 1}, "status": "active"},
+		{"id": "scanner_2", "name": "Advanced Scanning", "group": "scanning", "cost": 1, "requires": ["scanner_1"], "effects": {"scan_radius_m": 8.0, "scan_shows_remaining": 1}, "status": "active"},
+		{"id": "supermagnet", "name": "Supermagnet — Exact Match", "group": "magnet", "cost": 3, "requires": ["magnet_2"], "effects": {"supermagnet": 1}, "status": "active"},
+		{"id": "robot_coordination", "name": "Robot Task Coordination", "group": "robots", "cost": 1, "requires": [], "effects": {"robot_command_slots": 1}, "status": "active"},
+		{"id": "robot_coordination_2", "name": "Shift Planner", "group": "robots", "cost": 2, "requires": ["robot_coordination"], "effects": {"robot_command_slots": 2, "robot_speed": 0.2}, "status": "active"},
+		{"id": "auto_delivery", "name": "Automatic Storage Delivery", "group": "automation", "cost": 3, "requires": ["robot_coordination"], "effects": {"auto_delivery": 1}, "status": "active"},
+		{"id": "area_collection", "name": "Area Sweep", "group": "automation", "cost": 3, "requires": ["bulk_pickup", "magnet_2"], "effects": {"area_collect_radius_m": 2.5, "area_collect_max_items": 40}, "status": "active"}
 	],
 	"supermagnet": {
 		"radius_m": 6.0,
@@ -97,7 +97,7 @@
 		{"id": "hover_staging", "robot": "hoverbot", "name": "Staging Prioritization", "description": "Empties the fullest staging zones first, then the closest.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "staging_priority", "mode": "rank", "effect_per_rank": 1, "status": "active"},
 		{"id": "hover_fleet", "robot": "hoverbot", "name": "Fleet Coordination", "description": "Hoverbots split the staging zones between them instead of crowding the same one.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "fleet_coordination", "mode": "rank", "effect_per_rank": 1, "status": "active"}
 	],
-	"respec": {"unlock_level": 12, "status": "active", "comment": "From this level the Robots screen can refund every robot upgrade point (player skills stay)."},
+	"respec": {"status": "active", "comment": "From this level the Robots screen can refund every robot upgrade point (player skills stay)."},
 	"restoration": {
 		"lamp_boost_at_100": 0.45,
 		"machine_zone_percent": 60,

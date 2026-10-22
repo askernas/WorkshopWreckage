@@ -569,6 +569,17 @@ namespace WorkshopWreckage
             while (!r2.Active && Time.realtimeSinceStartup - t2 < 12) yield return null;
             Check("Hoverbot #2 activates with its own identity next to the first", r2.Active && r2.id != hover.id && hover.Active && wb.Unlocked(wb.P("hoverbot_3")) == (pr.level >= wb.P("hoverbot_3").level),
                   $"{r2.displayName} ({r2.id}): {r2.Describe()}");
+
+            // debug mode (unlocks.json debug_mode / --debug): "unlock now" ignores the blueprint level
+            var h3 = wb.P("hoverbot_3");
+            var r3 = wb.RobotOf(h3);
+            int keepLevel = pr.level;
+            pr.level = 1;
+            string dmsg = Unlocks.DebugMode ? wb.DebugUnlock(h3) : "debug mode off";
+            t2 = Time.realtimeSinceStartup;
+            while (Unlocks.DebugMode && !r3.Active && Time.realtimeSinceStartup - t2 < 12) yield return null;
+            Check("debug mode: the workbench's 'unlock now' builds and starts a robot below its blueprint level", !Unlocks.DebugMode || (r3.Active && wb.Operational(h3)), dmsg);
+            pr.level = keepLevel;
         }
 
         IEnumerator ToolChecks()
@@ -765,7 +776,7 @@ namespace WorkshopWreckage
             foreach (var id in parts.Concat(wb.PartIds(uniP))) g.progress.Discover(g.world.instances[id].defId);
             pr.level = 1; pr.xp = 0;
             wb.CheckBlueprints(false);
-            Check("blueprints lock robots behind player levels (2 / 5 / 9 / 14 / 19)", !wb.Unlocked(retro) && wb.projects.Where(p => !p.crafted).Select(p => p.level).SequenceEqual(new[] { 2, 5, 9, 14, 19 }),
+            Check("blueprints lock robots behind the player levels in unlocks.json", !wb.Unlocked(retro) && wb.projects.All(p => p.level == Unlocks.Robot(p.id, -1)),
                   string.Join(", ", wb.projects.Select(p => $"{p.name} lv {p.level}")));
 
             // 1-2. a part found below its blueprint level can be picked up and carried

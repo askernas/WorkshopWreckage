@@ -186,6 +186,17 @@ namespace WorkshopWreckage
             });
             ab.interactable = wb.CanActivate(p);
             ab.GetComponent<LayoutElement>().preferredWidth = 300;
+            if (Unlocks.DebugMode && !wb.Operational(p))
+            {
+                var db = MakeButton(_wbActions, "DEBUG: unlock now", () =>
+                {
+                    string msg = wb.DebugUnlock(p);
+                    if (wb.RobotOf(p) is Robot r && r.mode == Robot.Mode.Activating) { _g.SetState("play"); Toast(msg, true); }
+                    else { OnFeedback(msg, wb.Complete(p)); RefreshWorkbench(); }
+                });
+                db.GetComponent<LayoutElement>().preferredWidth = 240;
+                db.GetComponentInChildren<Text>().color = new Color(1f, 0.55f, 0.35f);
+            }
             var cb = MakeButton(_wbActions, "Close", () => _g.SetState("play"));
             cb.GetComponent<LayoutElement>().preferredWidth = 200;
         }

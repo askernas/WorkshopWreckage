@@ -29,6 +29,7 @@ Shader "WorkshopWreckage/Item"
     TEXTURE2D(_WearNoise); SAMPLER(sampler_WearNoise);
     StructuredBuffer<float4> _ItemData;
     float _ItemOffset;
+    float _WWItemDebug;   // QA (--itemdebug): 1 normals, 2 ambient only, 3 main light only, 4 additional lights only
 
     struct Attributes
     {
@@ -60,8 +61,10 @@ Shader "WorkshopWreckage/Item"
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
-            // Double-sided: any hole or wrongly wound face in a procedural part still renders
-            // (back faces get a flipped normal) instead of letting you see into the part.
+            // Double-sided: any hole in a procedural part still renders instead of letting
+            // you see into the part. Shading always uses the mesh normal (verified outward
+            // for every exported part): the instanced draws report front faces as back
+            // faces, and flipping by SV_IsFrontFace turned every upward face black.
             Cull Off
             HLSLPROGRAM
             #pragma target 4.5
@@ -112,9 +115,8 @@ Shader "WorkshopWreckage/Item"
                 return o;
             }
 
-            half4 frag(Varyings i, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
+            half4 frag(Varyings i) : SV_Target
             {
-                i.normalWS = IS_FRONT_VFACE(face, i.normalWS, -i.normalWS);
                 float4 c = i.custom;
                 float n = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.xy * 0.45 + i.objPos.zz * 0.21 + c.w * 7.0).r;
                 float grime = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.zx * 0.13 + c.w * 3.0).r;
@@ -144,6 +146,26 @@ Shader "WorkshopWreckage/Item"
                 s.occlusion = 1.0;
                 s.alpha = 1.0;
                 half4 col = UniversalFragmentPBR(d, s);
+                if (_WWItemDebug > 0.5)
+                {
+                    if (_WWItemDebug < 1.5) return half4(d.normalWS * 0.5 + 0.5, 1);
+                    if (_WWItemDebug < 2.5) return half4(d.bakedGI, 1);
+                    if (_WWItemDebug < 3.5)
+                    {
+                        Light ml = GetMainLight(d.shadowCoord);
+                        return half4(ml.color * ml.shadowAttenuation * ml.distanceAttenuation * saturate(dot(d.normalWS, ml.direction)), 1);
+                    }
+                    half3 acc = 0;
+                    uint n = GetAdditionalLightsCount();
+                    #if USE_CLUSTER_LIGHT_LOOP || USE_FORWARD_PLUS
+                    InputData inputData = d;
+                    LIGHT_LOOP_BEGIN(n)
+                        Light al = GetAdditionalLight(lightIndex, d.positionWS, half4(1, 1, 1, 1));
+                        acc += al.color * al.distanceAttenuation * al.shadowAttenuation * saturate(dot(d.normalWS, al.direction));
+                    LIGHT_LOOP_END
+                    #endif
+                    return half4(acc, 1);
+                }
                 col.rgb = MixFog(col.rgb, i.fog);
                 return col;
             }
@@ -226,7 +248,7 @@ Shader "WorkshopWreckage/Item"
                 o.n = TransformObjectToWorldNormal(v.normalOS);
                 return o;
             }
-            half4 frag(V2F i, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target { return half4(NormalizeNormalPerPixel(IS_FRONT_VFACE(face, i.n, -i.n)), 0); }
+            half4 frag(V2F i) : SV_Target { return half4(NormalizeNormalPerPixel(i.n), 0); }
             ENDHLSL
         }
     }

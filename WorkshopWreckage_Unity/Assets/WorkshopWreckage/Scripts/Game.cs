@@ -110,6 +110,8 @@ namespace WorkshopWreckage
             if (!StartWorld(seed, null)) return;
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
             StartCoroutine(ProbeLater());
+            // QA: item lighting terms (1 normals, 2 ambient, 3 main light, 4 additional lights)
+            if (args.TryGetValue("itemdebug", out var idm)) Shader.SetGlobalFloat("_WWItemDebug", float.Parse(idm, System.Globalization.CultureInfo.InvariantCulture));
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
             if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
