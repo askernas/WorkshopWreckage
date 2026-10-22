@@ -11,7 +11,7 @@ using Unity.Profiling;
 namespace WorkshopWreckage
 {
     /// <summary>HUD and menus (port of Godot hud.gd + menus.gd), built in uGUI.</summary>
-    public class Hud : MonoBehaviour
+    public partial class Hud : MonoBehaviour
     {
         static readonly Color Bg = new(0.11f, 0.08f, 0.06f, 0.94f), Brass = new(0.82f, 0.63f, 0.32f), BrassDim = new(0.55f, 0.42f, 0.22f),
             Cream = new(0.96f, 0.91f, 0.8f), Muted = new(0.72f, 0.66f, 0.56f), GoodC = new(0.55f, 0.85f, 0.45f), BadC = new(0.95f, 0.42f, 0.32f);
@@ -277,12 +277,7 @@ namespace WorkshopWreckage
             Stack(_skillList);
             MakeButton(sk, "Back", () => ShowScreenRaw(_backTo));
 
-            var rs = Screen("robots", 1150);
-            Title(rs, "ROBOTS");
-            Para(rs, "R: nearest robot works on the part you aim at  ·  T: work / follow  ·  H: hand your parts to a robot  ·  J: work zone", 15, Muted, 24);
-            _robotList = Rect("List", rs, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            Stack(_robotList);
-            MakeButton(rs, "Back", () => ShowScreenRaw(_backTo));
+            BuildRobotScreens();
 
             var st = Screen("settings", 640);
             Title(st, "SETTINGS");
@@ -345,7 +340,7 @@ namespace WorkshopWreckage
         public void SetScreen(string state)
         {
             _hud.gameObject.SetActive(state != "menu");
-            ShowScreenRaw(state == "menu" ? "main" : state == "paused" ? "pause" : state == "inventory" ? "inventory" : "");
+            ShowScreenRaw(state == "menu" ? "main" : state == "paused" ? "pause" : state == "inventory" ? "inventory" : state == "workbench" ? "workbench" : "");
         }
 
         public void SetHudVisible(bool v) => _hud.gameObject.SetActive(v);
@@ -364,6 +359,8 @@ namespace WorkshopWreckage
             if (name == "save" || name == "load") RefreshSlots();
             if (name == "skills") RefreshSkills();
             if (name == "robots") RefreshRobots();
+            if (name == "workbench") RefreshWorkbench();
+            else if (_previewCam != null) PreviewCamera(false);
             if (name == "inventory") RefreshLog();
             if (name == "main") _continue.interactable = LatestSlot() != "";
         }
@@ -391,37 +388,6 @@ namespace WorkshopWreckage
                         else _g.LoadGame(slot);
                     });
                     b.interactable = saving || System.IO.File.Exists(SaveSystem.PathOf(slot));
-                }
-            }
-        }
-
-        RectTransform _robotList;
-        float _robotRefreshT;
-
-        /// <summary>Robot management: status, load and work record of every robot, with
-        /// work / follow and zone release.</summary>
-        void RefreshRobots()
-        {
-            foreach (Transform c in _robotList) Destroy(c.gameObject);
-            foreach (var r in _g.robots)
-            {
-                var row = new GameObject(r.id, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
-                row.transform.SetParent(_robotList, false);
-                row.GetComponent<LayoutElement>().preferredHeight = 40;
-                var h = row.GetComponent<HorizontalLayoutGroup>();
-                h.spacing = 8; h.childControlWidth = true; h.childForceExpandWidth = false; h.childControlHeight = true;
-                string zone = r.zoneCenter.HasValue ? "  ·  zone" : "";
-                var info = Para(row.transform, $"<b>{r.displayName}</b>   {r.Describe().Substring(r.displayName.Length + 2)}   ·   battery {r.Battery * 100:0}%  ·  stored {r.delivered}, piled {r.staged}{zone}", 17, r.Active ? Cream : Muted, 40);
-                info.alignment = TextAnchor.MiddleLeft;
-                info.GetComponent<LayoutElement>().preferredWidth = 820;
-                if (!r.Active) continue;
-                var robot = r;
-                var b = MakeButton(row.transform, r.mode == Robot.Mode.Following ? "Work" : "Follow me", () => { robot.ToggleFollow(); RefreshRobots(); });
-                b.GetComponent<LayoutElement>().preferredWidth = 140;
-                if (r.zoneCenter.HasValue)
-                {
-                    var z = MakeButton(row.transform, "Clear zone", () => { robot.AssignZone(null); RefreshRobots(); });
-                    z.GetComponent<LayoutElement>().preferredWidth = 140;
                 }
             }
         }
@@ -473,7 +439,8 @@ namespace WorkshopWreckage
             for (int z = 0; z < _g.layout.zones.Count; z++)
                 t += $"{_g.layout.zones[z].name}:  {p.ZonePercent(z):0}%  ·  {p.ZoneSorted(z)} sorted, {p.ZoneRemaining(z)} still to sort\n";
             t += $"\nRobot components found: {p.robotPartsFound} / {db.RobotPartIds().Count}\n";
-            foreach (var r in RepairBay.Robots) t += $"   {char.ToUpper(r[0]) + r.Substring(1)}: {_g.storage.Stored("RS-" + r).Count} / {db.RobotPartIds(r).Count} at the repair bay\n";
+            foreach (var pj in _g.workbench.projects.Where(x => !x.crafted))
+                t += $"   {pj.name}: {_g.workbench.InstalledCount(pj)} / {_g.workbench.Required(pj)} installed, {_g.workbench.DeliveredIds(pj).Count} in the holding tray  ·  {RobotWorkbench.StatusText(_g.workbench.StatusOf(pj))}\n";
             _logText.text = t;
         }
 
@@ -513,7 +480,7 @@ namespace WorkshopWreckage
             if (!active || def == null) return;
             var p = _g.progress;
             var t = $"<size=24><b><color=#d4a352>{def.displayName}</color></b></size>\n<color=#b8a890>{def.CategoryName}  ·  {def.shape}</color>\n\n";
-            if (def.IsRobotPart) t += $"A component of <b>{def.subcategory}</b>.\nBring it to the Robot Repair Bay.\n\n";
+            if (def.IsRobotPart) t += $"A component of <b>{def.subcategory}</b>.\nCarry it to the Robot Workbench yourself.\n\n";
             else
             {
                 var mat = def.material == "oxidized" ? "Rusty steel" : char.ToUpper(def.material[0]) + def.material.Substring(1);
@@ -544,6 +511,7 @@ namespace WorkshopWreckage
         void Update()
         {
             if (_screen == "robots" && (_robotRefreshT -= Time.unscaledDeltaTime) <= 0) { _robotRefreshT = 1; RefreshRobots(); }
+            if (_screen == "workbench" && (_wbRefreshT -= Time.unscaledDeltaTime) <= 0) { _wbRefreshT = 1; RefreshWorkbench(); }
             if (_feedbackT > 0)
             {
                 _feedbackT -= Time.deltaTime;
@@ -568,6 +536,7 @@ namespace WorkshopWreckage
             var near = _g.NearestActiveRobot() ?? _g.retrobot;
             if (near == null) return "";
             int active = _g.robots.Count(r => r.Active);
+            if (!near.Operational) return "";
             return "     " + near.Describe() + (active > 1 ? $"  (+{active - 1} robots)" : "");
         }
 

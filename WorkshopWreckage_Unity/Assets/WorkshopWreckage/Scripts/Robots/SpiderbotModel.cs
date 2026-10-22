@@ -36,6 +36,22 @@ namespace WorkshopWreckage
             _jawR = Pivot("JawR", _shell, new Vector3(0.05f, 0.23f, 0.19f));
             head = Pivot("Head", _shell, new Vector3(0, 0.405f, 0.03f));
             carry = Pivot("Carry", _shell, new Vector3(0, 0.43f, -0.15f));   // on its back, behind the head
+            for (int i = 0; i < 6; i++) Mount(_hip[i], Legs[i].part, new Vector3(Legs[i].x, 0, 0), 0.035f);
+            Mount(head, "head", Vector3.up, 0.045f);
+            Mount(_jawL, "gripping jaws", new Vector3(0, 0, -1), 0.025f);
+        }
+
+        protected override Vector3? ClampPoint => new Vector3(0, 0.31f, Has("body shell") ? 0.21f : 0.1f);
+
+        /// <summary>Without the body shell: the chassis plate with its hip rails.</summary>
+        protected override void BuildFrame()
+        {
+            if (Has("body shell")) return;
+            var b = new Batch();
+            b.RoundedBox(new Vector3(0, 0.27f, 0), new Vector3(0.26f, 0.025f, 0.3f), 0.006f, Gunmetal, 2);
+            foreach (var z in new[] { -0.13f, 0f, 0.13f }) b.RoundedBox(new Vector3(0, HipY, z), new Vector3(0.36f, 0.025f, 0.03f), 0.006f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, 0.32f, 0.02f), new Vector3(0.08f, 0.06f, 0.1f), 0.008f, Brass, 2);   // the drive block
+            b.Build(_shell, "G_frame", true);
         }
 
         protected override void BuildGeometry()

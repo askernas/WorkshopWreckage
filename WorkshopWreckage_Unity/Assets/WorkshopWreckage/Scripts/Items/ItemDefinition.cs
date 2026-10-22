@@ -72,7 +72,10 @@ namespace WorkshopWreckage
         }
     }
 
-    public enum ItemState { InWorld = 0, Carried = 1, Stored = 2 }
+    /// <summary>Installed: built into a robot at the Robot Workbench (a unique robot
+    /// part, or an ordinary part consumed by a crafting recipe; owner "assembly:&lt;robot&gt;").
+    /// Like Stored it counts as accounted for in its definition's collection.</summary>
+    public enum ItemState { InWorld = 0, Carried = 1, Stored = 2, Installed = 3 }
 
     /// <summary>One physical, individually tracked part.</summary>
     public class ItemInstance

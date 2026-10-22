@@ -33,6 +33,10 @@ namespace WorkshopWreckage
         public string targetDest;
         public StorageUnit targetUnit;
         public bool inspecting;
+        /// <summary>The unfinished robot taken off the workbench to look at (null = none).</summary>
+        public Robot inspectRobot;
+        public Vector3 targetPoint;
+        public event Action<Robot> RobotInspectChanged;
         public int inspectWorldId = -1;
         public double lastActionMicros;
         public readonly HashSet<int> busy = new();
@@ -98,7 +102,9 @@ namespace WorkshopWreckage
             if (inspecting)
             {
                 HideHover();
-                if (lmbDown && inspectWorldId >= 0) { int id = inspectWorldId; EndInspect(); Pickup(id, false); }
+                if (lmbDown && inspectRobot != null) InstallFromInspect();
+                else if (lmbDown && inspectWorldId >= 0) { int id = inspectWorldId; EndInspect(); Pickup(id, false); }
+                else if (mouse != null && mouse.rightButton.wasPressedThisFrame && inspectRobot != null) EndInspect();
                 else if (kb.fKey.wasPressedThisFrame) EndInspect();
                 else if (kb.rKey.wasPressedThisFrame) game.held.autoRotate = !game.held.autoRotate;
                 if (wheel != 0) game.held.Zoom(wheel > 0 ? 0.15f : -0.15f);
@@ -156,7 +162,7 @@ namespace WorkshopWreckage
             else if (hit.HasValue)
             {
                 var st = hit.Value.collider.GetComponent<StorageTarget>();
-                if (st != null && st.station) targetType = "station";
+                if (st != null && st.station) { targetType = "station"; targetPoint = hit.Value.point; }
                 else if (st != null && st.destId == "TRAY") targetType = "tray";
                 else if (st != null) { targetType = "dest"; targetDest = st.destId; targetUnit = st.unit; }
             }
@@ -264,9 +270,13 @@ namespace WorkshopWreckage
                 }
                 case "station":
                 {
+                    var wb = game.workbench;
+                    var p = wb.ActiveOnMat(MatAt(targetPoint));
                     var parts = StationParts();
-                    return new TargetInfo { title = "Robot Repair Bay", sub = $"{game.progress.robotPartsFound} robot parts found",
-                        hint = parts.Count > 0 ? $"[LMB] Place robot part    [G] Place all ({parts.Count})" : "Bring robot components here", tone = parts.Count > 0 ? 1 : 0 };
+                    string sub = $"{p.name}: {RobotWorkbench.StatusText(wb.StatusOf(p))}  ·  {wb.InstalledCount(p)}/{wb.Required(p)} installed" + (wb.Unlocked(p) ? "" : $"  ·  {wb.LockReason(p)}");
+                    string look = wb.RobotOf(p) is Robot r && r.mode == Robot.Mode.Assembling && r.gameObject.activeSelf ? "    [F] Pick up and look" : "";
+                    string hint = parts.Count > 0 ? $"[LMB] Deliver {World.DefOf(parts[0]).displayName}    [G] Deliver all ({parts.Count})" : "[LMB] Open the workbench" + look;
+                    return new TargetInfo { title = "Robot Workbench", sub = sub, hint = hint, tone = parts.Count > 0 ? 1 : 0 };
                 }
             }
             return new TargetInfo();
@@ -294,6 +304,7 @@ namespace WorkshopWreckage
                 case "station":
                     var p = StationParts();
                     if (p.Count > 0) DepositStation(p[0]);
+                    else game.OpenWorkbench(game.workbench.ActiveOnMat(MatAt(targetPoint)).id);
                     break;
                 case "tray":
                     if (Inv.HeldId() >= 0) DropInTray(Inv.HeldId());
@@ -362,7 +373,7 @@ namespace WorkshopWreckage
         public bool DropInTray(int id, bool feedback = true)
         {
             var def = World.DefOf(id);
-            if (def.IsRobotPart) { if (feedback) Feedback?.Invoke("Robot parts belong at the repair bay", false); return false; }
+            if (def.IsRobotPart) { if (feedback) Feedback?.Invoke("Robot parts go to the Robot Workbench — carry them there yourself", false); return false; }
             var r = game.TrayRectU;
             var p = new Vector3(UnityEngine.Random.Range(r.xMin + 0.12f, r.xMax - 0.12f), 0, UnityEngine.Random.Range(r.yMin + 0.12f, r.yMax - 0.12f));
             var e = ItemDatabase.Extents(def);
@@ -381,16 +392,47 @@ namespace WorkshopWreckage
             return true;
         }
 
-        public void DepositStation(int id)
+        /// <summary>The player hands a carried part over at the Robot Workbench (in person:
+        /// this is only reachable while aiming at the bench).</summary>
+        public bool DepositStation(int id)
         {
-            var def = World.DefOf(id);
-            var r = Storage.Check(def.storageBox, id);
-            if (r != StorageSystem.Result.Ok) { Feedback?.Invoke(Storage.ResultText(r, def.storageBox, id), false); return; }
-            Inv.Remove(id);
-            Storage.Deposit(def.storageBox, id);
-            game.repairBay.Refresh(true);
-            Sfx.Play(Storage.Stored(def.storageBox).Count == game.db.BoxCapacity(def.storageBox) ? "complete" : "drop_drawer", game.repairBay.transform.position);
-            Feedback?.Invoke("Robot part placed: " + def.displayName, true);
+            var (ok, text) = game.workbench.Deliver(id);
+            Feedback?.Invoke(text, ok);
+            if (!ok) Sfx.Play("reject", null, -4);
+            return ok;
+        }
+
+        /// <summary>Workbench mat (robot type index) under a world point on the bench.</summary>
+        public int MatAt(Vector3 world)
+        {
+            var l = game.workbench.transform.InverseTransformPoint(world);
+            float x = Batch.G(l).x;
+            return Mathf.Clamp(Mathf.FloorToInt((x + RobotWorkbench.Bench.x / 2) / (RobotWorkbench.Bench.x / RobotWorkbench.Types.Length)), 0, RobotWorkbench.Types.Length - 1);
+        }
+
+        /// <summary>F at the workbench: lift the unfinished robot off its mat and turn it in
+        /// your hands (mouse); you stay at the bench until you put it back (F / RMB / Esc).</summary>
+        public bool BeginRobotInspect(Robot r)
+        {
+            if (r == null || r.mode != Robot.Mode.Assembling || !r.gameObject.activeSelf) return false;
+            inspecting = true;
+            inspectWorldId = -1;
+            inspectRobot = r;
+            game.held.BeginInspectObject(r.ModelTransform, r.Height);
+            game.player.lookEnabled = false;
+            game.player.inputEnabled = false;
+            Sfx.Play("inspect", null, -8);
+            RobotInspectChanged?.Invoke(r);
+            return true;
+        }
+
+        void InstallFromInspect()
+        {
+            var p = game.workbench.P(inspectRobot.id);
+            int n = game.workbench.InstallAll(p, false);
+            if (n > 0) { Feedback?.Invoke($"Installed {n} part{(n == 1 ? "" : "s")} on {p.name}", true); game.held.RefreshObject(); }
+            else Feedback?.Invoke(game.workbench.Summary(p), false);
+            RobotInspectChanged?.Invoke(inspectRobot);
         }
 
         void DepositAll()
@@ -403,7 +445,10 @@ namespace WorkshopWreckage
                 if (n > 1) Feedback?.Invoke($"Stored {n} parts", true);
             }
             else if (targetType == "station")
-                foreach (var id in StationParts()) DepositStation(id);
+            {
+                int n = StationParts().Count(DepositStation);
+                if (n > 1) Feedback?.Invoke($"Delivered {n} parts to the workbench", true);
+            }
             else if (targetType == "tray")
             {
                 int n = Inv.items.ToList().Count(id => DropInTray(id, false));
@@ -418,7 +463,15 @@ namespace WorkshopWreckage
             return l.Take(Mathf.Max(0, room)).ToList();
         }
 
-        List<int> StationParts() => Inv.items.Where(id => World.DefOf(id).IsRobotPart).ToList();
+        /// <summary>What the workbench would take from your hands: robot parts, and recipe
+        /// materials for a crafted robot under construction (the held one first).</summary>
+        List<int> StationParts()
+        {
+            var o = Inv.items.Where(id => game.workbench.ProjectFor(id) != null).ToList();
+            int held = Inv.HeldId();
+            if (o.Remove(held)) o.Insert(0, held);
+            return o;
+        }
 
         public void DropHeld()
         {
@@ -446,6 +499,7 @@ namespace WorkshopWreckage
 
         public void BeginInspect()
         {
+            if (targetType == "station") { BeginRobotInspect(game.workbench.RobotOf(game.workbench.ActiveOnMat(MatAt(targetPoint)))); return; }
             ItemDefinition def = null;
             if (targetType == "item")
             {
@@ -469,6 +523,13 @@ namespace WorkshopWreckage
         {
             if (!inspecting) return;
             inspecting = false;
+            if (inspectRobot != null)
+            {
+                game.held.EndInspectObject();
+                inspectRobot.RefreshAssembly();
+                inspectRobot = null;
+                RobotInspectChanged?.Invoke(null);
+            }
             if (inspectWorldId >= 0) { busy.Remove(inspectWorldId); game.renderer.SetHidden(inspectWorldId, false); }
             inspectWorldId = -1;
             game.held.EndInspect();
@@ -608,7 +669,7 @@ namespace WorkshopWreckage
             _pivot = new GameObject("InspectPivot").transform;
             _pivot.SetParent(transform, false);
             _pivot.localPosition = InspectPos;
-            var key = new GameObject("InspectKey").AddComponent<Light>();
+            var key = _key = new GameObject("InspectKey").AddComponent<Light>();
             key.type = LightType.Point;
             key.range = 0.8f;
             key.intensity = 0.8f;
@@ -670,6 +731,51 @@ namespace WorkshopWreckage
             _dof.weight = 0;
         }
 
+        Light _key;
+        Transform _object, _objectParent;
+        Vector3 _objectPos, _objectScale;
+        Quaternion _objectRot;
+
+        /// <summary>Holds a whole scene object (an unfinished robot) in the inspection
+        /// pivot, about 17 cm tall, facing you; EndInspectObject puts it back exactly.</summary>
+        public void BeginInspectObject(Transform obj, float height)
+        {
+            _zoom = 1;
+            autoRotate = false;
+            _object = obj;
+            _objectParent = obj.parent;
+            _objectPos = obj.localPosition; _objectRot = obj.localRotation; _objectScale = obj.localScale;
+            _pivot.localRotation = Quaternion.Euler(12, 180, 0);
+            _pivot.localScale = Vector3.one * 0.3f;
+            float k = 0.17f / Mathf.Max(0.05f, height);
+            // a whole robot is bigger than a part: keep the key light well clear of it
+            _key.transform.localPosition = new Vector3(0.45f, 0.5f, -0.45f);
+            _key.range = 2.2f;
+            _key.intensity = 0.5f;
+            obj.SetParent(_pivot, false);
+            obj.localScale = _objectScale * k;
+            obj.localRotation = Quaternion.identity;
+            obj.localPosition = new Vector3(0, -0.085f, 0);
+            if (_hand) _hand.SetActive(false);
+            _dof.weight = 1;
+        }
+
+        /// <summary>Nothing to rebuild (the robot rebuilds its own geometry in place).</summary>
+        public void RefreshObject() { }
+
+        public void EndInspectObject()
+        {
+            if (_object == null) return;
+            _object.SetParent(_objectParent, false);
+            _object.localPosition = _objectPos; _object.localRotation = _objectRot; _object.localScale = _objectScale;
+            _object = null;
+            _key.transform.localPosition = new Vector3(0.18f, 0.2f, -0.1f);
+            _key.range = 0.8f;
+            _key.intensity = 0.8f;
+            if (_hand) _hand.SetActive(true);
+            _dof.weight = 0;
+        }
+
         public void RotateBy(Vector2 d)
         {
             _pivot.Rotate(Vector3.up, -d.x * 0.57f, Space.World);
@@ -682,90 +788,13 @@ namespace WorkshopWreckage
         void Update()
         {
             _t += Time.deltaTime;
-            if (_inspect != null)
+            if (_inspect != null || _object != null)
             {
                 if (autoRotate) _pivot.Rotate(Vector3.up, Time.deltaTime * 34f, Space.World);
                 _pivot.localScale = Vector3.Lerp(_pivot.localScale, Vector3.one * _zoom, Mathf.Min(1, Time.deltaTime * 10));
             }
             else if (_hand != null)
                 _hand.transform.localPosition = Vector3.Lerp(_hand.transform.localPosition, HandPos + new Vector3(0, Mathf.Sin(_t * 1.6f) * 0.004f, 0), Mathf.Min(1, Time.deltaTime * 8));
-        }
-    }
-
-    /// <summary>The robot repair bay: collects robot components per robot (port of RepairBay.gd).</summary>
-    public class RepairBay : MonoBehaviour
-    {
-        public static readonly string[] Robots = { "retrobot", "unibot", "spiderbot", "caterpillarbot", "hoverbot" };
-        static readonly Vector3 Bench = new(2.9f, 0.86f, 0.9f);
-        Game _game;
-        readonly Dictionary<string, Transform> _mats = new();
-        TextAtlas _labels;
-
-        public void Init(Game g)
-        {
-            _game = g;
-            var b = new Batch();
-            var top = EnvMaterials.Wood(new Color(0.42f, 0.3f, 0.2f));
-            var steel = EnvMaterials.Metal(new Color(0.3f, 0.33f, 0.3f), 0.4f);
-            b.Box(new Vector3(0, Bench.y - 0.03f, 0), new Vector3(Bench.x, 0.06f, Bench.z), top);
-            foreach (var sx in new[] { -1f, 1f })
-                foreach (var sz in new[] { -1f, 1f })
-                    b.Box(new Vector3(sx * (Bench.x / 2 - 0.06f), (Bench.y - 0.06f) / 2, sz * (Bench.z / 2 - 0.06f)), new Vector3(0.07f, Bench.y - 0.06f, 0.07f), steel);
-            b.Box(new Vector3(0, 1.45f, -Bench.z / 2 + 0.02f), new Vector3(Bench.x, 1.1f, 0.04f), EnvMaterials.Wood(new Color(0.3f, 0.2f, 0.13f)));
-            var title = TextAtlas.RenderSingle("ROBOT REPAIR BAY", 1024, 128, new Color(0.3f, 0.2f, 0.13f), new Color(0.82f, 0.63f, 0.32f), 72, true);
-            b.Quad(new Vector3(0, 1.85f, -Bench.z / 2 + 0.045f), new Vector2(1.6f, 0.2f), EnvMaterials.Atlas(title), new Rect(0, 0, 1, 1));
-            _labels = new TextAtlas(Robots.Length, new Vector2Int(200, 80), new Color(0.3f, 0.2f, 0.13f));
-            var lm = EnvMaterials.Atlas(_labels.texture);
-            float w = Bench.x / Robots.Length;
-            for (int i = 0; i < Robots.Length; i++)
-            {
-                float x = -Bench.x / 2 + w * (i + 0.5f);
-                b.Box(new Vector3(x, Bench.y + 0.003f, 0.05f), new Vector3(w - 0.06f, 0.006f, Bench.z - 0.2f), EnvMaterials.Plain(new Color(0.14f, 0.24f, 0.18f), 0, 0.1f));
-                b.Quad(new Vector3(x, 1.55f, -Bench.z / 2 + 0.045f), new Vector2(w - 0.12f, 0.42f), EnvMaterials.Blueprint(1), new Rect(0, 0, 1, 1));
-                b.Quad(new Vector3(x, 1.2f, -Bench.z / 2 + 0.046f), new Vector2(0.4f, 0.16f), lm, _labels.CellUV(i));
-                var holder = new GameObject("Mat_" + Robots[i]).transform;
-                holder.SetParent(transform, false);
-                holder.localPosition = Batch.G(x, Bench.y + 0.006f, 0.05f);
-                _mats[Robots[i]] = holder;
-            }
-            b.colliders.Add((Batch.G(0, Bench.y / 2, 0), new Vector3(Bench.x, Bench.y, Bench.z), Quaternion.identity));
-            b.Build(transform, "RepairBay");
-            var tgo = new GameObject("Target_RepairBay") { layer = Layers.Target };
-            tgo.transform.SetParent(transform, false);
-            tgo.transform.localPosition = Batch.G(0, Bench.y + 0.15f, 0);
-            tgo.AddComponent<BoxCollider>().size = new Vector3(Bench.x, 0.3f, Bench.z);
-            tgo.AddComponent<StorageTarget>().station = true;
-        }
-
-        /// <summary>Bench-local (Godot space) x of a robot's mat.</summary>
-        public static float MatX(int i) => -Bench.x / 2 + Bench.x / Robots.Length * (i + 0.5f);
-
-        /// <summary>animate: true when the player just installed a part (plays the
-        /// activation sequence if it completed a robot).</summary>
-        public void Refresh(bool animate = false)
-        {
-            foreach (var r in _game.robots) r.RefreshAssembly(animate);
-            for (int i = 0; i < Robots.Length; i++)
-            {
-                var robot = Robots[i];
-                var ids = _game.storage.Stored("RS-" + robot);
-                int total = _game.db.RobotPartIds(robot).Count;
-                _labels.Set(i, $"{ids.Count}/{total}", robot.ToUpper(), ids.Count == total ? "READY" : "parts", true);
-                var holder = _mats[robot];
-                foreach (Transform c in holder) Destroy(c.gameObject);
-                if (_game.robots.Exists(r => r.id == robot)) continue;   // installed on the robot itself
-                for (int k = 0; k < ids.Count; k++)
-                {
-                    var def = _game.world.DefOf(ids[k]);
-                    var mi = HeldView.MakeModel(def);
-                    mi.transform.SetParent(holder, false);
-                    var rot = Quaternion.Euler(0, -0.4f * k * Mathf.Rad2Deg, 0) * (def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, -90) : Quaternion.identity);
-                    mi.transform.localRotation = rot;
-                    mi.transform.localScale = Vector3.one * def.worldScale * 0.8f;
-                    mi.transform.localPosition = Batch.G(-0.18f + (k % 4) * 0.12f, 0.04f, -0.2f + (k / 4) * 0.12f);
-                }
-            }
-            _labels.Redraw();
         }
     }
 }

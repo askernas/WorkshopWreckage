@@ -40,6 +40,27 @@ namespace WorkshopWreckage
             _armL.localRotation = _armR.localRotation = Quaternion.Euler(ArmRest, 0, 0);
             for (int i = 0; i < 3; i++) _boxes[i] = Pivot("Cargo" + i, _chassis, new Vector3(0, 0.335f, -BoxZ[i]));
             carry = _boxes[0];
+            Mount(head, "head", Vector3.up, 0.05f);
+            Mount(_armL, "left arm", Vector3.up, 0.035f);
+            Mount(_armR, "right arm", Vector3.up, 0.035f);
+            Mount(_sprocketLF, "left drive sprocket", Vector3.left, 0.04f);
+            Mount(_sprocketLR, "left drive sprocket", Vector3.left, 0.04f);
+            Mount(_sprocketRF, "right drive sprocket", Vector3.right, 0.04f);
+            Mount(_sprocketRR, "right drive sprocket", Vector3.right, 0.04f);
+            for (int i = 0; i < 3; i++) Mount(_boxes[i], BoxPart[i], Vector3.up, 0.05f);
+        }
+
+        protected override Vector3? ClampPoint => Has("left track") && Has("right track") ? null : new Vector3(0, 0.26f, 0.64f);
+
+        /// <summary>Without the chassis: the bare ladder frame.</summary>
+        protected override void BuildFrame()
+        {
+            if (Has("chassis")) return;
+            var b = new Batch();
+            foreach (var x in new[] { -0.15f, 0.15f }) b.RoundedBox(new Vector3(x, 0.2f, 0), new Vector3(0.04f, 0.05f, EndZ * 2 + 0.1f), 0.008f, Gunmetal, 2);
+            foreach (var z in new[] { -EndZ, -0.2f, 0.1f, EndZ }) b.RoundedBox(new Vector3(0, 0.2f, z), new Vector3(0.34f, 0.035f, 0.035f), 0.008f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, 0.25f, 0.25f), new Vector3(0.14f, 0.07f, 0.12f), 0.01f, Brass, 2);   // the gearbox
+            b.Build(_chassis, "G_frame", true);
         }
 
         protected override void BuildGeometry()

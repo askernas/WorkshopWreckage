@@ -43,6 +43,12 @@ namespace WorkshopWreckage
             return r;
         }
 
+        /// <summary>Takes a part out of a destination's contents (the caller sets its new state).</summary>
+        public void Remove(string box, int id)
+        {
+            if (contents.TryGetValue(box, out var l)) l.Remove(id);
+        }
+
         public string ResultText(Result r, string box, int id) => r switch
         {
             Result.WrongBox => "Wrong destination — this belongs in " + db.BoxLabel(world.DefOf(id).storageBox),
@@ -159,7 +165,7 @@ namespace WorkshopWreckage
                     _collected[i.defId] = _collected.GetValueOrDefault(i.defId) + 1;
                     if (world.DefOf(i.id).IsRobotPart) robotPartsFound++;
                 }
-                if (i.state == ItemState.Stored)
+                if (Accounted(i.state))
                 {
                     _sorted[i.defId] = _sorted.GetValueOrDefault(i.defId) + 1;
                     sortedTotal++;
@@ -183,7 +189,7 @@ namespace WorkshopWreckage
                 _collected[inst.defId] = _collected.GetValueOrDefault(inst.defId) - 1;
                 if (def.IsRobotPart) robotPartsFound--;
             }
-            if (inst.state == ItemState.Stored && old != ItemState.Stored)
+            if (Accounted(inst.state) && !Accounted(old))
             {
                 _sorted[inst.defId] = _sorted.GetValueOrDefault(inst.defId) + 1;
                 sortedTotal++;
@@ -194,11 +200,26 @@ namespace WorkshopWreckage
                     foreach (var step in new[] { 25, 50, 75, 100 })
                         if (pct >= step) Mile($"zone_{inst.zone}_{step}", $"{zoneNames[inst.zone]} {step}% restored");
                 }
-                if (SortedOf(inst.defId) == world.TotalOf(inst.defId)) DefinitionCompleted?.Invoke(inst.defId);
+                // unique robot parts follow the workbench's rules, not collection completion
+                if (!def.IsRobotPart && SortedOf(inst.defId) == world.TotalOf(inst.defId)) DefinitionCompleted?.Invoke(inst.defId);
                 foreach (var m in SortMilestones)
                     if (sortedTotal == m) Mile("sorted_" + m, m == 1 ? "First part sorted!" : $"{m} parts sorted");
             }
+            else if (!Accounted(inst.state) && Accounted(old))
+            {
+                _sorted[inst.defId] = _sorted.GetValueOrDefault(inst.defId) - 1;
+                sortedTotal--;
+                if (inst.zone >= 0) _zoneSorted[inst.zone]--;
+            }
         }
+
+        /// <summary>Accounted for in its collection: stored in its destination, or
+        /// installed at the Robot Workbench (robot part, or consumed by a recipe).
+        /// Parts in staging zones, in hands or carried by robots are not.</summary>
+        public static bool Accounted(ItemState s) => s == ItemState.Stored || s == ItemState.Installed;
+
+        /// <summary>Every copy of the definition accounted for (the collection is complete).</summary>
+        public bool IsComplete(int defId) => world.TotalOf(defId) > 0 && SortedOf(defId) == world.TotalOf(defId);
 
         void Mile(string key, string text)
         {
@@ -216,7 +237,7 @@ namespace WorkshopWreckage
         public string CountLabel(int d) => revealed.Contains(d) ? $"{CollectedOf(d)} / {world.TotalOf(d)} collected" : $"{CollectedOf(d)} collected";
         public float ZonePercent(int z) => 100f * _zoneSorted[z] / Mathf.Max(1, _zoneTotal[z]);
         public int ZoneSorted(int z) => _zoneSorted[z];
-        public int ZoneRemaining(int z) => world.instances.Count(i => i.zone == z && i.state != ItemState.Stored);
+        public int ZoneRemaining(int z) => world.instances.Count(i => i.zone == z && !Accounted(i.state));
         public float OverallPercent => 100f * sortedTotal / Mathf.Max(1, world.Count);
 
         public Dictionary<string, object> ToDict() => new()
@@ -421,6 +442,7 @@ namespace WorkshopWreckage
                 ["play_time_s"] = g.playTime, ["progression"] = g.progression.ToDict(),
                 ["robots"] = g.robots.ToDictionary(r => r.id, r => (object)r.ToDict()),
                 ["objectives"] = g.objectives.ToList(),
+                ["workbench"] = g.workbench.ToDict(),
                 ["items"] = items, ["storage"] = storage,
                 ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),

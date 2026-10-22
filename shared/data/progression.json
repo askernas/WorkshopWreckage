@@ -1,23 +1,24 @@
 {
-	"version": 1,
-	"note": "Player levels, XP and skills. Engine independent; read by Progression.cs. XP is only ever granted once per instance/definition/zone/robot (see anti_exploit). 'status' marks what the current build implements: active = effect applied in game, planned = data reserved for a later milestone (see docs/ROADMAP.md).",
+	"version": 2,
+	"note": "Player levels, XP, skills and robot upgrades. Engine independent; read by Progression.cs. XP is only ever granted once per instance/definition/zone/robot (see anti_exploit). Completing a whole ordinary item definition (every copy stored) is the main source of XP; sorting single parts gives a little. Robot blueprints unlock at levels set in robots.json (blueprint_level). 'status' marks what the current build implements: active = effect applied in game, planned = data reserved for a later milestone (see docs/ROADMAP.md).",
 	"levels": {
 		"max_level": 25,
 		"xp_curve": {"type": "power", "base": 19, "exponent": 1.55, "comment": "XP needed to go from level L to L+1 = round(base * L^exponent)"},
-		"skill_points_per_level": 1,
-		"bonus_skill_points": {"5": 1, "10": 1, "15": 1, "20": 1}
+		"skill_points_per_level": 2,
+		"bonus_skill_points": {"5": 1, "10": 1, "15": 1, "20": 1},
+		"comment": "Two points per level: player skills and the five robot upgrade trees share the pool, and there are more ranks than points on purpose (choices matter)."
 	},
 	"xp_rewards": {
-		"sort_item": 2,
-		"sort_item_robot_assisted": 1,
-		"complete_definition": 15,
-		"complete_definition_per_copy": 1,
+		"sort_item": 1,
+		"sort_item_robot_assisted": 0.5,
+		"complete_definition": 24,
+		"complete_definition_per_copy": 1.5,
 		"zone_restored_25": 40,
 		"zone_restored_50": 60,
 		"zone_restored_75": 80,
 		"zone_restored_100": 150,
 		"discover_definition": 1,
-		"discover_robot_part": 25,
+		"discover_robot_part": 10,
 		"robot_repaired": 300,
 		"objective_completed": 100
 	},
@@ -64,6 +65,39 @@
 		"line_of_sight_required": true,
 		"comment": "Matches the held item's exact definition id; only UNSORTED instances lying in the world (state InWorld, not reserved by robots). Works on non-magnetic materials."
 	},
+	"robot_upgrades_note": "Robot upgrade trees (docs/specs/robots_and_levels.md §6-7). Bought with skill points once that robot type is operational; model-level, so every Hoverbot shares them. stat + mode: add = base + ranks * effect_per_rank; percent = base * (1 + ranks * effect_per_rank) (negative = faster for times); rank = behaviour level read by the robot's strategy. The result never exceeds the robot's permanent limits in robots.json. cost_per_rank lists the cost of each successive rank.",
+	"robot_upgrades": [
+		{"id": "retro_speed", "robot": "retrobot", "name": "Walking Speed", "description": "Longer strides and faster turns.", "max_rank": 3, "cost_per_rank": [1, 1, 2], "stat": "walk_speed", "mode": "percent", "effect_per_rank": 0.12, "status": "active"},
+		{"id": "retro_capacity", "robot": "retrobot", "name": "Carrying Capacity", "description": "A belly hook and a back clip: carries one more part per rank (two kinds at most per trip).", "max_rank": 2, "cost_per_rank": [2, 2], "stat": "capacity", "mode": "add", "effect_per_rank": 1, "also": {"item_types": 1}, "status": "active"},
+		{"id": "retro_reach", "robot": "retrobot", "name": "Arm Reach", "description": "Telescopic arms: stores into somewhat higher drawers and boxes. The high shelving stays out of reach.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "reach_height", "mode": "add", "effect_per_rank": 0.09, "status": "active"},
+		{"id": "retro_pickup", "robot": "retrobot", "name": "Pickup Efficiency", "description": "Quicker grabbing and placing.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "pick_time", "mode": "percent", "effect_per_rank": -0.15, "status": "active"},
+		{"id": "retro_targeting", "robot": "retrobot", "name": "Basic Target Selection", "description": "Rank 1: prefers nearby parts of sets you have started. Rank 2: also remembers unreachable parts longer and wanders less.", "max_rank": 2, "cost_per_rank": [1, 1], "stat": "target_selection", "mode": "rank", "effect_per_rank": 1, "status": "active"},
+
+		{"id": "uni_speed", "robot": "unibot", "name": "Wheel Speed", "description": "A bigger motor.", "max_rank": 3, "cost_per_rank": [1, 1, 2], "stat": "walk_speed", "mode": "percent", "effect_per_rank": 0.15, "status": "active"},
+		{"id": "uni_turning", "robot": "unibot", "name": "Acceleration and Turning", "description": "Sharper gyro: faster turns and braking.", "max_rank": 2, "cost_per_rank": [1, 1], "stat": "turn_speed", "mode": "percent", "effect_per_rank": 0.25, "status": "active"},
+		{"id": "uni_capacity", "robot": "unibot", "name": "Carrying Capacity", "description": "Carries one more small part per rank. Big parts still need their own trip.", "max_rank": 2, "cost_per_rank": [2, 2], "stat": "capacity", "mode": "add", "effect_per_rank": 1, "also": {"item_types": 1}, "status": "active"},
+		{"id": "uni_delivery", "robot": "unibot", "name": "Delivery Efficiency", "description": "Faster loading and unloading.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "pick_time", "mode": "percent", "effect_per_rank": -0.15, "status": "active"},
+		{"id": "uni_coordination", "robot": "unibot", "name": "Courier Coordination", "description": "Rank 1: avoids staging zones that are filling up. Rank 2: picks up near its last drop-off to cut empty trips.", "max_rank": 2, "cost_per_rank": [1, 2], "stat": "courier_coordination", "mode": "rank", "effect_per_rank": 1, "status": "active"},
+
+		{"id": "spider_climb", "robot": "spiderbot", "name": "Climbing Speed", "description": "Stronger leg servos.", "max_rank": 3, "cost_per_rank": [1, 1, 2], "stat": "climb_speed", "mode": "percent", "effect_per_rank": 0.25, "also_percent": {"walk_speed": 0.1}, "status": "active"},
+		{"id": "spider_capacity", "robot": "spiderbot", "name": "Carrying Capacity", "description": "A cargo net on its back: one more part of its assigned kind per rank.", "max_rank": 2, "cost_per_rank": [2, 2], "stat": "capacity", "mode": "add", "effect_per_rank": 1, "status": "active"},
+		{"id": "spider_search", "robot": "spiderbot", "name": "Search Efficiency", "description": "Checks more candidates per step and goes for the closest known copies first.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "search_efficiency", "mode": "rank", "effect_per_rank": 1, "status": "active"},
+		{"id": "spider_range", "robot": "spiderbot", "name": "Detection Range", "description": "Spots its assigned part from further away.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "scan_radius", "mode": "add", "effect_per_rank": 3, "status": "active"},
+		{"id": "spider_reach", "robot": "spiderbot", "name": "Reach and Grip", "description": "Climbs higher shelving.", "max_rank": 2, "cost_per_rank": [1, 2], "stat": "climb_height", "mode": "add", "effect_per_rank": 0.2, "status": "active"},
+
+		{"id": "cat_cargo", "robot": "caterpillarbot", "name": "Cargo Capacity", "description": "Deeper cargo boxes: one more part per rank (bulky parts take two slots).", "max_rank": 3, "cost_per_rank": [1, 2, 2], "stat": "capacity", "mode": "add", "effect_per_rank": 1, "also": {"item_types": 1}, "status": "active"},
+		{"id": "cat_terrain", "robot": "caterpillarbot", "name": "Terrain Traversal", "description": "Grousers on the tracks: crosses taller heaps.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "heap_step_height", "mode": "add", "effect_per_rank": 0.05, "also_percent": {"walk_speed": 0.08}, "status": "active"},
+		{"id": "cat_loading", "robot": "caterpillarbot", "name": "Loading Speed", "description": "Faster loading and unloading.", "max_rank": 2, "cost_per_rank": [1, 1], "stat": "pick_time", "mode": "percent", "effect_per_rank": -0.2, "status": "active"},
+		{"id": "cat_route", "robot": "caterpillarbot", "name": "Route Planning", "description": "Collects along a route and groups nearby destinations into one delivery run.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "route_planning", "mode": "rank", "effect_per_rank": 1, "also": {"gather_radius": 1}, "status": "active"},
+		{"id": "cat_lift", "robot": "caterpillarbot", "name": "Lifting Strength", "description": "Lifts bigger parts.", "max_rank": 2, "cost_per_rank": [1, 1], "stat": "max_item_size", "mode": "add", "effect_per_rank": 0.05, "status": "active"},
+
+		{"id": "hover_speed", "robot": "hoverbot", "name": "Flight Speed", "description": "Faster rotor: quicker flights and climbs.", "max_rank": 3, "cost_per_rank": [1, 1, 2], "stat": "walk_speed", "mode": "percent", "effect_per_rank": 0.15, "status": "active"},
+		{"id": "hover_sorting", "robot": "hoverbot", "name": "Sorting Speed", "description": "Faster pick-up and placement.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "pick_time", "mode": "percent", "effect_per_rank": -0.15, "status": "active"},
+		{"id": "hover_capacity", "robot": "hoverbot", "name": "Carrying Capacity", "description": "Rank 2 adds a second claw hook: two light parts per trip.", "max_rank": 2, "cost_per_rank": [1, 2], "stat": "capacity", "mode": "add", "effect_per_rank": 0.5, "also": {"item_types": 0.5}, "status": "active"},
+		{"id": "hover_staging", "robot": "hoverbot", "name": "Staging Prioritization", "description": "Empties the fullest staging zones first, then the closest.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "staging_priority", "mode": "rank", "effect_per_rank": 1, "status": "active"},
+		{"id": "hover_fleet", "robot": "hoverbot", "name": "Fleet Coordination", "description": "Hoverbots split the staging zones between them instead of crowding the same one.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "fleet_coordination", "mode": "rank", "effect_per_rank": 1, "status": "active"}
+	],
+	"respec": {"unlock_level": 12, "status": "active", "comment": "From this level the Robots screen can refund every robot upgrade point (player skills stay)."},
 	"restoration": {
 		"lamp_boost_at_100": 0.45,
 		"machine_zone_percent": 60,

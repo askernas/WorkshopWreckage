@@ -242,29 +242,33 @@ namespace WorkshopWreckage
 
         IEnumerator AllRobotsChecks()
         {
-            var others = g.robots.Where(r => r.id != "retrobot").ToList();
-            var cfgR = Robot.AllConfig();
-            Check("robot capacity scales with world size (Retrobot stays at one)", g.robots.All(r => r.Capacity == (Json.Int(Json.Obj(cfgR[r.id]), "capacity") <= 1 ? 1 : Mathf.RoundToInt(Json.Int(Json.Obj(cfgR[r.id]), "capacity") * g.Scale("robot_capacity")))) && g.retrobot.Capacity == 1,
-                  string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Capacity}")) + $" (×{g.Scale("robot_capacity")})");
-            Check("five robots at toy scale", g.robots.Count == 5 && g.robots.All(r => r.Height <= 0.31f), string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Height:0.00} m")));
-            // half-built: ghosts show what is missing
-            foreach (var r in others)
-            {
-                var ids = g.db.RobotPartIds(r.id).SelectMany(d => g.world.IdsOf(d)).ToList();
-                foreach (var id in ids.Take(ids.Count / 2)) Install(id);
-            }
-            g.repairBay.Refresh();
-            var bay = g.repairBay.transform;
-            var mid = (g.robots[0].home + g.robots[4].home) * 0.5f;
-            var front = Vector3.ProjectOnPlane(bay.TransformDirection(Batch.G(0, 0, 1)), Vector3.up).normalized;
-            LookFrom(mid + front * 1.6f + Vector3.up * 0.9f, mid + Vector3.up * 0.12f);
+            var wb = g.workbench;
+            var others = g.robots.Where(r => r.id != "retrobot" && !wb.P(r.id).crafted).ToList();
+            Check("base capacities follow the capability matrix (1 / 1 / 1 / 3 / 1, not scaled by world size)",
+                  g.robots.First(r => r.id == "retrobot").Capacity == 1 && g.robots.First(r => r.id == "unibot").Capacity == 1 && g.robots.First(r => r.id == "spiderbot").Capacity == 1
+                  && g.robots.First(r => r.id == "caterpillarbot").Capacity == 3 && g.robots.First(r => r.id == "hoverbot").Capacity == 1,
+                  string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Capacity}")));
+            var retro = g.retrobot; var uni = g.robots.First(r => r.id == "unibot");
+            Check("Unibot is about twice as fast as Retrobot", uni.WalkSpeed / retro.BaseStat("walk_speed") is > 1.8f and < 2.2f, $"{uni.WalkSpeed:0.00} vs {retro.BaseStat("walk_speed"):0.00} m/s");
+            Check("five robot types at toy scale, up to three Hoverbots", g.robots.Count(r => !wb.P(r.id).crafted) == 5 && g.robots.Count(r => r.type == "hoverbot") == 3 && g.robots.All(r => r.Height <= 0.31f),
+                  string.Join(", ", g.robots.Select(r => $"{r.displayName} {r.Height:0.00} m")));
+            LevelTo(g.progression.maxLevel);
+            // half-built on the bench: ghosts show what is still to find
+            foreach (var r in others) wb.ForceInstall(wb.P(r.id), wb.Required(wb.P(r.id)) / 2);
+            var bay = g.workbench.transform;
+            var front = wb.Front;
+            var benchMid = bay.position + Vector3.up * 0.9f;
+            LookFrom(benchMid + front * 1.5f + Vector3.up * 0.55f, benchMid);
             yield return g.Capture(Path.Combine(outDir, "15_robots_half_built.png"), 3);
-            foreach (var r in others)
-                foreach (var id in g.db.RobotPartIds(r.id).SelectMany(d => g.world.IdsOf(d))) Install(id);
-            g.repairBay.Refresh(true);
+            LookFrom(wb.MatSpot(3).pos + front * 0.75f + Vector3.up * 0.35f + Vector3.Cross(Vector3.up, front) * 0.3f, wb.MatSpot(3).pos + Vector3.up * 0.08f);
+            yield return g.Capture(Path.Combine(outDir, "15b_caterpillarbot_half_built.png"), 3);
+            foreach (var r in others) wb.ForceInstall(wb.P(r.id));
+            Check("a finished robot waits for the player to activate it", others.All(r => !r.Active && wb.CanActivate(wb.P(r.id))), string.Join(", ", others.Select(r => RobotWorkbench.StatusText(wb.StatusOf(wb.P(r.id))))));
+            foreach (var r in others) wb.Activate(wb.P(r.id));
             float t0 = Time.realtimeSinceStartup;
             while (others.Any(r => !r.Active) && Time.realtimeSinceStartup - t0 < 15) yield return null;
-            Check("all robots activate once their parts are installed", others.All(r => r.Active), string.Join(", ", others.Select(r => r.Describe())));
+            Check("all robots start work once activated", others.All(r => r.Active), string.Join(", ", others.Select(r => r.Describe())));
+            var mid = (g.robots[0].home + g.robots[4].home) * 0.5f;
             // size line-up: everyone at the repair bay, seen from eye height
             var saved = g.robots.ToDictionary(r => r, r => (r.transform.position, r.transform.rotation));
             foreach (var r in g.robots) { r.enabled = false; r.transform.SetPositionAndRotation(r.home + Vector3.up * (r.id == "hoverbot" ? 0.25f : 0), r.homeRot); }
@@ -279,8 +283,15 @@ namespace WorkshopWreckage
             bool[] shot = new bool[5];
             bool doubleHeld = false;
             t0 = Time.realtimeSinceStartup;
-            while (Time.realtimeSinceStartup - t0 < 90 && g.robots.Any(r => r.delivered + r.staged - before[r.id].delivered - before[r.id].staged < 2))
+            int catMax = 0;
+            var uniStored0 = uni.delivered;
+            var spiderPicks = new HashSet<int>();
+            var spider = g.robots.First(r => r.id == "spiderbot");
+            while (Time.realtimeSinceStartup - t0 < 90 && g.robots.Where(r => r.Active).Any(r => r.delivered + r.staged - before[r.id].delivered - before[r.id].staged < 2))
             {
+                catMax = Mathf.Max(catMax, g.robots.First(r => r.id == "caterpillarbot").carried.Count);
+                foreach (var c in spider.carried) spiderPicks.Add(g.world.instances[c].defId);
+                if (spider.targetId >= 0 && spider.assignedDef >= 0 && g.world.instances[spider.targetId].defId != spider.assignedDef) spiderPicks.Add(-99);
                 for (int i = 0; i < 5; i++)
                 {
                     var r = g.robots[i];
@@ -304,6 +315,11 @@ namespace WorkshopWreckage
             var hover = g.robots.First(r => r.id == "hoverbot");
             Check("no part is ever held by two robots", !doubleHeld && g.world.instances.Where(i => i.state == ItemState.Carried && i.owner.StartsWith("robot:")).All(i => g.robots.Count(r => r.carried.Contains(i.id)) == 1), "");
             Check("Hoverbot stores into destinations the small robots can't reach", hover.delivered > before["hoverbot"].delivered, $"{hover.delivered - before["hoverbot"].delivered} stored by Hoverbot");
+            Check("Unibot never stores directly: everything goes to staging zones (still unsorted)", uni.delivered == uniStored0 && uni.staged > before["unibot"].staged
+                  && g.world.instances.Where(i => i.owner.StartsWith("stage:")).All(i => i.state == ItemState.InWorld), $"{uni.staged - before["unibot"].staged} staged, {uni.delivered - uniStored0} stored");
+            Check("Caterpillarbot collects several parts before a delivery run", catMax >= 2, $"up to {catMax} on board");
+            Check("Spiderbot collects only its one assigned definition", !spiderPicks.Contains(-99), $"definitions carried: {spiderPicks.Count}, now {spider.Describe()}");
+            yield return RobotSpecChecks(hover, uni, spider);
             // battery: a robot running low finishes its load, goes home, charges and resumes
             var sp = g.robots.First(r => r.id == "spiderbot");
             sp.SetBattery(0.05f);
@@ -323,6 +339,110 @@ namespace WorkshopWreckage
             yield return g.Capture(Path.Combine(outDir, "20_robots_screen.png"), 5);
             g.hud.BackFromSubScreen();
             g.SetState("play");
+        }
+
+        /// <summary>Robot specialisation, upgrades and the second Hoverbot
+        /// (robots_and_levels.md §19, robot_blueprints_and_assembly.md §10 test 14).</summary>
+        IEnumerator RobotSpecChecks(Robot hover, Robot uni, Robot spider)
+        {
+            var wb = g.workbench;
+            var pr = g.progression;
+            var retro = g.retrobot;
+            bool High(string box) => g.db.boxes.TryGetValue(box, out var bd) && Json.Num(bd, "elevation_m") > 1.0;
+            bool Loose(ItemInstance i) => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && !g.world.DefOf(i.id).IsRobotPart && !i.owner.StartsWith("stage:");
+
+            // Scenario A/B: a part left in the staging zone below a high destination is stored by Hoverbot
+            var staged = g.world.instances.FirstOrDefault(i => Loose(i) && i.Position.y < 0.4f && High(g.world.DefOf(i.id).storageBox) && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= hover.MaxItemSize);
+            if (staged != null)
+            {
+                var box = g.world.DefOf(staged.id).storageBox;
+                var spot = hover.StagingSpot(box).Value;
+                var def = g.world.DefOf(staged.id);
+                g.index.Remove(staged.id);
+                g.world.SetTransform(staged.id, Matrix4x4.TRS(spot + Vector3.up * (ItemDatabase.Extents(def)[2] * 0.5f + 0.01f), Quaternion.identity, Vector3.one * def.worldScale));
+                g.world.SetState(staged.id, ItemState.InWorld, "stage:" + box);
+                g.index.Insert(staged.id);
+                Check("staged parts stay UNSORTED and don't count towards their set", !ProgressTracker.Accounted(staged.state) && !g.progress.IsComplete(staged.defId), $"part {staged.id} waits below {box}");
+                int hd = hover.delivered;
+                hover.SetBattery(1);
+                // every part waiting in a staging zone right now (the planted one and Unibot's)
+                var waiting = g.world.instances.Where(i => i.state == ItemState.InWorld && i.owner.StartsWith("stage:")).Select(i => i.id).ToList();
+                bool Done() => waiting.Any(i => g.world.instances[i].state == ItemState.Stored);
+                Time.timeScale = 4;
+                float t1 = Time.realtimeSinceStartup;
+                while (Time.realtimeSinceStartup - t1 < 60 && !Done()) yield return null;
+                Time.timeScale = 1;
+                Check("Hoverbot empties the staging zones and stores those parts high up", Done() && hover.delivered > hd,
+                      $"{waiting.Count(i => g.world.instances[i].state == ItemState.Stored)} of {waiting.Count} staged parts stored, {hover.Describe()}");
+            }
+            else Check("Hoverbot empties the staging zones and stores those parts high up", false, "no candidate part");
+
+            // Scenario C: Spiderbot on an assignment that needs climbing
+            var shelfPart = g.world.instances.FirstOrDefault(i => Loose(i) && i.Position.y > 0.55f && i.Position.y < spider.ReachHeight - 0.05f && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= spider.MaxItemSize
+                                                                && (i.Position - spider.transform.position).magnitude < 9f);
+            if (shelfPart != null)
+            {
+                spider.Assign(shelfPart.defId, false);
+                bool climbed = false;
+                Time.timeScale = 4;
+                float t1 = Time.realtimeSinceStartup;
+                while (Time.realtimeSinceStartup - t1 < 60 && !(climbed && shelfPart.state != ItemState.InWorld))
+                {
+                    if (spider.Climbing && !climbed) { climbed = true; Time.timeScale = 1; LookAtRobot(spider, 1.0f, 0.9f, 0.6f); yield return g.Capture(Path.Combine(outDir, "18b_spiderbot_climbing.png"), 1); Time.timeScale = 4; }
+                    yield return null;
+                }
+                Time.timeScale = 1;
+                Check("Spiderbot climbs furniture to reach parts of its assignment", climbed, $"{g.world.DefOf(shelfPart.id).displayName} at {shelfPart.Position.y:0.00} m: {shelfPart.state}; {spider.Describe()}");
+            }
+            else Check("Spiderbot climbs furniture to reach parts of its assignment", false, "no part on furniture in range");
+
+            // upgrades: better at their jobs, never past their permanent limits
+            pr.skillPoints += 60;
+            float reach0 = retro.ReachHeight;
+            for (int k = 0; k < 3; k++) g.BuyRobotUpgrade("retro_reach");
+            var highBox = g.db.boxes.Keys.FirstOrDefault(High);
+            Check("Retrobot's Arm Reach raises its reach, but never to the high shelves", retro.ReachHeight > reach0 && retro.ReachHeight <= retro.LimitOf("reach_height") + 1e-3f && highBox != null && !retro.ReachableDest(highBox),
+                  $"{reach0:0.00} -> {retro.ReachHeight:0.00} m (limit {retro.LimitOf("reach_height"):0.00})");
+            g.BuyRobotUpgrade("uni_capacity"); g.BuyRobotUpgrade("uni_capacity");
+            Check("Unibot carries more after upgrades but still never stores", uni.Capacity == 3 && !uni.CanDirectStore && !uni.ReachableDest(g.db.boxes.Keys.First()), $"capacity {uni.Capacity}");
+            g.BuyRobotUpgrade("retro_speed"); g.BuyRobotUpgrade("retro_speed"); g.BuyRobotUpgrade("retro_speed");
+            Check("Retrobot never becomes faster than Unibot", retro.WalkSpeed < uni.BaseStat("walk_speed"), $"{retro.WalkSpeed:0.00} vs {uni.BaseStat("walk_speed"):0.00} m/s");
+            g.BuyRobotUpgrade("hover_speed");
+            var hovers = g.robots.Where(r => r.type == "hoverbot").ToList();
+            Check("Hoverbot upgrades are shared by the whole fleet", hovers.All(h => Mathf.Approximately(h.WalkSpeed, hover.WalkSpeed)) && hover.WalkSpeed > hover.BaseStat("walk_speed"), string.Join(", ", hovers.Select(h => $"{h.displayName} {h.WalkSpeed:0.00}")));
+
+            // 14. a second Hoverbot, crafted from ordinary parts carried to the bench
+            var h2 = wb.P("hoverbot_2");
+            var r2 = wb.RobotOf(h2);
+            Check("Hoverbot #2's project opens once Hoverbot is operational", wb.Unlocked(h2) && wb.OnBench(h2) && r2.gameObject.activeSelf, wb.Summary(h2));
+            var consumed = new List<int>();
+            foreach (var kv in h2.materials)
+            {
+                var pick = g.world.instances.Where(i => Loose(i) && g.world.DefOf(i.id).CategoryName == kv.Key).Take(kv.Value).ToList();
+                foreach (var i in pick) { Take(i.id); if (g.interaction.DepositStation(i.id)) consumed.Add(i.id); }
+                if (consumed.Count > 6 && consumed.Count < 12)
+                {
+                    var (sp, _) = wb.MatSpot(h2.mat);
+                    LookFrom(sp + wb.Front * 0.6f + Vector3.up * 0.3f, sp + Vector3.up * 0.1f);
+                    yield return g.Capture(Path.Combine(outDir, "15c_hoverbot2_being_crafted.png"), 3);
+                }
+            }
+            Check("recipe materials are built into Hoverbot #2 (installed, not duplicated)", wb.Complete(h2) && consumed.All(i => g.world.instances[i].state == ItemState.Installed && !g.inventory.items.Contains(i)), wb.Summary(h2));
+            // a consumed part still counts for its set, so crafting never makes a set impossible
+            int cd = g.world.instances[consumed[0]].defId;
+            foreach (var i in g.world.IdsOf(cd).Where(i => g.world.instances[i].state != ItemState.Stored && g.world.instances[i].state != ItemState.Installed).ToList())
+            {
+                if (g.world.instances[i].state == ItemState.Carried && g.world.instances[i].owner != "player") continue;
+                Take(i);
+                g.inventory.Remove(i);
+                g.storage.Deposit(g.world.DefOf(i).storageBox, i);
+            }
+            Check("a set with parts used in crafting can still be completed", g.progress.IsComplete(cd), $"{g.db.Get(cd).displayName}: {g.progress.SortedOf(cd)}/{g.world.TotalOf(cd)} accounted");
+            wb.Activate(h2);
+            float t2 = Time.realtimeSinceStartup;
+            while (!r2.Active && Time.realtimeSinceStartup - t2 < 12) yield return null;
+            Check("Hoverbot #2 activates with its own identity next to the first", r2.Active && r2.id != hover.id && hover.Active && wb.Unlocked(wb.P("hoverbot_3")) == (pr.level >= wb.P("hoverbot_3").level),
+                  $"{r2.displayName} ({r2.id}): {r2.Describe()}");
         }
 
         IEnumerator ToolChecks()
@@ -427,7 +547,7 @@ namespace WorkshopWreckage
                   $"{hm}; {handed.Count - g.inventory.Count} taken, {storedByRobot} stored, {handed.Count(i => g.world.instances[i].state == ItemState.InWorld)} piled so far");
 
             // Task Coordination: a robot works only inside its zone
-            var zr = g.robots.First(r => r.id == "spiderbot");
+            var zr = g.robots.First(r => r.id == "retrobot");
             int oldTarget = zr.targetId;   // a part it was already picking up doesn't count
             zr.AssignZone(hc);
             Time.timeScale = 4;
@@ -456,45 +576,175 @@ namespace WorkshopWreckage
             Check("robots empty the sorting tray first", put > 0 && inTray >= put && g.TrayCount <= inTray - 3, $"{put} put in, {inTray} in tray, {g.TrayCount} left");
         }
 
-        void Install(int id)
+        /// <summary>Puts a part into the player's hands, wherever it lies (test setup).</summary>
+        void Take(int id)
         {
-            if (g.world.instances[id].state == ItemState.Stored) return;
-            if (g.world.instances[id].state == ItemState.InWorld) { g.index.Remove(id); g.world.SetState(id, ItemState.Carried, "player"); }
-            g.storage.Deposit(g.world.DefOf(id).storageBox, id);
+            var i = g.world.instances[id];
+            if (i.state == ItemState.InWorld) { g.index.Remove(id); g.world.SetState(id, ItemState.Carried, "player"); }
+            if (i.state == ItemState.Carried && i.owner == "player" && !g.inventory.items.Contains(id)) g.inventory.Add(id);
         }
 
+        /// <summary>Earns real XP (objective rewards) until the level is reached.</summary>
+        void LevelTo(int level)
+        {
+            var pr = g.progression;
+            for (int k = 0; pr.level < level && k < 5000; k++) pr.OnObjective("autotest_level_" + k);
+        }
+
+        /// <summary>Stands in front of a workbench mat and aims at the bench top there.</summary>
+        IEnumerator AimAtBench(int mat)
+        {
+            var (spot, _) = g.workbench.MatSpot(mat);
+            LookFrom(spot + g.workbench.Front * 0.85f + Vector3.up * 0.75f, spot + g.workbench.Front * 0.2f);
+            yield return Frames(2);
+            g.interaction.UpdateTarget();
+        }
+
+        /// <summary>Visible vertex count of a robot model (solid parts only, ghosts excluded).</summary>
+        static int SolidVerts(Robot r) => r.ModelTransform.GetComponentsInChildren<MeshFilter>(true)
+            .Where(f => f.GetComponent<MeshRenderer>() is MeshRenderer mr && mr.sharedMaterial != null && !mr.sharedMaterial.shader.name.Contains("Ghost")).Sum(f => f.sharedMesh != null ? f.sharedMesh.vertexCount : 0);
+
+        /// <summary>Every unique robot part is in exactly one place: the workshop, a hand,
+        /// the holding tray or a robot.</summary>
+        bool PartsIntact(out string detail)
+        {
+            int bad = 0;
+            foreach (var id in g.db.RobotPartIds().SelectMany(d => g.world.IdsOf(d)))
+            {
+                var i = g.world.instances[id];
+                int places = (i.state == ItemState.InWorld ? 1 : 0) + (g.inventory.items.Contains(id) ? 1 : 0)
+                    + g.storage.contents.Values.Count(l => l.Contains(id)) + (i.state == ItemState.Installed ? 1 : 0)
+                    + g.robots.Count(r => r.carried.Contains(id));
+                if (places != 1) bad++;
+            }
+            detail = bad == 0 ? $"{g.db.RobotPartIds().Count} unique parts, each in one place" : $"{bad} parts in the wrong number of places";
+            return bad == 0;
+        }
+
+        /// <summary>The Robot Workbench acceptance tests (robot_blueprints_and_assembly.md §10)
+        /// with Retrobot and Unibot, driven through the same interaction code the player uses.</summary>
         IEnumerator RetrobotChecks()
         {
+            var wb = g.workbench;
             var rb = g.retrobot;
-            var parts = g.db.RobotPartIds("retrobot").SelectMany(d => g.world.IdsOf(d)).ToList();
+            var pr = g.progression;
+            var retro = wb.P("retrobot");
+            var uniP = wb.P("unibot");
+            var parts = wb.PartIds(retro);
             Check("Retrobot has 5 assembly parts", parts.Count == 5, $"{parts.Count} parts");
-            Check("Retrobot inactive before assembly", !rb.Active, rb.Describe());
-            for (int k = 0; k < parts.Count; k++)
-            {
-                int id = parts[k];
-                if (g.world.instances[id].state == ItemState.InWorld)
-                {
-                    g.index.Remove(id);
-                    g.world.SetState(id, ItemState.Carried, "player");
-                    g.inventory.Add(id);
-                }
-                g.interaction.DepositStation(id);
-                yield return Frames(2);
-                if (k == 2)
-                {
-                    Check("Retrobot stays inactive while parts are missing", !rb.Active, rb.Describe());
-                    LookAtRobot(0.75f, 0.5f, 0.25f);
-                    yield return g.Capture(Path.Combine(outDir, "05_retrobot_partial.png"), 4);
-                }
-            }
+            Check("Retrobot inactive before assembly", !rb.Active && !rb.Operational, rb.Describe());
+            // the parts' discovery XP is earned first, then the player goes back to level 1
+            foreach (var id in parts.Concat(wb.PartIds(uniP))) g.progress.Discover(g.world.instances[id].defId);
+            pr.level = 1; pr.xp = 0;
+            wb.CheckBlueprints(false);
+            Check("blueprints lock robots behind player levels (2 / 5 / 9 / 14 / 19)", !wb.Unlocked(retro) && wb.projects.Where(p => !p.crafted).Select(p => p.level).SequenceEqual(new[] { 2, 5, 9, 14, 19 }),
+                  string.Join(", ", wb.projects.Select(p => $"{p.name} lv {p.level}")));
+
+            // 1-2. a part found below its blueprint level can be picked up and carried
+            int uniPart = wb.PartIds(uniP)[0];
+            var up = g.world.instances[uniPart];
+            g.player.Teleport(up.Position + new Vector3(0.5f, -up.Position.y, 0.5f));
+            bool picked = g.interaction.Pickup(uniPart, false);
+            Check("a level-1 player picks up and carries a Unibot part (blueprint at level 5)", picked && g.inventory.items.Contains(uniPart) && wb.StateOf(uniPart) == RobotWorkbench.PartState.Carried,
+                  g.world.DefOf(uniPart).displayName);
+            // robot helpers never deliver robot parts for you
+            Check("the sorting tray refuses robot parts", !g.interaction.DropInTray(uniPart, false), "");
+
+            // 3-4. personally delivered at the bench, it waits safely in the holding tray
+            yield return AimAtBench(1);
+            g.inventory.Select(up.defId);
+            bool aimed = g.interaction.targetType == "station";
+            g.interaction.Primary();
+            yield return Frames(3);
+            Check("the player delivers it in person at the Robot Workbench", aimed && wb.StateOf(uniPart) == RobotWorkbench.PartState.Delivered && !g.inventory.items.Contains(uniPart),
+                  $"aim: {g.interaction.targetType}, state {wb.StateOf(uniPart)}");
+            // 5. no assembly while the blueprint is locked
+            Check("a locked blueprint can't be assembled", wb.InstallAll(uniP) == 0 && wb.InstalledCount(uniP) == 0 && wb.CanInstall(uniP, uniPart).Contains("level 5"), wb.CanInstall(uniP, uniPart));
+
+            // Retrobot: three parts delivered at level 1 wait in the tray
+            foreach (var id in parts.Take(3)) { Take(id); g.interaction.DepositStation(id); }
+            yield return Frames(2);
+            Check("parts delivered before the blueprint wait in the holding tray", wb.DeliveredIds(retro).Count == 3 && wb.InstalledCount(retro) == 0 && wb.StatusOf(retro) == RobotWorkbench.Status.AwaitingBlueprint,
+                  wb.Summary(retro));
+            yield return AimAtBench(0);
+            g.hud.SetHudVisible(true);
+            yield return g.Capture(Path.Combine(outDir, "05_workbench_locked.png"), 4);
+            g.hud.SetHudVisible(false);
+
+            // 6-7. reaching level 2 unlocks the blueprint; the delivered parts are still there
+            LevelTo(2);
+            Check("reaching level 2 unlocks Retrobot's blueprint, delivered parts kept", wb.Unlocked(retro) && wb.DeliveredIds(retro).Count == 3 && wb.StatusOf(retro) == RobotWorkbench.Status.ReadyToAssemble,
+                  $"level {pr.level}, {RobotWorkbench.StatusText(wb.StatusOf(retro))}");
+            // 8. installing visibly changes the robot on the bench
+            int v0 = SolidVerts(rb);
+            int n = wb.InstallAll(retro);
+            yield return Frames(2);
+            int v1 = SolidVerts(rb);
+            Check("installing parts visibly builds the robot on the bench", n == 3 && v1 > v0, $"{n} installed, solid geometry {v0} -> {v1} vertices");
+            // 9-10. the missing parts are named; it can't be activated yet
+            var missing = parts.Where(id => wb.StateOf(id) != RobotWorkbench.PartState.Installed).ToList();
+            Check("missing components are identified", missing.Count == 2 && wb.Summary(retro).Contains("3 of 5"), wb.Summary(retro));
+            Check("an incomplete robot can't be activated", !wb.CanActivate(retro) && !wb.Activate(retro) && !rb.Active, RobotWorkbench.StatusText(wb.StatusOf(retro)));
+            Check("each robot part is in exactly one place", PartsIntact(out var d1), d1);
+            // the half-built Retrobot, and held in the hands
+            var (spot, _) = wb.MatSpot(0);
+            LookFrom(spot + wb.Front * 0.55f + Vector3.up * 0.32f + Vector3.Cross(Vector3.up, wb.Front) * 0.2f, spot + Vector3.up * 0.12f);
+            yield return g.Capture(Path.Combine(outDir, "05b_retrobot_on_the_bench.png"), 4);
+            yield return AimAtBench(0);
+            g.interaction.BeginInspect();
+            bool held = g.interaction.inspecting && g.interaction.inspectRobot == rb && !g.player.inputEnabled;
+            g.held.RotateBy(new Vector2(70, 8));
+            g.hud.SetHudVisible(true);
+            yield return g.Capture(Path.Combine(outDir, "05c_retrobot_in_hands.png"), 40);
+            g.interaction.EndInspect();
+            yield return Frames(2);
+            g.hud.SetHudVisible(false);
+            Check("an unfinished robot can be picked up and turned in the hands, then put back", held && !g.interaction.inspecting && g.player.inputEnabled && rb.ModelTransform.parent == rb.transform,
+                  "");
+            // 12. partial assembly survives save / load
+            string Bench() => $"{string.Join(",", wb.InstalledIds(retro))}|{string.Join(",", wb.DeliveredIds(uniP))}|{SolidVerts(rb)}|{pr.level}";
+            var wbBefore = Bench();
+            g.SaveGame("autotest_wb");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_wb");
+            g.player.enabled = false;
+            yield return Frames(4);
+            rb = g.retrobot;
+            var wbAfter = Bench();
+            Check("partial assembly and the holding tray survive save/load", wbBefore == wbAfter && PartsIntact(out _), $"{wbBefore}  vs  {wbAfter}");
+            File.Delete(SaveSystem.PathOf("autotest_wb"));
+            // 13. a part can't be delivered twice
+            var again = g.interaction.DepositStation(parts[0]);
+            bool intact = PartsIntact(out var d2);
+            Check("an installed part can't be delivered again (no duplicates)", !again && intact, d2);
+
+            // the last two parts, found in the workshop: installed as they are delivered (unlocked)
+            foreach (var id in missing) { Take(id); g.interaction.DepositStation(id); }
+            yield return Frames(2);
+            Check("with the blueprint unlocked, a delivered part is installed at once", wb.Complete(retro) && wb.StatusOf(retro) == RobotWorkbench.Status.ReadyForActivation, wb.Summary(retro));
+            g.OpenWorkbench("retrobot");
+            yield return g.Capture(Path.Combine(outDir, "05d_workbench_screen.png"), 8);
+            g.SetState("play");
+            g.player.enabled = false;
+            // 11. activation: it hops off the bench and starts work
+            Check("a complete robot is activated by the player", wb.Activate(retro), "");
             float t0 = Time.realtimeSinceStartup;
-            while (!rb.Active && Time.realtimeSinceStartup - t0 < 10) { LookAtRobot(0.75f, 0.5f, 0.2f); yield return null; }
-            Check("Retrobot activates when all 5 parts are installed", rb.Active, rb.Describe());
+            while (!rb.Active && Time.realtimeSinceStartup - t0 < 12) { LookAtRobot(1.0f, 0.9f, 0.4f); yield return null; }
+            Check("Retrobot activates, leaves the bench and is managed with the others", rb.Active && rb.Operational && (rb.transform.position - rb.home).magnitude < 0.3f && wb.StatusOf(retro) == RobotWorkbench.Status.Operational,
+                  rb.Describe());
             yield return new WaitForSeconds(1.2f);
-            Check("objectives advance with play (first part, sorting, Retrobot)", g.objectives.done.Contains("first_part") && g.objectives.done.Contains("sort_10") && g.objectives.done.Contains("retrobot_parts"),
+            Check("objectives advance with play (first part, sorting, Retrobot)", g.objectives.done.Contains("first_part") && g.objectives.done.Contains("sort_10") && g.objectives.done.Contains("retrobot_parts") && g.objectives.done.Contains("retrobot_on"),
                   $"done: {string.Join(", ", g.objectives.done)}; now: {g.objectives.HudText()}");
             LookAtRobot(0.7f, 0.45f, 0.15f);
             yield return g.Capture(Path.Combine(outDir, "06_retrobot_online.png"), 3);
+
+            // 15. every preset can reach every blueprint level from ordinary collection work
+            var cfgRobots = Robot.AllConfig();
+            int maxBp = wb.projects.Where(p => !p.crafted).Max(p => p.level), maxCraft = wb.projects.Max(p => p.level);
+            int oItems = g.world.Count - g.db.RobotPartIds().Count, oDefs = g.db.order.Count(d => !g.db.Get(d).IsRobotPart && g.world.TotalOf(d) > 0);
+            long at75 = pr.CollectionXp(oItems, oDefs, 0.75), at100 = pr.CollectionXp(oItems, oDefs, 1.0);
+            Check("every blueprint level is reachable from collection work alone (robots by 75% of the sets, crafted Hoverbots by 100%)", at75 >= pr.XpAtLevelStart(maxBp) && at100 >= pr.XpAtLevelStart(maxCraft),
+                  $"{g.presetId}: {at75:N0} XP at 75% vs {pr.XpAtLevelStart(maxBp):N0} for level {maxBp}; {at100:N0} XP at 100% vs {pr.XpAtLevelStart(maxCraft):N0} for level {maxCraft}");
 
             // let him work on his own (sped up), photographing a pick-up and a carry
             int sortedBefore = g.progress.sortedTotal, robotBefore = g.telemetry.sortedRobot;

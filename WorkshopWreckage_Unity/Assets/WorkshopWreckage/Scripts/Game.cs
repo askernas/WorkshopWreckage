@@ -29,7 +29,7 @@ namespace WorkshopWreckage
         public HeldView held;
         public Interaction interaction;
         public Hud hud;
-        public RepairBay repairBay;
+        public RobotWorkbench workbench;
         public readonly List<Robot> robots = new();
         public Robot retrobot => robots.Find(r => r.id == "retrobot");
         public readonly HashSet<int> robotReserved = new();   // parts a robot is on its way to: no one else takes them
@@ -82,8 +82,8 @@ namespace WorkshopWreckage
             hud.transform.SetParent(transform, false);
             hud.Init(this);
             if (!valid) { hud.ShowFatal("The item data files are invalid:\n\n" + string.Join("\n", db.errors.Take(25))); return; }
-            repairBay = new GameObject("RepairBay").AddComponent<RepairBay>();
-            repairBay.transform.SetParent(transform, false);
+            workbench = new GameObject("RobotWorkbench").AddComponent<RobotWorkbench>();
+            workbench.transform.SetParent(transform, false);
 
             player = new GameObject("Player").AddComponent<PlayerController>();
             player.transform.SetParent(transform, false);
@@ -100,7 +100,8 @@ namespace WorkshopWreckage
             interaction.TargetChanged += hud.OnTarget;
             interaction.Feedback += hud.OnFeedback;
             interaction.InspectChanged += hud.ShowInspect;
-            repairBay.Init(this);
+            interaction.RobotInspectChanged += hud.ShowRobotInspect;
+            workbench.Init(this);
 
             if (args.TryGetValue("items", out var n)) itemCount = int.Parse(n);
             int seed = args.TryGetValue("seed", out var sd) ? int.Parse(sd) : Json.Int(db.config, "default_seed", 1912);
@@ -167,8 +168,8 @@ namespace WorkshopWreckage
             Debug.Log("[boot] workshop built");
             BuildStorage();
             Debug.Log("[boot] storage built");
-            repairBay.transform.position = Shared.Pos(layout.repairBayPos.x, layout.repairBayPos.y, layout.repairBayPos.z);
-            repairBay.transform.rotation = Shared.YRot(layout.repairBayRot);
+            workbench.transform.position = Shared.Pos(layout.repairBayPos.x, layout.repairBayPos.y, layout.repairBayPos.z);
+            workbench.transform.rotation = Shared.YRot(layout.repairBayRot);
             if (startupMs > 0) StartCoroutine(ProbeLater());
             return true;
         }
@@ -206,18 +207,22 @@ namespace WorkshopWreckage
             index = new ItemSpatialIndex(world);
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
-            SpawnRobots();
-            repairBay.Refresh();
-            foreach (var u in units.Values) { u.labelProvider = LabelFor; u.RefreshLabels(); }
             interaction.ResetState();
             tools.ResetState();
             StartProgression(seed, save);
+            workbench.PrepareOrders();
+            workbench.ResetState();
+            SpawnRobots();
+            workbench.Load(save);
+            foreach (var u in units.Values) { u.labelProvider = LabelFor; u.RefreshLabels(); }
             objectives = new Objectives(this);
             if (save != null) objectives.Load(save.GetValueOrDefault("objectives"));
             else objectives.Tick(1);   // nothing is done yet; evaluates silently
             objectives.Completed += o => { hud.Toast("Objective complete: " + o.text, true); Sfx.Play("milestone", null, -4); };
             if (save != null && save.TryGetValue("robots", out var ro))
                 foreach (var kv in Json.Obj(ro)) robots.Find(r => r.id == kv.Key)?.LoadState(Json.Obj(kv.Value));
+            foreach (var r in robots) r.RefreshAssembly();   // which crafted Hoverbot is on the bench depends on the others
+            workbench.Refresh();
             progress.Milestone += (key, text) => { hud.Toast(text, key.StartsWith("zone") || key == "first_pickup"); Sfx.Play("milestone", null, -6); };
             progress.DefinitionCompleted += id => { hud.Toast($"Set complete: {db.Get(id).displayName}  (all {world.TotalOf(id)})", true); Sfx.Play("complete", null, -4); };
             progress.Discovered += id => { _labelsDirty.Add(db.Get(id).storageBox); Sfx.Play("discover", null, -12); };
@@ -294,13 +299,8 @@ namespace WorkshopWreckage
         {
             var r = robots.Find(x => x.id == id);
             if (r == null) return;
-            foreach (var d in db.RobotPartIds(id))
-                foreach (var i in world.IdsOf(d))
-                {
-                    if (world.instances[i].state == ItemState.InWorld) { index.Remove(i); world.SetState(i, ItemState.Carried, "player"); }
-                    if (world.instances[i].state != ItemState.Stored) storage.Deposit(world.DefOf(i).storageBox, i);
-                }
-            repairBay.Refresh();
+            workbench.ForceInstall(workbench.P(id));
+            r.SetOperational();
             r.enabled = false;
             var pos = Shared.Pos(layout.spawn.x, 0, layout.spawn.z - 1.2f);
             r.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(Vector3.back));   // faces south, towards the camera
@@ -351,26 +351,32 @@ namespace WorkshopWreckage
             return rects.Select(r => new Rect(r.xMin, -r.yMax, r.width, r.height)).ToList();   // Godot z -> Unity z
         }
 
-        /// <summary>Each robot stands in front of its mat at the repair bay; parts the
-        /// player installs appear on it, missing ones are ghosted.</summary>
+        /// <summary>One robot per workbench project (crafted Hoverbots included, hidden
+        /// until their turn on the bench). Its home — the charging mat it returns to — is
+        /// on the floor in front of its workbench mat.</summary>
         void SpawnRobots()
         {
             foreach (var r in robots) if (r != null) Destroy(r.gameObject);
             robots.Clear();
             robotReserved.Clear();
-            var cfg = Robot.AllConfig();
-            var bay = repairBay.transform;
-            var front = Vector3.ProjectOnPlane(bay.TransformDirection(Batch.G(0, 0, 1)), Vector3.up);
-            for (int i = 0; i < RepairBay.Robots.Length; i++)
+            var bench = workbench.transform;
+            var front = workbench.Front;
+            foreach (var p in workbench.projects)
             {
-                var id = RepairBay.Robots[i];
-                if (!cfg.ContainsKey(id)) continue;
-                var r = new GameObject("Robot_" + id).AddComponent<Robot>();
+                int extra = workbench.projects.Where(x => x.type == p.type).ToList().IndexOf(p);
+                var r = new GameObject("Robot_" + p.id).AddComponent<Robot>();
                 r.transform.SetParent(transform, false);
-                var home = bay.TransformPoint(Batch.G(RepairBay.MatX(i), 0, id == "caterpillarbot" ? 1.05f : 0.85f));
-                r.Init(this, id, new Vector3(home.x, 0, home.z), Quaternion.LookRotation(front));
+                var home = bench.TransformPoint(Batch.G(RobotWorkbench.MatX(p.mat) - extra * 0.3f, 0, (p.type == "caterpillarbot" ? 1.05f : 0.85f) + extra * 0.35f));
+                r.Init(this, p.type, p.id, new Vector3(home.x, 0, home.z), Quaternion.LookRotation(front));
                 robots.Add(r);
             }
+        }
+
+        /// <summary>Opens the Robot Workbench screen on a project.</summary>
+        public void OpenWorkbench(string projectId)
+        {
+            workbench.selected = projectId;
+            SetState("workbench");
         }
 
         /// <summary>The active robot closest to the player (commands go to it).</summary>
@@ -467,6 +473,8 @@ namespace WorkshopWreckage
                 playTime = Json.Num(save, "play_time_s");
             }
             ApplySkills();
+            progression.LeveledUp += lv => workbench.CheckBlueprints(true);
+            progression.RobotUpgraded += type => { foreach (var r in robots) if (r.type == type) r.ApplyUpgrades(); };
             progression.LeveledUp += lv =>
             {
                 hud.Toast($"Level {lv}!  Skill point earned (Esc → Skills)", true);
@@ -504,6 +512,17 @@ namespace WorkshopWreckage
             if (progression.Has("reveal_totals")) foreach (var d in progress.discovered) progress.revealed.Add(d);   // Inventory Manifest
             telemetry.SkillUnlocked(id, playTime);
             hud.Toast("Skill unlocked: " + progression.Skill(id).name, true);
+            return true;
+        }
+
+        /// <summary>Buys the next rank of a robot upgrade (its type must be operational).</summary>
+        public bool BuyRobotUpgrade(string id)
+        {
+            var u = progression.Upgrade(id);
+            if (u == null || !progression.BuyUpgrade(id, robots.Any(r => r.type == u.robot && r.Operational))) return false;
+            telemetry.SkillUnlocked(id + "#" + progression.RankOf(id), playTime);
+            var robotName = Robot.AllConfig().ContainsKey(u.robot) ? Json.Str(Json.Obj(Robot.AllConfig()[u.robot]), "name") : u.robot;
+            hud.Toast($"{u.name} rank {progression.RankOf(id)} — every {robotName} gets it", true);
             return true;
         }
 
@@ -623,7 +642,7 @@ namespace WorkshopWreckage
                     progress.Discover(inst.defId);
                 }
             }
-            repairBay.Refresh();
+            workbench.Refresh();
             foreach (var u in units.Values) u.RefreshLabels();
         }
 
@@ -649,15 +668,16 @@ namespace WorkshopWreckage
             if (kb.escapeKey.wasPressedThisFrame)
             {
                 if (state == "play") { if (interaction.inspecting) interaction.EndInspect(); else SetState("paused"); }
-                else if (state == "paused" || state == "inventory") { if (!hud.BackFromSubScreen()) SetState("play"); }
+                else if (state == "paused" || state == "inventory" || state == "workbench") { if (!hud.BackFromSubScreen()) SetState("play"); }
                 else if (state == "menu") hud.BackFromSubScreen();
             }
             else if (kb.tabKey.wasPressedThisFrame && (state == "play" || state == "inventory")) SetState(state == "play" ? "inventory" : "play");
             else if (kb.f5Key.wasPressedThisFrame && state == "play") SaveGame("quick");
             else if (kb.rKey.wasPressedThisFrame && state == "play" && !interaction.inspecting)
             {
-                var rb = NearestActiveRobot();
-                if (rb == null) hud.OnFeedback("No robot is running yet: install all of a robot's parts at the repair bay", false);
+                // the collection specialist takes assignments; otherwise the nearest robot focuses on that kind
+                var rb = robots.FirstOrDefault(r => r.Active && r.strategy == "assigned_definition") ?? NearestActiveRobot();
+                if (rb == null) hud.OnFeedback("No robot is running yet: build one at the Robot Workbench", false);
                 else if (interaction.targetType == "item")
                 {
                     var msg = rb.CommandFocus(world.instances[interaction.targetItem].defId);
@@ -676,6 +696,7 @@ namespace WorkshopWreckage
         {
             state = s;
             bool playing = s == "play";
+            if (!playing && interaction.inspecting && s != "paused") interaction.EndInspect();
             player.inputEnabled = playing && !interaction.inspecting;
             player.lookEnabled = playing && !interaction.inspecting;
             interaction.enabledInput = playing && !Automated;   // automated runs drive interaction directly; real mouse clicks must not interfere

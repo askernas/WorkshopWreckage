@@ -29,6 +29,24 @@ namespace WorkshopWreckage
             _armL = Pivot("ArmL", _saucer, new Vector3(-RimR - 0.02f, 0.27f, 0));
             _armR = Pivot("ArmR", _saucer, new Vector3(RimR + 0.02f, 0.27f, 0));
             carry = Pivot("Carry", _saucer, new Vector3(0, 0.05f, 0.05f));   // held under the saucer
+            Mount(head, "head", Vector3.up, 0.05f);
+            Mount(_rotor, "rotor hub", Vector3.up, 0.035f);
+            Mount(_armL, "left arm", Vector3.left, 0.035f);
+            Mount(_armR, "right arm", Vector3.right, 0.035f);
+        }
+
+        protected override Vector3? ClampPoint => new Vector3(0, 0.26f, Has("lower saucer shell") ? RimR + 0.02f : 0.2f);
+
+        /// <summary>Without the saucer shells: two crossed spars around the hub ring.</summary>
+        protected override void BuildFrame()
+        {
+            if (Has("lower saucer shell")) return;
+            var b = new Batch();
+            b.RoundedBox(new Vector3(0, 0.22f, 0), new Vector3(RimR * 1.9f, 0.025f, 0.035f), 0.006f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, 0.22f, 0), new Vector3(0.035f, 0.025f, RimR * 1.9f), 0.006f, Gunmetal, 2);
+            b.Lathe(new Vector3(0, 0.2f, 0), Ring(0.13f, 0.1f, 0.04f), Gunmetal, null, 24);
+            b.Lathe(new Vector3(0, 0.2f, 0), Disc(0.06f, 0.06f, 0.008f), Brass, null, 16);
+            b.Build(_saucer, "G_frame", true);
         }
 
         protected override void BuildGeometry()

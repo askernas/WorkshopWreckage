@@ -205,7 +205,8 @@ namespace WorkshopWreckage
         {
             var key = "blueprint" + variant;
             if (_cache.TryGetValue(key, out var m)) return m;
-            var paper = new Color(0.16f, 0.30f, 0.52f);
+            // variant 2: a locked blueprint — the robot drawing faded on grey paper, with a padlock
+            var paper = variant == 2 ? new Color(0.2f, 0.22f, 0.26f) : new Color(0.16f, 0.30f, 0.52f);
             float Circle(float u, float v, float cx, float cy, float r) => 1 - SS(0, 0.006f, Mathf.Abs(Vector2.Distance(new Vector2(u, v), new Vector2(cx, cy)) - r));
             float Line(float u, float v, float ax, float ay, float bx, float by)
             {
@@ -221,8 +222,13 @@ namespace WorkshopWreckage
                 if (variant == 0)
                     ink += Circle(u, v, 0.35f, 0.5f, 0.2f) + Circle(u, v, 0.35f, 0.5f, 0.07f) + Circle(u, v, 0.72f, 0.42f, 0.12f) + Line(u, v, 0.35f, 0.5f, 0.72f, 0.42f) + Line(u, v, 0.1f, 0.85f, 0.9f, 0.85f);
                 else
-                    ink += Line(u, v, 0.3f, 0.2f, 0.7f, 0.2f) + Line(u, v, 0.3f, 0.2f, 0.3f, 0.55f) + Line(u, v, 0.7f, 0.2f, 0.7f, 0.55f) + Line(u, v, 0.3f, 0.55f, 0.7f, 0.55f)
-                        + Circle(u, v, 0.42f, 0.38f, 0.05f) + Circle(u, v, 0.58f, 0.38f, 0.05f) + Line(u, v, 0.35f, 0.55f, 0.3f, 0.85f) + Line(u, v, 0.65f, 0.55f, 0.7f, 0.85f);
+                {
+                    ink += (Line(u, v, 0.3f, 0.2f, 0.7f, 0.2f) + Line(u, v, 0.3f, 0.2f, 0.3f, 0.55f) + Line(u, v, 0.7f, 0.2f, 0.7f, 0.55f) + Line(u, v, 0.3f, 0.55f, 0.7f, 0.55f)
+                        + Circle(u, v, 0.42f, 0.38f, 0.05f) + Circle(u, v, 0.58f, 0.38f, 0.05f) + Line(u, v, 0.35f, 0.55f, 0.3f, 0.85f) + Line(u, v, 0.65f, 0.55f, 0.7f, 0.85f)) * (variant == 2 ? 0.3f : 1f);
+                    if (variant == 2)   // padlock
+                        ink += Line(u, v, 0.42f, 0.42f, 0.58f, 0.42f) + Line(u, v, 0.42f, 0.58f, 0.58f, 0.58f) + Line(u, v, 0.42f, 0.42f, 0.42f, 0.58f) + Line(u, v, 0.58f, 0.42f, 0.58f, 0.58f)
+                            + Circle(u, v, 0.5f, 0.62f, 0.055f) * (v > 0.6f ? 1 : 0) + Circle(u, v, 0.5f, 0.5f, 0.015f);
+                }
                 var c = paper * (0.8f + 0.35f * Noise(u * 3, v * 3, 3));
                 c = Color.Lerp(c, new Color(0.85f, 0.9f, 0.95f), Mathf.Clamp01(ink) * 0.8f);
                 c.a = 1;

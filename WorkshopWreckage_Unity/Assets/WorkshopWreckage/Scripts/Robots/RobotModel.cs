@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -27,16 +28,36 @@ namespace WorkshopWreckage
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and
     /// scaled to their configured height). Geometry is authored in Godot-local space
-    /// (front = -Z) through Batch. Every primitive belongs to an assembly part; parts
-    /// not yet installed at the repair bay render as translucent ghosts.</summary>
+    /// (front = -Z) through Batch. Every primitive belongs to an assembly part. On the
+    /// Robot Workbench a robot is genuinely unfinished: parts not yet installed are
+    /// simply absent, the bare internal frame shows where a shell is missing, empty
+    /// mounting sockets (with loose wires) mark where limbs and heads attach, and an
+    /// assembly clamp holds the body up (see BuildAssemblyAids).</summary>
     public abstract partial class RobotModel : MonoBehaviour
     {
         public Transform body, head, carry;
         public abstract float ModelHeight { get; }
         protected HashSet<string> installed = new();
-        protected Material ghost;
+        /// <summary>True while the robot is on the workbench (unfinished or awaiting activation).</summary>
+        public bool assembling;
+        /// <summary>Whether a missing part's socket is ready to receive it (its mechanical
+        /// prerequisites are installed); sockets are only drawn where they are.</summary>
+        public System.Func<string, bool> mountReady;
         protected readonly List<Renderer> eyes = new(), beacons = new();
         protected readonly List<Transform> pivots = new();
+        readonly List<(Transform pivot, string part, Vector3 normal, float r)> _mounts = new();
+
+        /// <summary>Registers an attachment point: while `part` is missing, an empty
+        /// socket facing `normalG` (Godot-local) is drawn at the pivot's origin.</summary>
+        protected void Mount(Transform pivot, string part, Vector3 normalG, float r = 0.04f) => _mounts.Add((pivot, part, normalG, r));
+
+        /// <summary>Where the assembly clamp grips the body while on the workbench
+        /// (Godot-local, model units, on the robot's back), or null for no clamp.</summary>
+        protected virtual Vector3? ClampPoint => null;
+
+        /// <summary>The exposed internal frame drawn while the robot's main shell part is
+        /// missing (models override; build into their own pivots with Done).</summary>
+        protected virtual void BuildFrame() { }
         static Material _eyeOff, _eyeOn, _beaconOff, _beaconOn;
         protected static Material EyeOffMat => _eyeOff;
         protected static Material BeaconOffMat => _beaconOff;
@@ -56,8 +77,6 @@ namespace WorkshopWreckage
             _eyeOn ??= EnvMaterials.Plain(new Color(1f, 0.82f, 0.45f), 0f, 0.9f, 4f);
             _beaconOff ??= EnvMaterials.Plain(new Color(0.55f, 0.06f, 0.04f), 0.1f, 0.8f);
             _beaconOn ??= EnvMaterials.Plain(new Color(1f, 0.15f, 0.08f), 0f, 0.9f, 5f);
-            ghost = EnvMaterials.NewGhost();
-            ghost.SetColor("_Color", new Color(0.35f, 0.75f, 1f, 0.22f));
             body = Pivot("Body", transform, Vector3.zero);
             CreatePivots();
         }
@@ -82,24 +101,103 @@ namespace WorkshopWreckage
             return (carry, new Vector3((i % 3 - 1) * spread * (n > 1 ? 1 : 0), (i / 3) * 0.08f, 0));
         }
 
-        /// <summary>Rebuilds all geometry; parts not in `have` are ghosted.</summary>
+        /// <summary>Rebuilds all geometry; parts not in `have` are left out (and, while
+        /// assembling, their empty sockets and the bare frame are shown instead).</summary>
         public void Build(HashSet<string> have)
         {
             installed = have;
-            foreach (var p in pivots)
+            foreach (var p in pivots.Append(transform))   // the clamp hangs on the model root
                 for (int i = p.childCount - 1; i >= 0; i--)
-                    if (p.GetChild(i).name.StartsWith("G_")) Destroy(p.GetChild(i).gameObject);
+                    if (p.GetChild(i).name.StartsWith("G_")) { p.GetChild(i).gameObject.SetActive(false); Destroy(p.GetChild(i).gameObject); }
             eyes.Clear(); beacons.Clear();
             BuildGeometry();
+            if (assembling) BuildAssemblyAids();
         }
 
         protected bool Has(string part) => installed.Contains(part);
-        protected Material M(string part, Material m) => Has(part) ? m : ghost;
+        /// <summary>The material of a primitive belonging to `part`. A missing part is a
+        /// faint ghost while the robot is on the workbench (so the player sees what is still
+        /// to find), and is not drawn at all otherwise.</summary>
+        protected Material M(string part, Material m) => Has(part) ? m : assembling ? Ghost : null;
+
+        static Material _ghost;
+        protected static Material Ghost
+        {
+            get
+            {
+                if (_ghost == null)
+                {
+                    _ghost = EnvMaterials.NewGhost();
+                    _ghost.SetColor("_Color", new Color(0.35f, 0.75f, 1f, 0.16f));
+                }
+                return _ghost;
+            }
+        }
+
+        static Material _socket, _wireA, _wireB, _clamp;
+
+        /// <summary>Empty sockets with loose wires for missing parts, the exposed frame and
+        /// the workbench clamp. Built as G_ objects so the next Build replaces them.</summary>
+        void BuildAssemblyAids()
+        {
+            _socket ??= EnvMaterials.Plain(new Color(0.24f, 0.25f, 0.26f), 0.9f, 0.5f);
+            _wireA ??= EnvMaterials.Plain(new Color(0.75f, 0.12f, 0.08f), 0f, 0.45f);
+            _wireB ??= EnvMaterials.Plain(new Color(0.85f, 0.65f, 0.12f), 0f, 0.45f);
+            _clamp ??= EnvMaterials.Plain(new Color(0.2f, 0.22f, 0.24f), 0.9f, 0.4f);
+            BuildFrame();
+            var shown = new HashSet<(Transform, string)>();
+            foreach (var (pivot, part, normal, r) in _mounts)
+            {
+                if (Has(part) || (mountReady != null && !mountReady(part)) || !shown.Add((pivot, part))) continue;
+                var b = new Batch();
+                var n = normal.normalized;
+                var rot = Quaternion.FromToRotation(Vector3.up, Batch.G(n));
+                b.Lathe(Vector3.zero, new[] { new Vector2(0, 0), new Vector2(r, 0), new Vector2(r, r * 0.25f), new Vector2(r * 0.7f, r * 0.32f), new Vector2(0, r * 0.32f) }, _socket, rot, 16);
+                b.Lathe(n * (r * 0.3f), new[] { new Vector2(0, 0), new Vector2(r * 0.32f, 0), new Vector2(r * 0.32f, r * 0.35f), new Vector2(0, r * 0.4f) }, Brass, rot, 10);
+                var side = Mathf.Abs(n.y) > 0.9f ? Vector3.right : Vector3.up;
+                var t1 = Vector3.Cross(n, side).normalized;
+                var t2 = Vector3.Cross(n, t1).normalized;
+                for (int k = 0; k < 4; k++)
+                {
+                    float a = k * Mathf.PI / 2 + Mathf.PI / 4;
+                    b.Rivet((t1 * Mathf.Cos(a) + t2 * Mathf.Sin(a)) * r * 0.72f + n * (r * 0.26f), n, r * 0.12f, Brass);
+                }
+                // two loose wire ends sticking out of the socket
+                foreach (var (o, mat, len) in new[] { (0.18f, _wireA, 1.0f), (-0.18f, _wireB, 0.8f) })
+                {
+                    var dir = (n + t1 * o * 2.5f).normalized;
+                    b.Cylinder(n * (r * 0.3f) + t1 * (o * r) + dir * (r * 0.55f * len), r * 0.07f, r * 1.1f * len, mat, Quaternion.FromToRotation(Vector3.up, Batch.G(dir)), 6);
+                }
+                b.Build(pivot, "G_socket", true);
+            }
+            if (ClampPoint is Vector3 c)
+            {
+                // assembly clamp: a stand behind the robot with an arm gripping its back
+                var b = new Batch();
+                float postZ = c.z + 0.16f;
+                b.Box(new Vector3(0, 0.012f, postZ), new Vector3(0.22f, 0.024f, 0.16f), _clamp);
+                b.Cylinder(new Vector3(0, c.y / 2, postZ), 0.022f, c.y, _clamp);
+                b.Box(new Vector3(0, c.y, (c.z + postZ) / 2 + 0.01f), new Vector3(0.04f, 0.04f, postZ - c.z + 0.02f), _clamp);
+                b.Box(new Vector3(0, c.y, c.z + 0.008f), new Vector3(0.12f, 0.07f, 0.016f), Brass);
+                b.Lathe(new Vector3(0.05f, c.y, postZ + 0.02f), Disc0(0.028f, 0.012f), Brass, Batch.R(Vector3.right, Mathf.PI / 2), 12);
+                b.Build(transform, "G_clamp", true);
+            }
+        }
+
+        static Vector2[] Disc0(float r, float h) => new[] { new Vector2(0, 0), new Vector2(r, 0), new Vector2(r, h), new Vector2(0, h) };
+
+        /// <summary>Removes the workbench aids (activation).</summary>
+        public void EndAssembly()
+        {
+            assembling = false;
+            Build(installed);
+        }
 
         protected static void Done(Batch b, Transform parent) => b.Build(parent, "G_mesh", true);
 
         protected Renderer Prim(PrimitiveType t, Transform parent, Vector3 posG, Vector3 scale, Quaternion rot, Material m)
         {
+            if (m == null) return null;
             var go = GameObject.CreatePrimitive(t);
             Destroy(go.GetComponent<Collider>());
             go.name = "G_prim";
@@ -157,11 +255,8 @@ namespace WorkshopWreckage
                     eyes.Add(Prim(PrimitiveType.Cylinder, pivot, new Vector3(x, size.y * 0.6f, -hd - 0.021f), new Vector3(er * 1.7f, 0.004f, er * 1.7f), AxisZ, _eyeOff));
             foreach (var (x, ant) in new[] { (-1f, antennaL), (1f, antennaR) })
                 Prim(PrimitiveType.Sphere, pivot, new Vector3(x * hw * 0.75f, size.y + 0.11f, 0), Vector3.one * 0.045f, Quaternion.identity, M(ant, Red));
-            if (beacon != null)
-            {
-                var r = Prim(PrimitiveType.Sphere, pivot, new Vector3(0, size.y + 0.035f, 0), new Vector3(0.075f, 0.06f, 0.075f), Quaternion.identity, Has(beacon) ? _beaconOff : ghost);
-                if (Has(beacon)) beacons.Add(r);
-            }
+            if (beacon != null && Has(beacon))
+                beacons.Add(Prim(PrimitiveType.Sphere, pivot, new Vector3(0, size.y + 0.035f, 0), new Vector3(0.075f, 0.06f, 0.075f), Quaternion.identity, _beaconOff));
         }
 
         public void SetEyes(bool on) { foreach (var r in eyes) if (r != null) r.sharedMaterial = on ? _eyeOn : _eyeOff; }

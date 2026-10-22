@@ -28,6 +28,26 @@ namespace WorkshopWreckage
             _armR = Pivot("ArmR", _leanGeo, new Vector3(0.19f, ShoulderY, 0));
             head = Pivot("Head", _leanGeo, new Vector3(0, NeckY, 0));
             carry = Pivot("Carry", _leanGeo, new Vector3(0, 0.49f, 0.36f));
+            Mount(head, "head shell", Vector3.up, 0.05f);
+            Mount(_armL, "left arm", Vector3.left);
+            Mount(_armR, "right arm", Vector3.right);
+            Mount(_gyro, "gyro stabilizer", Vector3.right, 0.035f);
+            Mount(Pivot("ForkMount", _leanGeo, new Vector3(0, 0.43f, 0)), "wheel hub", Vector3.down, 0.05f);
+            Mount(_wheel, "tire", Vector3.right, 0.05f);
+        }
+
+        protected override Vector3? ClampPoint => new Vector3(0, 0.56f, Has("torso") ? 0.115f : 0.03f);
+
+        /// <summary>Without the torso: spine, shoulder axle and the undercarriage plate frame.</summary>
+        protected override void BuildFrame()
+        {
+            if (Has("torso")) return;
+            var b = new Batch();
+            b.RoundedBox(new Vector3(0, 0.57f, 0), new Vector3(0.05f, 0.24f, 0.05f), 0.01f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, ShoulderY, 0), new Vector3(0.38f, 0.03f, 0.03f), 0.008f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, 0.455f, 0), new Vector3(0.21f, 0.02f, 0.16f), 0.006f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, NeckY - 0.01f, 0), new Vector3(0.08f, 0.02f, 0.08f), 0.006f, Brass, 2);
+            b.Build(_leanGeo, "G_frame", true);
         }
 
         protected override void BuildGeometry()

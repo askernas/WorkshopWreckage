@@ -41,12 +41,12 @@ namespace WorkshopWreckage
             {
                 case "collected": return p.CollectedTotal;
                 case "sorted": return p.sortedTotal;
-                case "robot_parts": return g.storage.Stored("RS-" + o.robot).Count;
-                case "robot_active": return g.robots.Any(r => r.id == o.robot && r.Active) ? 1 : 0;
-                case "robots_active": return g.robots.Count(r => r.Active);
-                case "sets_completed": return g.db.order.Count(d => !g.db.Get(d).IsRobotPart && g.world.TotalOf(d) > 0 && p.SortedOf(d) == g.world.TotalOf(d));
+                case "robot_parts": return g.workbench.InstalledCount(o.robot);
+                case "robot_active": return g.robots.Any(r => r.id == o.robot && r.Operational) ? 1 : 0;
+                case "robots_active": return g.robots.Count(r => r.Operational);
+                case "sets_completed": return g.db.order.Count(d => !g.db.Get(d).IsRobotPart && p.IsComplete(d));
                 case "zone_percent": return Mathf.FloorToInt(Enumerable.Range(0, g.layout.zones.Count).Max(z => p.ZonePercent(z)));
-                case "skills": return g.progression.unlocked.Count;
+                case "skills": return g.progression.unlocked.Count + g.progression.RanksBought;
                 case "level": return g.progression.level;
             }
             return 0;

@@ -35,6 +35,25 @@ namespace WorkshopWreckage
             armR = Pivot("ArmR", upperGeo, new Vector3(ShoulderX, ShoulderY, 0));
             head = Pivot("Head", upperGeo, new Vector3(0, NeckY, 0));
             carry = Pivot("Carry", upperGeo, new Vector3(0, 0.47f, 0.4f));  // between the claws with the arms held forward
+            Mount(head, Head, Vector3.up, 0.05f);
+            Mount(armL, ArmL, Vector3.left);
+            Mount(armR, ArmR, Vector3.right);
+            Mount(legL, Legs, Vector3.down, 0.045f);
+            Mount(legR, Legs, Vector3.down, 0.045f);
+        }
+
+        protected override Vector3? ClampPoint => new Vector3(0, 0.5f, Has(Torso) ? 0.15f : 0.035f);
+
+        /// <summary>Without the torso: the bare spine with shoulder and hip bars.</summary>
+        protected override void BuildFrame()
+        {
+            if (Has(Torso)) return;
+            var b = new Batch();
+            b.RoundedBox(new Vector3(0, (HipY + NeckY) / 2, 0), new Vector3(0.05f, NeckY - HipY, 0.05f), 0.01f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, ShoulderY, 0), new Vector3(ShoulderX * 2, 0.035f, 0.035f), 0.008f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, HipY, 0), new Vector3(LegX * 2 + 0.05f, 0.045f, 0.06f), 0.01f, Gunmetal, 2);
+            b.RoundedBox(new Vector3(0, 0.53f, -0.03f), new Vector3(0.09f, 0.07f, 0.035f), 0.008f, Brass, 2);   // the little drive box on the spine
+            b.Build(upperGeo, "G_frame", true);
         }
 
         static Quaternion Side(float s) => Quaternion.FromToRotation(Vector3.up, new Vector3(s, 0, 0));

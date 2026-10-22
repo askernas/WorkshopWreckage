@@ -29,6 +29,7 @@ namespace WorkshopWreckage
         /// <summary>Box centred at a Godot-local point, optional Godot-space rotation.</summary>
         public void Box(Vector3 centerG, Vector3 size, Material m, bool collide = false, Quaternion? rotU = null)
         {
+            if (m == null) return;   // a missing robot part: nothing is drawn
             var rot = rotU ?? Quaternion.identity;
             var c = G(centerG);
             var (v, n, uv, t) = Part(m);
@@ -66,6 +67,7 @@ namespace WorkshopWreckage
         /// rounding), centred at a Godot-local point. The pressed-tin look of the toys.</summary>
         public void RoundedBox(Vector3 centerG, Vector3 size, float r, Material m, int segs = 3, Quaternion? rotU = null)
         {
+            if (m == null) return;   // a missing robot part: nothing is drawn
             var rot = rotU ?? Quaternion.identity;
             var c = G(centerG);
             var (v, n, uv, t) = Part(m);
@@ -114,6 +116,7 @@ namespace WorkshopWreckage
         /// smoothed between neighbouring profile segments unless `hard` is set.</summary>
         public void Lathe(Vector3 centerG, Vector2[] profile, Material m, Quaternion? rotU = null, int segs = 20, bool hard = false)
         {
+            if (m == null) return;   // a missing robot part: nothing is drawn
             var rot = rotU ?? Quaternion.identity;
             var c = G(centerG);
             var (v, n, uv, t) = Part(m);
@@ -147,6 +150,7 @@ namespace WorkshopWreckage
         /// <summary>A small domed rivet head on a surface (Godot-local point and outward direction).</summary>
         public void Rivet(Vector3 centerG, Vector3 outwardG, float r, Material m)
         {
+            if (m == null) return;   // a missing robot part: nothing is drawn
             var up = G(outwardG).normalized;
             var rot = Quaternion.FromToRotation(Vector3.up, up);
             Lathe(centerG, new[] { new Vector2(r, -r * 0.2f), new Vector2(r * 0.95f, r * 0.15f), new Vector2(r * 0.7f, r * 0.5f), new Vector2(0, r * 0.62f) }, m, rot, 8);
@@ -155,6 +159,7 @@ namespace WorkshopWreckage
         /// <summary>Cylinder along local Y, centred at a Godot-local point.</summary>
         public void Cylinder(Vector3 centerG, float r, float h, Material m, Quaternion? rotU = null, int segs = 16)
         {
+            if (m == null) return;   // a missing robot part: nothing is drawn
             var rot = rotU ?? Quaternion.identity;
             var c = G(centerG);
             var (v, n, uv, t) = Part(m);
@@ -187,6 +192,7 @@ namespace WorkshopWreckage
         /// <summary>Quad facing local -Z after mirroring (i.e. Godot +Z), with UVs.</summary>
         public void Quad(Vector3 centerG, Vector2 size, Material m, Rect uvRect, Quaternion? rotU = null)
         {
+            if (m == null) return;   // a missing robot part: nothing is drawn
             var rot = rotU ?? Quaternion.identity;
             var c = G(centerG);
             var (v, n, uv, t) = Part(m);

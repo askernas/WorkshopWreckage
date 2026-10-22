@@ -5,23 +5,29 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>One of the five toy robots (design brief §13–16), configured by
-    /// shared/data/robots.json. Inactive until every assembly part is installed at
-    /// its repair-bay station; then an activation sequence plays and it works on its
-    /// own: it gathers unsorted parts it can reach (up to its capacity and number of
-    /// part types), always knowing where each belongs, and delivers them. Ground
-    /// robots path-find on the floor grid; Hoverbot flies. Destinations above a
-    /// robot's reach get the part piled on the floor in front of them (still
-    /// unsorted) — a robot that can reach them (Hoverbot) picks those piles up later.
-    /// Two robots never go for the same part (shared reservations).
-    /// Commands: R (aiming at a part) — nearest robot works on that kind next;
-    /// T — nearest robot: work / follow me.</summary>
+    /// <summary>One robot (docs/specs/robots_and_levels.md), configured by
+    /// shared/data/robots.json (type) and its upgrades (progression.json). Built at the
+    /// Robot Workbench: it stands on its mat while parts are installed and starts work
+    /// when the player activates it. Then it works on its own with its type's strategy:
+    ///  · opportunistic (Retrobot): nearest reachable part, one at a time;
+    ///  · courier (Unibot): fast, never stores — always leaves parts in the staging zone
+    ///    in front of the destination (they stay UNSORTED);
+    ///  · assigned_definition (Spiderbot): one exact part definition until the set is
+    ///    done; climbs heaps, benches and shelving to reach them and to store them;
+    ///  · multi_stop (Caterpillarbot): gathers several parts, then a delivery run;
+    ///  · staging_first (Hoverbot): empties staging zones first, reaches every height.
+    /// Destinations above a robot's reach get the part left in the staging zone (owner
+    /// "stage:&lt;destination&gt;") for a robot that can reach them. Two robots never go
+    /// for the same part (shared reservations, released whenever a task ends).
+    /// Commands: R (aiming at a part) — Spiderbot's assignment / nearest robot works on
+    /// that kind next; T — nearest robot: work / follow me.</summary>
     public class Robot : MonoBehaviour
     {
         public enum Mode { Assembling, Activating, Working, Following }
         enum Step { Choose, ToItem, Picking, ToDest, Depositing, ToPlayer, ToCharge, Charging, Gesture }
 
-        public string id, displayName, locomotion;
+        /// <summary>id: this instance ("hoverbot_2"); type: its robots.json entry ("hoverbot").</summary>
+        public string id, type, displayName, locomotion, strategy;
         public string Owner => "robot:" + id;
         public Mode mode = Mode.Assembling;
         Step _step = Step.Choose;
@@ -34,6 +40,11 @@ namespace WorkshopWreckage
         public Vector3? zoneCenter;                    // assigned work zone (Task Coordination skill)
         public float zoneRadius = 3f;
         public Quaternion homeRot;
+        public bool paused;
+        /// <summary>Spiderbot: the exact definition it collects (-1 none); auto = it picked it itself.</summary>
+        public int assignedDef = -1;
+        public bool autoAssigned;
+        public string specialistState = "";         // WORKING, SEARCHING, WAITING_FOR_ACCESS, COLLECTION_COMPLETE, PAUSED
 
         Game g;
         NavGrid _nav;
@@ -46,6 +57,11 @@ namespace WorkshopWreckage
         int _capacity, _types;
         public int Capacity => _capacity;
         float _walk, _turn, _reach, _maxPickH, _followDist, _radius, _pickTime, _depositTime, _height, _maxItem, _stepH, _gather, _cruise;
+        float _climbH, _climbSpeed, _scan, _largeItem;
+        int _targetRank, _courierRank, _searchRank, _routeRank, _stagingRank, _fleetRank;
+        bool _canStore = true, _canClimb, _climbing;
+        float _climbPitch, _unreachableT;
+        Dictionary<string, object> _cfg, _limits;
         bool Flies => locomotion == "hover";
         readonly HashSet<int> _unreachable = new();
         readonly Dictionary<int, GameObject> _carryModels = new();
@@ -56,41 +72,47 @@ namespace WorkshopWreckage
         bool _destReachable;
 
         public bool Active => mode == Mode.Working || mode == Mode.Following;
+        /// <summary>Built and activated (it has left the workbench).</summary>
+        public bool Operational => mode != Mode.Assembling && mode != Mode.Activating;
         public string StepName => _step.ToString();
         public float Speed => _speedNow;
         public float WalkSpeed => _walk;
         float Walk => _walk * g.Scale("robot_speed") * (1f + (float)(g.progression?.Effect("robot_speed") ?? 0));   // preset scaling, Shift Planner
         public float Height => _height;
-        public int StationCapacity => g.db.BoxCapacity("RS-" + id);
+        public bool CanDirectStore => _canStore;
+        public bool CanClimb => _canClimb;
+        /// <summary>Highest point it can pick from / store into (by climbing, for climbers).</summary>
+        public float ReachHeight => _canClimb ? Mathf.Max(_climbH, _maxPickH) : _maxPickH;
+        public float MaxItemSize => _maxItem;
+        public float HeapStep => _stepH;
+        public int ItemTypes => _types;
 
-        public static Dictionary<string, object> AllConfig() => Json.Obj(Shared.ReadObject(Shared.DataPath("robots.json"))["robots"]);
+        static Dictionary<string, object> _allConfig;
+        public static Dictionary<string, object> RootConfig() => Shared.ReadObject(Shared.DataPath("robots.json"));
+        public static Dictionary<string, object> AllConfig() => _allConfig ??= Json.Obj(RootConfig()["robots"]);
 
-        public void Init(Game game, string robotId, Vector3 home, Quaternion rot)
+        public void Init(Game game, string robotType, string instanceId, Vector3 home, Quaternion rot)
         {
             g = game;
-            id = robotId;
-            var c = Json.Obj(AllConfig()[id]);
-            displayName = Json.Str(c, "name", id);
+            type = robotType;
+            id = instanceId;
+            var c = _cfg = Json.Obj(AllConfig()[type]);
+            _limits = Json.Obj(c.GetValueOrDefault("limits")) ?? new Dictionary<string, object>();
+            var w = g.workbench?.P(id);
+            displayName = w?.name ?? Json.Str(c, "name", id);
             locomotion = Json.Str(c, "locomotion", "biped");
+            strategy = Json.Str(c, "strategy", "opportunistic");
             _height = (float)Json.Num(c, "height", 0.3);
-            int baseCap = Json.Int(c, "capacity", 1);
-            // bigger worlds give bigger loads — except Retrobot, who always carries one part at a time
-            _capacity = baseCap <= 1 ? 1 : Mathf.RoundToInt(baseCap * g.Scale("robot_capacity"));
-            _types = Json.Int(c, "item_types", 1);
-            _walk = (float)Json.Num(c, "walk_speed", 0.7);
-            _turn = (float)Json.Num(c, "turn_speed_deg", 260);
             _reach = (float)Json.Num(c, "reach", 0.32);
-            _maxPickH = (float)Json.Num(c, "reach_height", 0.35);
-            _maxItem = (float)Json.Num(c, "max_item_size", 0.33);
-            _stepH = (float)Json.Num(c, "heap_step_height", 0.18);
-            _gather = (float)Json.Num(c, "gather_radius", 3);
             _cruise = (float)Json.Num(c, "cruise_altitude", 2.9);
-            _pickTime = (float)Json.Num(c, "pick_time", 1.1);
-            _depositTime = (float)Json.Num(c, "deposit_time", 0.9);
             _followDist = (float)Json.Num(c, "follow_distance", 1.1);
             _radius = (float)Json.Num(c, "radius", 0.12);
             _batteryMinutes = (float)Json.Num(c, "battery_minutes", 8);
             _chargeMinutes = (float)Json.Num(c, "charge_minutes", 1);
+            _canStore = Json.Bool(c, "can_direct_store", true);
+            _canClimb = Json.Bool(c, "can_climb");
+            _largeItem = (float)Json.Num(RootConfig(), "large_item_size", 0.25);
+            ApplyUpgrades();
             if (!Flies)
             {
                 _nav = new NavGrid(g.layout, _radius, _height);
@@ -99,7 +121,7 @@ namespace WorkshopWreckage
             transform.SetPositionAndRotation(home, rot);
             this.home = home;
             homeRot = rot;
-            _model = id switch
+            _model = type switch
             {
                 "unibot" => new GameObject("Model").AddComponent<UnibotModel>(),
                 "spiderbot" => new GameObject("Model").AddComponent<SpiderbotModel>(),
@@ -118,8 +140,43 @@ namespace WorkshopWreckage
                 _loop.spatialBlend = 1; _loop.minDistance = 0.6f; _loop.maxDistance = 14; _loop.loop = true; _loop.volume = 0;
                 _loop.rolloffMode = AudioRolloffMode.Linear;
             }
-            RefreshAssembly(false);
+            _model.assembling = true;
+            RefreshAssembly();
         }
+
+        /// <summary>Recomputes the stats from robots.json and the type's bought upgrades
+        /// (never past the permanent limits). Called on spawn and after every purchase.</summary>
+        public void ApplyUpgrades()
+        {
+            var c = _cfg;
+            double Lim(string k) => _limits.TryGetValue(k, out var v) ? (double)v : double.PositiveInfinity;
+            float S(string k, double def) => (float)(g.progression?.RobotStat(type, k, Json.Num(c, k, def), Lim(k)) ?? Json.Num(c, k, def));
+            int R(string k) => Mathf.FloorToInt((float)(g.progression?.RobotStat(type, k, 0) ?? 0) + 1e-4f);
+            _capacity = Mathf.Max(1, Mathf.FloorToInt(S("capacity", 1) + 1e-4f));
+            _types = Mathf.Max(1, Mathf.FloorToInt(S("item_types", 1) + 1e-4f));
+            _walk = S("walk_speed", 0.7);
+            _turn = S("turn_speed", Json.Num(c, "turn_speed_deg", 260));
+            _maxPickH = S("reach_height", 0.35);
+            _climbH = S("climb_height", 0);
+            _climbSpeed = S("climb_speed", 0.35);
+            _maxItem = S("max_item_size", 0.33);
+            _stepH = S("heap_step_height", 0.18);
+            _gather = S("gather_radius", 3);
+            _scan = S("scan_radius", 6);
+            float pick = (float)(g.progression?.RobotStat(type, "pick_time", 1) ?? 1);   // a multiplier: faster loading also speeds unloading
+            _pickTime = (float)Json.Num(c, "pick_time", 1.1) * pick;
+            _depositTime = (float)Json.Num(c, "deposit_time", 0.9) * pick;
+            _targetRank = R("target_selection"); _courierRank = R("courier_coordination"); _searchRank = R("search_efficiency");
+            _routeRank = R("route_planning"); _stagingRank = R("staging_priority"); _fleetRank = R("fleet_coordination");
+        }
+
+        /// <summary>Base value of a stat from robots.json (for "base → upgraded" displays).</summary>
+        public float BaseStat(string k, double def = 0) => (float)Json.Num(_cfg, k == "turn_speed" ? "turn_speed_deg" : k, def);
+        public float LimitOf(string k) => _limits.TryGetValue(k, out var v) ? (float)(double)v : float.PositiveInfinity;
+        public float ClimbSpeed => _climbSpeed;
+        public float ScanRadius => _scan;
+        public List<string> Strengths => Json.Arr(_cfg.GetValueOrDefault("strengths")).Select(x => x.ToString()).ToList();
+        public List<string> Limitations => Json.Arr(_cfg.GetValueOrDefault("limitations")).Select(x => x.ToString()).ToList();
 
         // ---------------------------------------------------------------- assembly
 
@@ -131,27 +188,66 @@ namespace WorkshopWreckage
             return (sp >= 0 ? n.Substring(sp + 1) : n).ToLowerInvariant();
         }
 
-        public HashSet<string> Installed()
+        RobotWorkbench.Project Project => g.workbench?.P(id);
+
+        /// <summary>Rebuilds the model from the workbench state. While unbuilt the robot
+        /// stands on its mat; missing parts show as ghosts with empty sockets.</summary>
+        public void RefreshAssembly()
         {
-            var o = new HashSet<string>();
-            foreach (var i in g.storage.Stored("RS-" + id)) o.Add(PartKey(g.world.DefOf(i)));
-            return o;
+            var p = Project;
+            if (p == null || g.workbench == null) return;
+            bool onBench = mode == Mode.Assembling;
+            gameObject.SetActive(!onBench || g.workbench.OnBench(p));
+            if (!onBench) return;
+            var have = g.workbench.InstalledKeys(p);
+            _model.assembling = true;
+            _model.mountReady = part => !p.requires.TryGetValue(part, out var req) || req.All(have.Contains);
+            _model.Build(have);
+            _model.SetEyes(false);
+            var (pos, rot) = g.workbench.MatSpot(p.mat);
+            transform.SetPositionAndRotation(pos, rot);
+            int total = g.workbench.Required(p);
+            status = g.workbench.Complete(p) ? "ready for activation" : $"{g.workbench.InstalledCount(p)}/{total} parts installed";
         }
 
-        public int InstalledCount => g.storage.Stored("RS-" + id).Count;
-
-        /// <summary>Called whenever the station contents change. Installing the final
-        /// part plays the activation sequence (silent activation when loading a save).</summary>
-        public void RefreshAssembly(bool animate)
+        /// <summary>A part was just installed: the robot gives a little jolt on the bench.</summary>
+        public void InstallPop(string partKey)
         {
-            var have = Installed();
-            if (mode == Mode.Assembling) _model.Build(have);
-            int total = g.db.RobotPartIds(id).Count;
-            bool complete = InstalledCount >= total && total > 0;
-            status = complete ? "" : $"{InstalledCount}/{total} parts installed";
-            if (!complete || mode != Mode.Assembling) return;
-            if (animate) StartCoroutine(Activate());
-            else { _model.SetEyes(true); mode = Mode.Working; if (Flies) _altitude = 0.6f; AdoptCarried(); }
+            if (gameObject.activeInHierarchy && _model.transform.parent == transform) StartCoroutine(Pop());
+        }
+
+        /// <summary>The model (for holding the unfinished robot in your hands at the workbench).</summary>
+        public Transform ModelTransform => _model.transform;
+
+        IEnumerator Pop()
+        {
+            var t0 = _model.transform.localPosition;
+            for (float t = 0; t < 0.35f; t += Time.deltaTime)
+            {
+                _model.transform.localPosition = t0 + Vector3.up * Mathf.Sin(t / 0.35f * Mathf.PI) * 0.06f;
+                yield return null;
+            }
+            _model.transform.localPosition = t0;
+        }
+
+        /// <summary>The player activates the finished robot at the workbench.</summary>
+        public void BeginActivation()
+        {
+            if (mode != Mode.Assembling) return;
+            StartCoroutine(Activate());
+        }
+
+        /// <summary>Loading a save (or a legacy save's finished robot): operational at once, at home.</summary>
+        public void SetOperational()
+        {
+            gameObject.SetActive(true);
+            _model.EndAssembly();
+            _model.SetEyes(true);
+            mode = Mode.Working;
+            _step = Step.Choose;
+            transform.SetPositionAndRotation(home, homeRot);
+            if (Flies) _altitude = 0.6f;
+            AdoptCarried();
         }
 
         IEnumerator Activate()
@@ -169,24 +265,44 @@ namespace WorkshopWreckage
                 _model.SetBeacon(false);
                 yield return new WaitForSeconds(0.1f);
             }
+            _model.EndAssembly();   // the clamp lets go, the ghosts are gone
+            _model.SetEyes(true);
             // a little "hello": the model wiggles in its own way while it looks around
-            for (float t = 0; t < 1.4f; t += Time.deltaTime)
+            for (float t = 0; t < 1.2f; t += Time.deltaTime)
             {
                 _time += Time.deltaTime;
-                if (Flies) _altitude = Mathf.SmoothStep(0, 0.6f, t / 1.4f);
                 _model.Animate(new RobotAnim
                 {
-                    dt = Time.deltaTime, gait = 0.6f * Mathf.Sin(t / 1.4f * Mathf.PI), phase = t * 9, active = true, time = _time, altitude = _altitude,
+                    dt = Time.deltaTime, gait = 0.6f * Mathf.Sin(t / 1.2f * Mathf.PI), phase = t * 9, active = true, time = _time, altitude = 0,
                     lookAt = transform.position + Quaternion.Euler(0, Mathf.Sin(t * 6) * 50, 0) * transform.forward, lookWeight = 1,
                 });
-                if (Flies) transform.position = new Vector3(transform.position.x, Ground(transform.position) + _altitude, transform.position.z);
                 yield return null;
             }
+            // off the bench: a hop down to its charging mat (Hoverbot flies down)
+            var from = transform.position;
+            var to = home + (Flies ? Vector3.up * 0.6f : Vector3.zero);
+            float dur = Flies ? 1.6f : 0.9f;
+            for (float t = 0; t < dur; t += Time.deltaTime)
+            {
+                float u = t / dur;
+                _time += Time.deltaTime;
+                var p = Vector3.Lerp(from, to, Flies ? Mathf.SmoothStep(0, 1, u) : u);
+                if (!Flies) p.y += Mathf.Sin(u * Mathf.PI) * 0.35f;
+                transform.position = p;
+                transform.rotation = Quaternion.Slerp(transform.rotation, homeRot, u);
+                if (Flies) _altitude = Mathf.Lerp(0.05f, 0.6f, u);
+                _model.Animate(new RobotAnim { dt = Time.deltaTime, gait = Flies ? 0.3f : 0, phase = t * 9, active = true, time = _time, altitude = _altitude, armReach = Flies ? 0 : Mathf.Sin(u * Mathf.PI) });
+                yield return null;
+            }
+            transform.SetPositionAndRotation(to, homeRot);
+            if (!Flies) Sfx.Play("drop_floor", transform.position, -4);
             Sfx.Play("complete", transform.position + Vector3.up * 0.3f, -2);
             mode = Mode.Working;
             _step = Step.Choose;
             g.progression?.OnRobotRepaired(id);
             g.hud.Toast($"{displayName} is online and starts sorting!", true);
+            g.workbench?.Refresh();
+            foreach (var r in g.robots) if (r != this && r.mode == Mode.Assembling) r.RefreshAssembly();   // the next Hoverbot may take the mat
         }
 
         /// <summary>After loading: parts saved as carried by this robot are its again.</summary>
@@ -207,6 +323,7 @@ namespace WorkshopWreckage
         {
             if (!Active) return $"{displayName} isn't assembled yet ({status})";
             if (g.db.Get(defId).IsRobotPart) return $"{displayName} leaves robot parts to you";
+            if (strategy == "assigned_definition") return Assign(defId, false);
             preferDef = defId;
             mode = Mode.Working;
             if (carried.Count == 0 && _step != Step.Picking) { Release(); _step = Step.Choose; _path = null; }
@@ -214,11 +331,30 @@ namespace WorkshopWreckage
             return $"{displayName}: on it — {g.db.Get(defId).displayName}";
         }
 
+        /// <summary>Spiderbot: collect exactly this definition (-1 cancels). Its current
+        /// carried part is finished first; a target of another kind is released.</summary>
+        public string Assign(int defId, bool auto)
+        {
+            if (strategy != "assigned_definition") return $"{displayName} doesn't take assignments";
+            if (defId >= 0 && g.db.Get(defId).IsRobotPart) return $"{displayName} leaves robot parts to you";
+            assignedDef = defId;
+            autoAssigned = auto;
+            _unreachable.Clear();
+            _completeT = 0;
+            if (targetId >= 0 && g.world.instances[targetId].defId != defId) { Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; }
+            mode = Mode.Working;
+            if (auto) return "";
+            Sfx.Play("servo", transform.position + Vector3.up * 0.3f, -6);
+            return defId < 0 ? $"{displayName}: assignment cleared" : $"{displayName}: on it — every {g.db.Get(defId).displayName}";
+        }
+
         /// <summary>Saved robot state (carried parts are saved with the items, owner robot:id).</summary>
         public Dictionary<string, object> ToDict()
         {
             var d = new Dictionary<string, object>
             {
+                ["operational"] = Operational || mode == Mode.Activating, ["paused"] = paused,
+                ["assigned"] = (double)assignedDef, ["auto_assigned"] = autoAssigned,
                 ["following"] = mode == Mode.Following, ["battery"] = (double)Battery,
                 ["delivered"] = (double)delivered, ["staged"] = (double)staged,
                 ["pos"] = new List<object> { (double)transform.position.x, (double)transform.position.y, (double)transform.position.z },
@@ -236,6 +372,10 @@ namespace WorkshopWreckage
             staged = Json.Int(d, "staged");
             var z = Json.Arr(d.GetValueOrDefault("zone"));
             zoneCenter = z.Count == 2 ? new Vector3(Json.F(z[0]), 0, Json.F(z[1])) : null;
+            paused = Json.Bool(d, "paused");
+            assignedDef = Json.Int(d, "assigned", -1);
+            autoAssigned = Json.Bool(d, "auto_assigned");
+            if (Json.Bool(d, "operational") && !Operational) SetOperational();
             if (!Active) return;
             var p = Json.Arr(d.GetValueOrDefault("pos"));
             if (p.Count == 3) transform.SetPositionAndRotation(new Vector3(Json.F(p[0]), Json.F(p[1]), Json.F(p[2])), Quaternion.Euler(0, (float)Json.Num(d, "yaw"), 0));
@@ -275,6 +415,7 @@ namespace WorkshopWreckage
             foreach (var itemId in g.inventory.items.ToList())
             {
                 if (carried.Count >= _capacity) break;
+                if (g.world.DefOf(itemId).IsRobotPart) continue;   // robot parts are the player's to deliver, personally
                 g.inventory.Remove(itemId);
                 g.world.SetState(itemId, ItemState.Carried, Owner);
                 carried.Add(itemId);
@@ -311,6 +452,8 @@ namespace WorkshopWreckage
             g.hud.Toast(mode == Mode.Following ? $"{displayName}: following you" : $"{displayName}: back to sorting");
         }
 
+        public bool Climbing => _climbing;
+
         void Release()
         {
             if (targetId >= 0) g.robotReserved.Remove(targetId);
@@ -335,7 +478,7 @@ namespace WorkshopWreckage
             else if (mode == Mode.Following) UpdateFollow(dt);
             else Brake(dt);
             _turnRate = Vector3.SignedAngle(fwd0, transform.forward, Vector3.up) / Mathf.Max(dt, 1e-4f);   // + = turning right
-            if (!Flies && Active)
+            if (!Flies && Active && !_climbing)
             {
                 // feet (wheels, tracks) on top of whatever small parts are underfoot
                 var p = transform.position;
@@ -371,6 +514,17 @@ namespace WorkshopWreckage
             // recovery: a trip that takes far too long is abandoned (blocked path, unreachable spot)
             if (_step != _lastStep) { _lastStep = _step; _stepT = 0; }
             _stepT += dt;
+            // parts it gave up on are tried again now and then (better target selection remembers longer)
+            if ((_unreachableT += dt) > (_targetRank >= 2 ? 180f : 60f)) { _unreachableT = 0; _unreachable.Clear(); }
+            // paused from Robot Management: finishes what it holds, then waits
+            if (paused && carried.Count == 0 && (_step == Step.Choose || _step == Step.ToItem))
+            {
+                Release(); _step = Step.Choose; _path = null;
+                Brake(dt);
+                if (Flies) HoverHold(dt, Mathf.Max(0.6f, _altitude));
+                specialistState = "PAUSED";
+                return;
+            }
             if (_step == Step.ToItem && _stepT > 25f)
             {
                 if (targetId >= 0) _unreachable.Add(targetId);
@@ -400,7 +554,9 @@ namespace WorkshopWreckage
                 {
                     if (targetId < 0 || g.world.instances[targetId].state != ItemState.InWorld) { Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; break; }
                     var ip = g.world.instances[targetId].Position;
-                    bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : (Flat(ip - transform.position).magnitude <= _reach * 0.75f || (Steer(dt) && Flat(ip - transform.position).magnitude <= _reach + 0.1f));
+                    bool high = !Flies && ip.y > _maxPickH;   // only climbers choose those: they climb up from the path's end
+                    float fd = Flat(ip - transform.position).magnitude;
+                    bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : ((!high && fd <= _reach * 0.75f) || (Steer(dt) && (fd <= _reach + 0.1f || (high && fd <= 1.0f))));
                     if (arrived) { _step = Step.Picking; StartCoroutine(PickUp(targetId)); }
                     else if (!Flies && _pathIdx >= _path.Count) { _unreachable.Add(targetId); Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; }
                     break;
@@ -465,35 +621,88 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- choosing
 
-        /// <summary>Picks the next part: nearest first; once carrying, only parts close
-        /// by and within the allowed number of part types (then delivers).</summary>
+        /// <summary>Cargo slots a part takes: bulky parts (longest side ≥ large_item_size) take two.</summary>
+        public int SlotsOf(int itemId) => ItemDatabase.Extents(g.world.DefOf(itemId))[0] >= _largeItem ? 2 : 1;
+        int SlotsUsed => carried.Sum(SlotsOf);
+
+        float _completeT, _waitT;
+
+        /// <summary>Picks the next part with the type's strategy (see the class summary).
+        /// Once carrying, only parts close by, within the number of part kinds and the
+        /// free cargo slots; then it delivers. Searches are bounded per frame.</summary>
         void ChooseNext()
         {
             var me = transform.position;
-            if (carried.Count >= _capacity) { _step = Step.ToDest; _path = null; return; }
+            if (SlotsUsed >= _capacity) { _step = Step.ToDest; _path = null; return; }
             if (!Flies) _nav.RefreshItems(g.world, _stepH);
             var types = carried.Select(c => g.world.instances[c].defId).ToHashSet();
-            IEnumerable<ItemInstance> pool = g.world.instances;
-            // parts the player put in the sorting tray come first
-            var tray = g.index.QuerySphere(g.TrayCenter, 1f).Select(i => g.world.instances[i]).Where(i => g.InTray(i.Position) && Pickable(i)).ToList();
-            if (tray.Count > 0 && preferDef < 0) pool = tray;
-            if (preferDef >= 0)
+            IEnumerable<ItemInstance> pool = null;
+            System.Func<ItemInstance, float> score = i => (i.Position - me).sqrMagnitude;
+            specialistState = "";
+            _stagedNow = strategy == "courier" && _courierRank > 0 ? StagedCounts() : null;
+            if (strategy == "assigned_definition")
             {
-                var pref = g.world.IdsOf(preferDef).Select(i => g.world.instances[i]).Where(Pickable).ToList();
-                if (pref.Count > 0) pool = pref; else preferDef = -1;
+                if (!ChooseAssigned(ref pool, me)) { if (carried.Count > 0) { _step = Step.ToDest; _path = null; } else _idleT = 1.5f; return; }
             }
-            int tries = 0;
-            foreach (var inst in pool.Where(Pickable).OrderBy(i => (i.Position - me).sqrMagnitude))
+            else
             {
-                if (carried.Count > 0 && ((inst.Position - me).magnitude > _gather || (!types.Contains(inst.defId) && types.Count >= _types))) break;
-                if (++tries > 6) break;   // keep the frame cheap; continue next frame
+                // parts the player put in the sorting tray come first
+                var tray = g.index.QuerySphere(g.TrayCenter, 1f).Select(i => g.world.instances[i]).Where(i => g.InTray(i.Position) && Pickable(i)).ToList();
+                if (tray.Count > 0 && preferDef < 0) pool = tray;
+                if (preferDef >= 0)
+                {
+                    var pref = g.world.IdsOf(preferDef).Select(i => g.world.instances[i]).Where(Pickable).ToList();
+                    if (pref.Count > 0) pool = pref; else preferDef = -1;
+                }
+                if (pool == null && strategy == "staging_first")
+                {
+                    // Hoverbot: finish what the others left in the staging zones first
+                    var staged = g.world.instances.Where(i => i.state == ItemState.InWorld && i.owner.StartsWith("stage:") && Pickable(i)).ToList();
+                    if (_fleetRank > 0)
+                    {
+                        // fleet coordination: leave zones another Hoverbot is already working on
+                        var taken = g.robots.Where(r => r != this && r.type == type && r.targetId >= 0).Select(r => g.world.instances[r.targetId].owner).ToHashSet();
+                        var free = staged.Where(i => !taken.Contains(i.owner)).ToList();
+                        if (free.Count > 0) staged = free;
+                    }
+                    if (staged.Count > 0)
+                    {
+                        pool = staged;
+                        if (_stagingRank > 0)
+                        {
+                            var fill = staged.GroupBy(i => i.owner).ToDictionary(gr => gr.Key, gr => gr.Count());
+                            score = i => (i.Position - me).magnitude - fill[i.owner] * 0.6f * _stagingRank;   // fullest zones first
+                        }
+                    }
+                }
+                pool ??= g.world.instances;
+                if (strategy == "opportunistic" && _targetRank > 0)
+                    score = i => (i.Position - me).magnitude - (g.progress.SortedOf(i.defId) > 0 ? 1.5f : 0);   // sets already started come first
+                if (strategy == "multi_stop" && _routeRank > 0 && carried.Count > 0)
+                {
+                    // route planning: next pickups whose destinations lie near the ones already on board
+                    var dests = carried.Select(c => StagingSpot(g.world.DefOf(c).storageBox)).Where(s => s.HasValue).Select(s => s.Value).ToList();
+                    score = i =>
+                    {
+                        var s = StagingSpot(g.db.Get(i.defId).storageBox);
+                        float near = s.HasValue && dests.Count > 0 ? dests.Min(d => Flat(d - s.Value).magnitude) : 5;
+                        return (i.Position - me).magnitude + near * 0.25f * _routeRank;
+                    };
+                }
+            }
+            int tries = 0, maxTries = 6 + 3 * _searchRank;
+            foreach (var inst in pool.Where(Pickable).OrderBy(score))
+            {
+                if (carried.Count > 0 && ((inst.Position - me).magnitude > _gather || (!types.Contains(inst.defId) && types.Count >= _types) || SlotsUsed + SlotsOf(inst.id) > _capacity)) break;
+                if (++tries > maxTries) break;   // keep the frame cheap; continue next frame
                 if (Flies)
                 {
                     _hoverTarget = HoverPoint(inst.Position, true);
                 }
                 else
                 {
-                    var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, _reach);
+                    bool high = inst.Position.y > _maxPickH;
+                    var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : _reach);
                     var path = goal.HasValue ? _nav.Path(me, goal.Value) : null;
                     if (path == null) { _unreachable.Add(inst.id); continue; }
                     _path = path;
@@ -502,6 +711,7 @@ namespace WorkshopWreckage
                 targetId = inst.id;
                 g.robotReserved.Add(inst.id);
                 _step = Step.ToItem;
+                if (strategy == "assigned_definition") specialistState = carried.Count == 0 && Flat(inst.Position - me).magnitude > _scan ? "SEARCHING" : "WORKING";
                 return;
             }
             if (carried.Count > 0) { _step = Step.ToDest; _path = null; return; }
@@ -509,21 +719,79 @@ namespace WorkshopWreckage
             if (tries == 0) status = "nothing left it can reach";
         }
 
-        /// <summary>A robot picks up only parts within its reach height that are no
-        /// bigger than its size limit, never robot parts, never parts another robot
-        /// reserved, and never parts it already piled below a destination it can't reach.</summary>
+        /// <summary>Spiderbot: works through its one assigned definition. Known copies in
+        /// detection range first, then it searches further. When none can be reached it
+        /// reports WAITING_FOR_ACCESS (and retries later) instead of looping; when every
+        /// copy is accounted for, COLLECTION_COMPLETE — after a short pause it picks the
+        /// nearest unfinished set itself unless the player assigns one.</summary>
+        bool ChooseAssigned(ref IEnumerable<ItemInstance> pool, Vector3 me)
+        {
+            if (assignedDef >= 0 && g.progress.IsComplete(assignedDef))
+            {
+                if (_completeT == 0)
+                {
+                    var name = g.db.Get(assignedDef).displayName;
+                    if (!autoAssigned || Vector3.Distance(me, g.player.transform.position) < 8) g.hud.Toast($"{displayName} finished the set: {name}", !autoAssigned);
+                }
+                specialistState = "COLLECTION_COMPLETE";
+                _completeT += 0.5f;
+                if (_completeT < 4f || !autoAssigned && _completeT < 30f) return false;
+                assignedDef = -1;
+            }
+            if (assignedDef < 0)
+            {
+                // no assignment: take the nearest unfinished set it can actually reach
+                var first = g.world.instances.Where(Pickable).OrderBy(i => (i.Position - me).sqrMagnitude).FirstOrDefault();
+                if (first == null) { specialistState = "WAITING_FOR_ACCESS"; return false; }
+                Assign(first.defId, true);
+            }
+            var mine = g.world.IdsOf(assignedDef).Select(i => g.world.instances[i]).Where(Pickable).ToList();
+            if (mine.Count == 0)
+            {
+                specialistState = "WAITING_FOR_ACCESS";
+                if ((_waitT += 0.5f) > 20f) { _waitT = 0; _unreachable.Clear(); }   // try the blocked ones again later
+                if (autoAssigned && _waitT > 6f) { _waitT = 0; assignedDef = -1; }   // its own pick: move on to another set
+                return false;
+            }
+            _waitT = 0;
+            var near = mine.Where(i => (i.Position - me).magnitude <= _scan).ToList();
+            pool = near.Count > 0 ? near : mine;
+            return true;
+        }
+
+        /// <summary>A robot picks up only parts it can reach (standing, or climbing for a
+        /// climber; Hoverbot not from under a heap), no bigger than it can lift, never robot
+        /// parts, never parts another robot reserved; staged parts only if it can store
+        /// them itself, and never parts it already left in front of a destination it can't reach.</summary>
         bool Pickable(ItemInstance i)
         {
-            if (i.state != ItemState.InWorld || i.Position.y > _maxPickH || _unreachable.Contains(i.id) || g.robotReserved.Contains(i.id)) return false;
+            if (i.state != ItemState.InWorld || i.Position.y > ReachHeight || _unreachable.Contains(i.id) || g.robotReserved.Contains(i.id)) return false;
             if (zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
             var def = g.db.Get(i.defId);
             if (def.IsRobotPart || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;
+            if (strategy == "assigned_definition" && assignedDef >= 0 && i.defId != assignedDef) return false;
+            if (Flies && g.debris != null && g.debris.At(i.Position) > i.Position.y + ItemDatabase.Extents(def)[2] * 0.5f + 0.05f) return false;   // buried
+            bool staged = i.owner.StartsWith("stage:");
             if (ReachableDest(def.storageBox)) return true;
+            if (staged) return false;   // waiting for a robot that can store it
+            if (_stagedNow != null && _stagedNow.GetValueOrDefault("stage:" + def.storageBox) >= StagingCapacity) return false;   // that zone is full
             var spot = StagingSpot(def.storageBox);
-            return spot == null || Flat(i.Position - spot.Value).magnitude > 0.45f;   // already waiting in a pile below a high destination
+            return spot == null || Flat(i.Position - spot.Value).magnitude > 0.45f;
         }
 
-        public bool ReachableDest(string box) => g.db.boxes.TryGetValue(box, out var d) && Json.Num(d, "elevation_m") <= _maxPickH;
+        /// <summary>Can it put a part into this destination itself? Never for a courier
+        /// (Unibot); otherwise if the destination is within reach (climbing for a climber).</summary>
+        public bool ReachableDest(string box) => _canStore && g.db.boxes.TryGetValue(box, out var d) && Json.Num(d, "elevation_m") <= ReachHeight;
+
+        public static int StagingCapacity => Json.Int(RootConfig(), "staging_capacity", 14);
+        public int StagingCount(string box) => g.world.instances.Count(i => i.state == ItemState.InWorld && i.owner == "stage:" + box);
+        Dictionary<string, int> _stagedNow;
+        Dictionary<string, int> StagedCounts()
+        {
+            var d = new Dictionary<string, int>();
+            foreach (var i in g.world.instances) if (i.state == ItemState.InWorld && i.owner.StartsWith("stage:")) d[i.owner] = d.GetValueOrDefault(i.owner) + 1;
+            return d;
+        }
 
         /// <summary>Floor point in front of a destination (where ground robots stand and pile parts).</summary>
         public Vector3? StagingSpot(string box)
@@ -568,6 +836,7 @@ namespace WorkshopWreckage
         IEnumerator PickUp(int itemId)
         {
             var ip = g.world.instances[itemId].Position;
+            if (!Flies && ip.y > _maxPickH) yield return ClimbTo(ip);   // Spiderbot climbs up to it
             float h = Mathf.Clamp01(1 - (ip.y - transform.position.y) / (_height * 3f));
             for (float t = 0; t < _pickTime * 0.45f; t += Time.deltaTime)
             {
@@ -600,6 +869,7 @@ namespace WorkshopWreckage
                 yield return null;
             }
             _bend = 0; _armReach = 0;
+            if (_climbing) yield return ClimbDown();
             _path = null;
             _step = Step.Choose;   // gather more (if allowed), else deliver
             _idleT = 0;
@@ -637,6 +907,7 @@ namespace WorkshopWreckage
         {
             var here = carried.Where(c => g.world.DefOf(c).storageBox == _destBox).ToList();
             if (!_destReachable) { yield return StageBelow(here); yield break; }
+            if (!Flies && _destPoint.y > _maxPickH) yield return ClimbTo(_destPoint);   // climbs up to store it
             float high = Mathf.Clamp01((_destPoint.y - transform.position.y) / (_height * 2f));
             for (float t = 0; t < _depositTime * 0.5f; t += Time.deltaTime)
             {
@@ -662,11 +933,71 @@ namespace WorkshopWreckage
                 yield return null;
             }
             _armLift = 0;
+            if (_climbing) yield return ClimbDown();
             _path = null;
             if (carried.Any(c => g.world.DefOf(c).storageBox == _destBox)) DropCarried($"{displayName}: that destination is full");
             _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
             _idleT = 0.15f;
             MaybeGesture();
+        }
+
+        Vector3 _climbFrom;
+
+        /// <summary>Climber: from the floor in front of the furniture it tilts nose-up, climbs
+        /// the face to the target's height and steps onto the shelf / bench top beside it.</summary>
+        IEnumerator ClimbTo(Vector3 target)
+        {
+            _climbing = true;
+            _climbFrom = transform.position;
+            var dir = Flat(target - transform.position).normalized;
+            float topY = Mathf.Max(transform.position.y, target.y - 0.02f);
+            while (transform.position.y < topY - 0.005f)
+            {
+                float dt = Time.deltaTime;
+                FaceTowards(target, dt);
+                _climbPitch = Mathf.MoveTowards(_climbPitch, 75, dt * 240);
+                var p = transform.position;
+                p.y = Mathf.MoveTowards(p.y, topY, dt * _climbSpeed * (_climbPitch / 75f));
+                transform.position = p;
+                _speedNow = _climbSpeed;
+                yield return null;
+            }
+            var stand = new Vector3(target.x, topY, target.z) - dir * (_reach * 0.6f);
+            for (float t = 0; t < 3f && Flat(stand - transform.position).magnitude > 0.02f; t += Time.deltaTime)
+            {
+                float dt = Time.deltaTime;
+                _climbPitch = Mathf.MoveTowards(_climbPitch, 0, dt * 200);
+                transform.position = Vector3.MoveTowards(transform.position, stand, dt * _walk * 0.6f);
+                _speedNow = _walk * 0.6f;
+                yield return null;
+            }
+            _speedNow = 0;
+        }
+
+        IEnumerator ClimbDown()
+        {
+            var edge = new Vector3(_climbFrom.x, transform.position.y, _climbFrom.z);
+            for (float t = 0; t < 3f && Flat(edge - transform.position).magnitude > 0.02f; t += Time.deltaTime)
+            {
+                transform.position = Vector3.MoveTowards(transform.position, edge, Time.deltaTime * _walk * 0.6f);
+                _speedNow = _walk * 0.6f;
+                yield return null;
+            }
+            float ground = Ground(transform.position);
+            while (transform.position.y > ground + 0.005f)
+            {
+                float dt = Time.deltaTime;
+                _climbPitch = Mathf.MoveTowards(_climbPitch, 75, dt * 240);
+                var p = transform.position;
+                p.y = Mathf.MoveTowards(p.y, ground, dt * _climbSpeed * 1.4f * (_climbPitch / 75f));
+                transform.position = p;
+                _speedNow = _climbSpeed;
+                yield return null;
+            }
+            for (float t = 0; t < 0.4f; t += Time.deltaTime) { _climbPitch = Mathf.MoveTowards(_climbPitch, 0, Time.deltaTime * 240); yield return null; }
+            _climbPitch = 0;
+            _speedNow = 0;
+            _climbing = false;
         }
 
         /// <summary>Personality: now and then, after finishing a delivery, a short
@@ -698,13 +1029,15 @@ namespace WorkshopWreckage
                 var def = g.world.DefOf(itemId);
                 var e = ItemDatabase.Extents(def);
                 int nearby = g.index.QuerySphere(spot, 0.16f).Count;
-                var jitter = new Vector3(Random.Range(-0.1f, 0.1f), 0, Random.Range(-0.1f, 0.1f));
+                // a full zone overflows into a wider loose pile around the same spot
+                float spread = 0.1f + 0.012f * Mathf.Max(0, StagingCount(_destBox) - StagingCapacity / 2);
+                var jitter = new Vector3(Random.Range(-spread, spread), 0, Random.Range(-spread, spread));
                 float y = e[2] * 0.5f + Mathf.Min(nearby, 5) * e[2] * 0.45f;
                 var rot = Quaternion.Euler(Random.Range(-12f, 12f), Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 + Random.Range(-10f, 10f) : Random.Range(-12f, 12f));
                 HideCarried(itemId);
                 carried.Remove(itemId);
                 g.world.SetTransform(itemId, Matrix4x4.TRS(spot + jitter + Vector3.up * y, rot, Vector3.one * def.worldScale));
-                g.world.SetState(itemId, ItemState.InWorld, "world");
+                g.world.SetState(itemId, ItemState.InWorld, "stage:" + _destBox);   // the destination's staging zone (still UNSORTED)
                 g.index.Insert(itemId);
                 staged++;
                 lastStagedId = itemId;
@@ -824,6 +1157,7 @@ namespace WorkshopWreckage
         void Animate(float dt)
         {
             if (mode == Mode.Assembling || mode == Mode.Activating) return;
+            _model.transform.localRotation = Quaternion.Euler(-_climbPitch, 0, 0);   // clinging to a vertical face
             float moving = Mathf.Max(_speedNow / _walk, Mathf.Clamp01(Mathf.Abs(_turnRate) / 120f) * 0.6f);
             _gait = Mathf.MoveTowards(_gait, moving > 0.05f ? Mathf.Max(0.45f, moving) : 0, dt * 3f);
             _phase += dt * Mathf.Lerp(5f, 8.5f, Mathf.Clamp01(moving)) * (_gait > 0 ? 1 : 0);
@@ -894,6 +1228,18 @@ namespace WorkshopWreckage
                 case Mode.Activating: return $"{displayName}: starting up…";
                 case Mode.Following: return carried.Count > 0 ? $"{displayName}: delivering, then following" : $"{displayName}: following you";
             }
+            if (paused && carried.Count == 0) return $"{displayName}: paused";
+            if (_climbing) return $"{displayName}: climbing";
+            if (strategy == "assigned_definition" && carried.Count == 0 && _step == Step.Choose)
+            {
+                string def = assignedDef >= 0 ? g.db.Get(assignedDef).displayName : "no assignment";
+                return specialistState switch
+                {
+                    "COLLECTION_COMPLETE" => $"{displayName}: set complete — {def}",
+                    "WAITING_FOR_ACCESS" => $"{displayName}: waiting for access — the remaining {def} are out of reach",
+                    _ => $"{displayName}: searching for {def}",
+                };
+            }
             if (_step == Step.ToPlayer) return $"{displayName}: coming to take your parts";
             if (_step == Step.ToCharge) return $"{displayName}: going to charge ({Battery * 100:0}%)";
             if (_step == Step.Charging) return $"{displayName}: charging {Battery * 100:0}%";
@@ -902,7 +1248,7 @@ namespace WorkshopWreckage
             {
                 Step.ToItem => carried.Count > 0 ? $"{displayName}: collecting ({carried.Count}/{_capacity})" : $"{displayName}: fetching a part",
                 Step.Picking => $"{displayName}: picking up",
-                Step.ToDest or Step.Depositing => carried.Count > 0 ? $"{displayName}: delivering {carried.Count}" : $"{displayName}: storing",
+                Step.ToDest or Step.Depositing => carried.Count > 0 ? (_canStore ? $"{displayName}: delivering {carried.Count}" : $"{displayName}: taking {carried.Count} to a staging zone") : $"{displayName}: storing",
                 _ => status == "" ? $"{displayName}: looking for parts" : $"{displayName}: {status}",
             } + zone;
         }
