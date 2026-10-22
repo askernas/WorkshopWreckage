@@ -313,6 +313,8 @@ namespace WorkshopWreckage
             foreach (var s in pr.skills.Where(s => s.Active).OrderBy(s => s.unlockLevel)) g.UnlockSkill(s.id);
             Check("tool skills unlock (levels, points, prerequisites)", pr.Has("bulk_pickup_count") && pr.Has("magnet_range_m") && pr.Has("scan_radius_m") && pr.Has("supermagnet"),
                   $"{pr.unlocked.Count} skills, inventory capacity {g.inventory.capacity}");
+            Check("Inventory Manifest reveals the totals of discovered parts", pr.Has("reveal_totals") && g.progress.discovered.All(g.progress.revealed.Contains),
+                  $"{g.progress.revealed.Count} of {g.progress.discovered.Count} discovered parts show their total");
             foreach (var r in g.robots) r.enabled = false;   // keep robots out of the way while measuring
             bool Free(ItemInstance i) => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && !g.world.DefOf(i.id).IsRobotPart && i.Position.y < 0.6f;
 

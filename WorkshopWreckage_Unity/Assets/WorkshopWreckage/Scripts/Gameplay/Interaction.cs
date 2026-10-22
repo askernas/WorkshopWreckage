@@ -440,11 +440,26 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- helpers
 
-        public void StartFly(ItemDefinition def, Matrix4x4 from, Matrix4x4 to, float dur) => StartCoroutine(Fly(def, from, to, dur, null));
+        /// <summary>Tool pulls (magnet, Supermagnet, sweep) leave a glowing trail.</summary>
+        public void StartFly(ItemDefinition def, Matrix4x4 from, Matrix4x4 to, float dur) => StartCoroutine(Fly(def, from, to, dur, null, true));
 
-        IEnumerator Fly(ItemDefinition def, Matrix4x4 from, Matrix4x4 to, float dur, Action done)
+        static Material _trailMat;
+
+        IEnumerator Fly(ItemDefinition def, Matrix4x4 from, Matrix4x4 to, float dur, Action done, bool trail = false)
         {
             var go = HeldView.MakeModel(def);
+            if (trail)
+            {
+                var tr = go.AddComponent<TrailRenderer>();
+                if (_trailMat == null) { _trailMat = EnvMaterials.NewGhost(); _trailMat.SetColor("_Color", new Color(0.45f, 0.8f, 1f, 0.6f)); }   // additive glow
+                tr.sharedMaterial = _trailMat;
+                tr.time = 0.25f;
+                tr.startWidth = 0.035f;
+                tr.endWidth = 0f;
+                tr.startColor = new Color(0.6f, 0.9f, 1f, 0.9f);
+                tr.endColor = new Color(0.3f, 0.6f, 1f, 0f);
+                tr.shadowCastingMode = ShadowCastingMode.Off;
+            }
             var p0 = (Vector3)from.GetColumn(3); var p1 = (Vector3)to.GetColumn(3);
             var q0 = from.rotation; var q1 = to.rotation;
             var s0 = from.lossyScale; var s1 = to.lossyScale;

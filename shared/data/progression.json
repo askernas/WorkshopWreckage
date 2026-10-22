@@ -38,6 +38,7 @@
 		{"id": "pockets_2", "name": "Tool Belt", "group": "inventory", "unlock_level": 6, "cost": 1, "requires": ["pockets_1"], "effects": {"inventory_capacity": 20}, "status": "active"},
 		{"id": "pockets_3", "name": "Parts Crate on Wheels", "group": "inventory", "unlock_level": 12, "cost": 2, "requires": ["pockets_2"], "effects": {"inventory_capacity": 40}, "status": "active"},
 		{"id": "quick_hands", "name": "Quick Hands", "group": "collection", "unlock_level": 3, "cost": 1, "requires": [], "effects": {"pickup_speed": 0.25}, "status": "active"},
+		{"id": "inventory_manifest", "name": "Inventory Manifest", "group": "scanning", "unlock_level": 4, "cost": 1, "requires": [], "effects": {"reveal_totals": 1}, "status": "active"},
 		{"id": "long_reach", "name": "Long Reach", "group": "collection", "unlock_level": 4, "cost": 1, "requires": [], "effects": {"reach_m": 0.8}, "status": "active"},
 		{"id": "bulk_pickup", "name": "Handful", "group": "collection", "unlock_level": 5, "cost": 1, "requires": [], "effects": {"bulk_pickup_count": 4, "bulk_pickup_radius_m": 0.25}, "status": "active"},
 		{"id": "magnet_1", "name": "Magnetic Glove", "group": "magnet", "unlock_level": 7, "cost": 1, "requires": [], "effects": {"magnet_range_m": 0.8, "magnet_max_items": 12}, "status": "active"},

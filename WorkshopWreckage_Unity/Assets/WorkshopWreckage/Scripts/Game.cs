@@ -391,7 +391,8 @@ namespace WorkshopWreckage
                 telemetry.Sorted(robot, playTime, progress.sortedTotal);
             };
             progress.DefinitionCompleted += id => progression.OnDefinitionCompleted(id, world.TotalOf(id));
-            progress.Discovered += id => progression.OnDiscovered(id, db.Get(id).IsRobotPart);
+            progress.Discovered += id => { progression.OnDiscovered(id, db.Get(id).IsRobotPart); if (progression.Has("reveal_totals")) progress.revealed.Add(id); };
+            progress.DefinitionCompleted += id => progress.revealed.Add(id);   // a finished set shows its total
             progress.Milestone += (key, _) =>
             {
                 var p = key.Split('_');   // zone_<index>_<percent>
@@ -410,6 +411,7 @@ namespace WorkshopWreckage
         {
             if (!progression.Unlock(id)) return false;
             ApplySkills();
+            if (progression.Has("reveal_totals")) foreach (var d in progress.discovered) progress.revealed.Add(d);   // Inventory Manifest
             telemetry.SkillUnlocked(id, playTime);
             hud.Toast("Skill unlocked: " + progression.Skill(id).name, true);
             return true;
