@@ -103,6 +103,12 @@ namespace WorkshopWreckage
             _armL.localRotation = Quaternion.Euler(pitch + wiggle, 0, -25 + 20 * a.armHold);
             _armR.localRotation = Quaternion.Euler(pitch - wiggle, 0, 25 - 20 * a.armHold);
             LookHead(a, 70);
+            if (a.gesture > 0)
+            {
+                float w = Mathf.Sin(a.gesture * Mathf.PI);
+                _saucer.localRotation *= Quaternion.Euler(0, Mathf.SmoothStep(0, 720, a.gesture), 0);   // a happy spin...
+                _saucer.localPosition += new Vector3(0, w * 0.12f, 0);                                     // ...with a little hop
+            }
         }
     }
 }

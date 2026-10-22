@@ -94,6 +94,7 @@ namespace WorkshopWreckage
             float wobble = Mathf.Sin(a.time * 3.1f) * 2.2f + Mathf.Sin(a.time * 7.3f) * 0.8f;
             _lean.localRotation = Quaternion.Euler(_lean01 + wobble, 0, Mathf.Sin(a.time * 2.3f) * 1.5f + a.turnRate * 0.03f);
             _gyro.localRotation = Quaternion.Euler(a.time * 720f, 0, 0);
+            if (a.gesture > 0) _lean.localRotation *= Quaternion.Euler(0, Mathf.SmoothStep(0, 360, a.gesture), Mathf.Sin(a.gesture * Mathf.PI * 4) * 6);   // nervous pirouette
             float empty = 1 - Mathf.Max(a.armHold, a.armReach);
             float pitch = -70 * a.armHold - 40 * a.armLift - 45 * a.armReach;
             float flap = Mathf.Sin(a.time * 2.7f) * 8 * empty;   // little balancing arm motions

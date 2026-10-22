@@ -370,7 +370,17 @@ namespace WorkshopWreckage
             Time.timeScale = 4;
             float t1 = Time.realtimeSinceStartup;
             bool Delivered(int i) => g.world.instances[i].state == ItemState.Stored || g.world.instances[i].state == ItemState.InWorld;   // stored, or piled below a high destination
-            while (Time.realtimeSinceStartup - t1 < 60 && !(g.inventory.Count < handed.Count && handed.Any(Delivered))) yield return null;
+            float logT = 0;
+            while (Time.realtimeSinceStartup - t1 < 60 && !(g.inventory.Count < handed.Count && handed.Any(Delivered)))
+            {
+                if ((logT -= Time.unscaledDeltaTime) <= 0)
+                {
+                    logT = 3;
+                    var extra = g.inventory.items.Except(handed).Select(i => $"{i}:{g.world.instances[i].owner}").Take(5);
+                    Debug.Log($"[autoplay] handover wait: inventory {g.inventory.Count} (handed {handed.Count}), new [{string.Join(",", extra)}], " + string.Join(" | ", g.robots.Select(r => r.Describe())));
+                }
+                yield return null;
+            }
             Time.timeScale = 1;
             int storedByRobot = handed.Count(i => g.world.instances[i].state == ItemState.Stored);
             Check("Automatic Storage Delivery: a robot takes your parts and delivers them", g.inventory.Count < handed.Count && handed.Any(Delivered),

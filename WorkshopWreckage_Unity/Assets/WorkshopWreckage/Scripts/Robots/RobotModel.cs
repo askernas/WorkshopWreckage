@@ -22,6 +22,7 @@ namespace WorkshopWreckage
         public Vector3 lookAt;     // world point the head turns towards (if lookWeight > 0)
         public float lookWeight;
         public float time;
+        public float gesture;      // 0..1 progress of a personality gesture (0 = none)
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and

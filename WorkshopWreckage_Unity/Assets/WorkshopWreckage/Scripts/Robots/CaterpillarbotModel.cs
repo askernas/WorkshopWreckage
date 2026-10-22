@@ -137,6 +137,12 @@ namespace WorkshopWreckage
             _armL.localRotation = Quaternion.Euler(pitch + sway, 0, 6);
             _armR.localRotation = Quaternion.Euler(pitch - sway, 0, -6);
             LookHead(a, 50);
+            if (a.gesture > 0)
+            {
+                float w = Mathf.Sin(a.gesture * Mathf.PI);
+                head.localRotation *= Quaternion.Euler(Mathf.Sin(a.gesture * Mathf.PI * 4) * 14 * w, 0, 0);   // a slow, dependable nod
+                SetBeacon(Mathf.Repeat(a.gesture * 6, 1) < 0.5f);
+            }
         }
     }
 }

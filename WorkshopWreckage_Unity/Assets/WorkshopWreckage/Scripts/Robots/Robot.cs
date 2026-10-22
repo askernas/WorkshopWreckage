@@ -19,7 +19,7 @@ namespace WorkshopWreckage
     public class Robot : MonoBehaviour
     {
         public enum Mode { Assembling, Activating, Working, Following }
-        enum Step { Choose, ToItem, Picking, ToDest, Depositing, ToPlayer, ToCharge, Charging }
+        enum Step { Choose, ToItem, Picking, ToDest, Depositing, ToPlayer, ToCharge, Charging, Gesture }
 
         public string id, displayName, locomotion;
         public string Owner => "robot:" + id;
@@ -228,6 +228,9 @@ namespace WorkshopWreckage
         float _batteryMinutes = 8, _chargeMinutes = 1;
         public float Battery { get; private set; } = 1f;   // 0..1
         public void SetBattery(float v) => Battery = Mathf.Clamp01(v);
+        float _gestureT, _sinceGesture;
+        const float GestureTime = 1.6f;
+        public int gestures;
         AudioSource _loop;
         string _loopName;
         float _lastStepPhase;
@@ -387,6 +390,13 @@ namespace WorkshopWreckage
                     if (_path != null) Steer(dt);
                     break;
                 }
+                case Step.Gesture:
+                    Brake(dt);
+                    if (locomotion == "biped") FaceTowards(g.player.transform.position, dt);   // Retrobot turns to you to wave
+                    if (Flies) HoverHold(dt, Mathf.Max(0.6f, _altitude));
+                    _gestureT += dt;
+                    if (_gestureT >= GestureTime) { _gestureT = 0; _step = Step.Choose; }
+                    break;
                 case Step.ToCharge:
                 {
                     bool home;
@@ -619,6 +629,19 @@ namespace WorkshopWreckage
             if (carried.Any(c => g.world.DefOf(c).storageBox == _destBox)) DropCarried($"{displayName}: that destination is full");
             _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
             _idleT = 0.15f;
+            MaybeGesture();
+        }
+
+        /// <summary>Personality: now and then, after finishing a delivery, a short
+        /// characterful pause (rare, so it never gets in the way of the work).</summary>
+        void MaybeGesture()
+        {
+            if (_step != Step.Choose || _time - _sinceGesture < 45f || Random.value > 0.3f) return;
+            _sinceGesture = _time;
+            _gestureT = 0;
+            _step = Step.Gesture;
+            gestures++;
+            Sfx.Play(locomotion == "hover" ? "discover" : "servo", transform.position + Vector3.up * 0.3f, -12, 0.15f);
         }
 
         /// <summary>Destination too high: the parts go in a little pile on the floor in
@@ -765,6 +788,7 @@ namespace WorkshopWreckage
                 dt = dt, speed01 = _speedNow / _walk, speed = _speedNow, gait = _gait, phase = _phase, turnRate = _turnRate, bend = _bend,
                 armReach = _armReach, armHold = _armHold, armLift = _armLift, altitude = _altitude, active = true, time = _time,
                 lookAt = g.player.transform.position, lookWeight = idle ? 1 : 0,
+                gesture = _step == Step.Gesture ? Mathf.Clamp01(_gestureT / GestureTime) : 0,
             });
             int k = 0;
             foreach (var itemId in carried)

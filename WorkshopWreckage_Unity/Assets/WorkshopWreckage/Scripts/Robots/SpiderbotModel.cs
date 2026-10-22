@@ -90,6 +90,12 @@ namespace WorkshopWreckage
                 _hip[i].localRotation = Quaternion.Euler(0, swing * -x, x * lift);   // +lift raises the foot on both sides
                 _knee[i].localRotation = Quaternion.Euler(0, 0, x * (lift * 0.6f + a.bend * 25));
             }
+            if (a.gesture > 0)
+            {
+                // waves its front-left leg
+                float w = Mathf.Sin(a.gesture * Mathf.PI);
+                _hip[0].localRotation = Quaternion.Euler(-40 * w, 0, -55 * w + Mathf.Sin(a.gesture * 28) * 15 * w);
+            }
             _shell.localPosition = new Vector3(0, Mathf.Abs(Mathf.Sin(a.phase)) * 0.012f * a.gait - a.bend * 0.06f, 0);
             _shell.localRotation = Quaternion.Euler(a.bend * 12, 0, Mathf.Sin(a.phase) * 1.5f * a.gait);
             float jaw = 25 * Mathf.Max(a.armReach, a.armLift) + 6 * Mathf.Sin(a.time * 1.7f) * (1 - a.gait);

@@ -85,6 +85,16 @@ namespace WorkshopWreckage
             float inward = 10 * Mathf.Max(a.armHold, a.armReach);
             armL.localRotation = Quaternion.Euler(pitch - swing * 1.1f * empty, 0, inward);
             armR.localRotation = Quaternion.Euler(pitch + swing * 1.1f * empty, 0, -inward);
+            if (a.gesture > 0)
+            {
+                // a cheerful wave with the right arm, head tilted
+                float w = Mathf.Sin(a.gesture * Mathf.PI);
+                armR.localRotation = Quaternion.Euler(-150 * w, 0, -25 * w + Mathf.Sin(a.gesture * 30) * 20 * w);
+                a.lookWeight = 1;
+                LookHead(a);
+                head.localRotation *= Quaternion.Euler(0, 0, 12 * w);
+                return;
+            }
             LookHead(a);
         }
     }
