@@ -168,6 +168,24 @@ namespace WorkshopWreckage
             yield return AllRobotsChecks();
             // 8. player tools from skills
             yield return ToolChecks();
+            // 9. robots survive a save/load round trip (zone, battery, record, carried parts)
+            {
+                var cat = g.robots.First(r => r.id == "caterpillarbot");
+                cat.AssignZone(g.player.transform.position);
+                g.robots.First(r => r.id == "unibot").SetBattery(0.5f);
+                string State() => string.Join(";", g.robots.Select(r => $"{r.id}:{r.Active}:{r.Battery:0.00}:{r.delivered}:{r.staged}:{r.zoneCenter?.ToString("0.0") ?? "-"}:{r.carried.Count}"));
+                foreach (var r in g.robots) r.enabled = false;   // freeze so the state can't move between save and compare
+                var robotsBefore = State();
+                g.SaveGame("autotest2");
+                g.StartWorld(g.world.seed, null);
+                g.LoadGame("autotest2");
+                foreach (var r in g.robots) r.enabled = false;
+                yield return Frames(3);
+                var robotsAfter = State();
+                Check("robots survive save/load (active, battery, record, zone, carried)", robotsBefore == robotsAfter, robotsAfter == robotsBefore ? robotsBefore.Substring(0, Mathf.Min(80, robotsBefore.Length)) + "…" : $"{robotsBefore}  vs  {robotsAfter}");
+                foreach (var r in g.robots) r.enabled = true;
+                File.Delete(SaveSystem.PathOf("autotest2"));
+            }
 
             g.PlaceCamera("0.6,1.65,3.6,0,-18");
             g.hud.SetHudVisible(true);
@@ -388,11 +406,12 @@ namespace WorkshopWreckage
 
             // Task Coordination: a robot works only inside its zone
             var zr = g.robots.First(r => r.id == "spiderbot");
+            int oldTarget = zr.targetId;   // a part it was already picking up doesn't count
             zr.AssignZone(hc);
             Time.timeScale = 4;
             t1 = Time.realtimeSinceStartup;
             int firstTarget = -1;
-            while (Time.realtimeSinceStartup - t1 < 30 && firstTarget < 0) { if (zr.targetId >= 0) firstTarget = zr.targetId; yield return null; }
+            while (Time.realtimeSinceStartup - t1 < 30 && firstTarget < 0) { if (zr.targetId >= 0 && zr.targetId != oldTarget) firstTarget = zr.targetId; yield return null; }
             Time.timeScale = 1;
             float dz = firstTarget >= 0 ? new Vector2(g.world.instances[firstTarget].Position.x - hc.x, g.world.instances[firstTarget].Position.z - hc.z).magnitude : -1;
             Check("Task Coordination: an assigned robot works only in its zone", firstTarget >= 0 && dz <= zr.zoneRadius, $"target {dz:0.0} m from the zone centre (radius {zr.zoneRadius})");

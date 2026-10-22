@@ -418,6 +418,7 @@ namespace WorkshopWreckage
                 ["preset"] = g.presetId, ["catalog_version"] = (double)Json.Int(g.db.config, "version", 1),
                 ["seed"] = (double)g.world.seed, ["item_count"] = (double)g.world.Count, ["catalog_hash"] = g.db.catalogHash.ToString(),
                 ["play_time_s"] = g.playTime, ["progression"] = g.progression.ToDict(),
+                ["robots"] = g.robots.ToDictionary(r => r.id, r => (object)r.ToDict()),
                 ["items"] = items, ["storage"] = storage,
                 ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),

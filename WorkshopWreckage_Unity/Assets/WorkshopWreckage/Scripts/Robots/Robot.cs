@@ -211,6 +211,35 @@ namespace WorkshopWreckage
             return $"{displayName}: on it — {g.db.Get(defId).displayName}";
         }
 
+        /// <summary>Saved robot state (carried parts are saved with the items, owner robot:id).</summary>
+        public Dictionary<string, object> ToDict()
+        {
+            var d = new Dictionary<string, object>
+            {
+                ["following"] = mode == Mode.Following, ["battery"] = (double)Battery,
+                ["delivered"] = (double)delivered, ["staged"] = (double)staged,
+                ["pos"] = new List<object> { (double)transform.position.x, (double)transform.position.y, (double)transform.position.z },
+                ["yaw"] = (double)transform.eulerAngles.y,
+            };
+            if (zoneCenter.HasValue) d["zone"] = new List<object> { (double)zoneCenter.Value.x, (double)zoneCenter.Value.z };
+            return d;
+        }
+
+        public void LoadState(Dictionary<string, object> d)
+        {
+            if (d == null) return;
+            Battery = (float)Json.Num(d, "battery", 1);
+            delivered = Json.Int(d, "delivered");
+            staged = Json.Int(d, "staged");
+            var z = Json.Arr(d.GetValueOrDefault("zone"));
+            zoneCenter = z.Count == 2 ? new Vector3(Json.F(z[0]), 0, Json.F(z[1])) : null;
+            if (!Active) return;
+            var p = Json.Arr(d.GetValueOrDefault("pos"));
+            if (p.Count == 3) transform.SetPositionAndRotation(new Vector3(Json.F(p[0]), Json.F(p[1]), Json.F(p[2])), Quaternion.Euler(0, (float)Json.Num(d, "yaw"), 0));
+            if (Json.Bool(d, "following")) mode = Mode.Following;
+            _path = null;
+        }
+
         /// <summary>Automatic Storage Delivery: the robot comes over, takes what the
         /// player carries (up to its capacity) and stores it.</summary>
         public bool RequestHandover()
