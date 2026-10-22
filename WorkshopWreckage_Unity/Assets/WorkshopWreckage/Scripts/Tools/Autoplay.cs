@@ -452,6 +452,9 @@ namespace WorkshopWreckage
             float t0 = Time.realtimeSinceStartup;
             while (!rb.Active && Time.realtimeSinceStartup - t0 < 10) { LookAtRobot(0.75f, 0.5f, 0.2f); yield return null; }
             Check("Retrobot activates when all 5 parts are installed", rb.Active, rb.Describe());
+            yield return new WaitForSeconds(1.2f);
+            Check("objectives advance with play (first part, sorting, Retrobot)", g.objectives.done.Contains("first_part") && g.objectives.done.Contains("sort_10") && g.objectives.done.Contains("retrobot_parts"),
+                  $"done: {string.Join(", ", g.objectives.done)}; now: {g.objectives.HudText()}");
             LookAtRobot(0.7f, 0.45f, 0.15f);
             yield return g.Capture(Path.Combine(outDir, "06_retrobot_online.png"), 3);
 

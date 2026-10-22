@@ -19,7 +19,7 @@ namespace WorkshopWreckage
         Game _g;
         Canvas _canvas;
         RectTransform _hud, _menus;
-        Text _level, _title, _sub, _hint, _feedback, _progress, _zone, _heldName, _heldCount, _heldDest, _carried, _inspectText, _debug, _status;
+        Text _objective, _level, _title, _sub, _hint, _feedback, _progress, _zone, _heldName, _heldCount, _heldDest, _carried, _inspectText, _debug, _status;
         Image _cross;
         RectTransform _toasts, _hotbar, _heldPanel, _inspect;
         float _feedbackT;
@@ -124,10 +124,14 @@ namespace WorkshopWreckage
             _toasts = At("Toasts", _hud, new Vector2(0.5f, 0), new Vector2(-300, 20), new Vector2(600, 300));
             var vl = _toasts.gameObject.AddComponent<VerticalLayoutGroup>();
             vl.spacing = 6; vl.childControlHeight = false; vl.childForceExpandHeight = false; vl.childAlignment = TextAnchor.UpperCenter;
-            var tl = At("Progress", _hud, Vector2.zero, new Vector2(20, 20), new Vector2(440, 92));
+            var tl = At("Progress", _hud, Vector2.zero, new Vector2(20, 20), new Vector2(600, 92));
             Panel(tl, new Color(0.1f, 0.07f, 0.05f, 0.72f), BrassDim);
             _progress = Label(tl, "p", 20, Brass, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14, 0), new Vector2(-10, -8));
             _level = Label(tl, "l", 17, Cream, TextAnchor.MiddleLeft, Vector2.zero, Vector2.one, new Vector2(14, 2), new Vector2(-10, 4));
+            var ob = At("Objective", _hud, new Vector2(1, 0), new Vector2(-500, 20), new Vector2(480, 56));
+            Panel(ob, new Color(0.1f, 0.07f, 0.05f, 0.72f), BrassDim);
+            Label(ob, "h", 13, Muted, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(12, 0), new Vector2(-10, -4)).text = "OBJECTIVE";
+            _objective = Label(ob, "o", 17, Cream, TextAnchor.LowerLeft, Vector2.zero, Vector2.one, new Vector2(12, 6), new Vector2(-10, 0));
             _zone = Label(tl, "z", 16, Muted, TextAnchor.LowerLeft, Vector2.zero, Vector2.one, new Vector2(14, 8), new Vector2(-10, 0));
             _heldPanel = At("Held", _hud, Vector2.one, new Vector2(-580, -230), new Vector2(560, 130));
             Panel(_heldPanel, new Color(0.1f, 0.07f, 0.05f, 0.8f), BrassDim);
@@ -548,6 +552,7 @@ namespace WorkshopWreckage
             if (_g == null || _g.world == null) return;
             var p = _g.progress;
             var pr = _g.progression;
+            if (_g.objectives != null) _objective.text = _g.objectives.HudText();
             _level.text = pr == null ? "" : (pr.level >= pr.maxLevel ? $"Level {pr.level} (max)  ·  {pr.xp:N0} XP" : $"Level {pr.level}  ·  {pr.XpIntoLevel:N0}/{pr.XpForLevel(pr.level):N0} XP") + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
             _progress.text = $"Workshop restored  {p.OverallPercent:0.0}%   ({p.sortedTotal} / {_g.world.Count} sorted)";
             int z = _g.layout.ZoneAt(_g.player.transform.position);

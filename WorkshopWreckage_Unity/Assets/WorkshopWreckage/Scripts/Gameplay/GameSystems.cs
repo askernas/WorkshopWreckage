@@ -132,6 +132,7 @@ namespace WorkshopWreckage
         readonly Dictionary<int, int> _collected = new(), _sorted = new();
         int[] _zoneTotal, _zoneSorted;
         public int sortedTotal, robotPartsFound;
+        public int CollectedTotal => _collected.Values.Sum();
         public event Action<string, string> Milestone;
         public event Action<int> Discovered, DefinitionCompleted;
 
@@ -419,6 +420,7 @@ namespace WorkshopWreckage
                 ["seed"] = (double)g.world.seed, ["item_count"] = (double)g.world.Count, ["catalog_hash"] = g.db.catalogHash.ToString(),
                 ["play_time_s"] = g.playTime, ["progression"] = g.progression.ToDict(),
                 ["robots"] = g.robots.ToDictionary(r => r.id, r => (object)r.ToDict()),
+                ["objectives"] = g.objectives.ToList(),
                 ["items"] = items, ["storage"] = storage,
                 ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),

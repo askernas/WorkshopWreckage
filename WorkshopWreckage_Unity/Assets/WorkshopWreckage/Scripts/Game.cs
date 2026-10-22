@@ -35,6 +35,7 @@ namespace WorkshopWreckage
         public readonly HashSet<int> robotReserved = new();   // parts a robot is on its way to: no one else takes them
         public DebrisField debris;
         public PlayerTools tools;
+        public Objectives objectives;
         public readonly Dictionary<string, StorageUnit> units = new();
         public int itemCount = -1;   // -1 = the preset's full population
         public string presetId = "standard";
@@ -197,6 +198,10 @@ namespace WorkshopWreckage
             interaction.ResetState();
             tools.ResetState();
             StartProgression(seed, save);
+            objectives = new Objectives(this);
+            if (save != null) objectives.Load(save.GetValueOrDefault("objectives"));
+            else objectives.Tick(1);   // nothing is done yet; evaluates silently
+            objectives.Completed += o => { hud.Toast("Objective complete: " + o.text, true); Sfx.Play("milestone", null, -4); };
             if (save != null && save.TryGetValue("robots", out var ro))
                 foreach (var kv in Json.Obj(ro)) robots.Find(r => r.id == kv.Key)?.LoadState(Json.Obj(kv.Value));
             progress.Milestone += (key, text) => { hud.Toast(text, key.StartsWith("zone") || key == "first_pickup"); Sfx.Play("milestone", null, -6); };
@@ -539,6 +544,7 @@ namespace WorkshopWreckage
                 _labelsDirty.Clear();
             }
             if (world != null && progress != null && builder != null) RestorationLighting();
+            if (world != null && objectives != null && state == "play") objectives.Tick(Time.deltaTime);
             if (world != null && telemetry != null && state == "play")
             {
                 playTime += Time.deltaTime;
