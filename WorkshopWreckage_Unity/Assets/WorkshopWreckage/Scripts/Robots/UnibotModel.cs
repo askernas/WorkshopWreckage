@@ -2,92 +2,127 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Unibot after resources/unibot.png: olive-green single-wheeled balancing
-    /// courier with one big lamp eye, red ear discs, antennas, a grilled torso, claw
-    /// arms, brass gyro stabilizers and a fat black tyre with a red hub. It leans into
-    /// acceleration and keeps wobbling to balance. Parts: head shell, optical eye,
-    /// antenna pair, torso, left arm, right arm, gyro stabilizer, wheel hub, tire.</summary>
+    /// <summary>Unibot after resources/unibot.png: an olive-green single-wheeled
+    /// balancing courier. Big rounded riveted head with one large lamp eye in a bolted
+    /// bezel, red ear discs, antennas from the top corners to red balls, a slatted back
+    /// vent; rounded torso with slatted chest grille and slot, red shoulder discs and
+    /// segmented arms with red pincers; a dark undercarriage with brass gyro
+    /// stabilisers and springs; an olive fork down to a fat treaded tyre with a red
+    /// bolted hub. Leans into acceleration and wobbles to keep its balance.
+    /// Parts: head shell, optical eye, antenna pair, torso, left arm, right arm,
+    /// gyro stabilizer, wheel hub, tire.</summary>
     public class UnibotModel : RobotModel
     {
         Transform _wheel, _lean, _leanGeo, _armL, _armR, _gyro;
         float _spin, _lean01, _lastSpeed;
-        public override float ModelHeight => 0.98f;
-        static Material Green => Paint(new Color(0.36f, 0.42f, 0.2f), 0.5f);
-        const float WheelR = 0.17f;
+        public override float ModelHeight => 1.2f;
+        const float WheelR = 0.2f, Axle = 0.2f, TorsoY = 0.58f, ShoulderY = 0.63f, NeckY = 0.71f;
 
         protected override void CreatePivots()
         {
-            _wheel = Pivot("Wheel", body, new Vector3(0, WheelR, 0));
-            _lean = Pivot("Lean", body, new Vector3(0, WheelR, 0));
-            _leanGeo = Pivot("LeanGeo", _lean, new Vector3(0, -WheelR, 0));
-            _gyro = Pivot("Gyro", _leanGeo, new Vector3(0, 0.36f, 0));
-            _armL = Pivot("ArmL", _leanGeo, new Vector3(-0.15f, 0.55f, 0));
-            _armR = Pivot("ArmR", _leanGeo, new Vector3(0.15f, 0.55f, 0));
-            head = Pivot("Head", _leanGeo, new Vector3(0, 0.6f, 0));
-            carry = Pivot("Carry", _leanGeo, new Vector3(0, 0.44f, 0.3f));
+            _wheel = Pivot("Wheel", body, new Vector3(0, Axle, 0));
+            _lean = Pivot("Lean", body, new Vector3(0, Axle, 0));                 // everything above the axle leans
+            _leanGeo = Pivot("LeanGeo", _lean, new Vector3(0, -Axle, 0));
+            _gyro = Pivot("Gyro", _leanGeo, new Vector3(0, 0.43f, 0));
+            _armL = Pivot("ArmL", _leanGeo, new Vector3(-0.19f, ShoulderY, 0));
+            _armR = Pivot("ArmR", _leanGeo, new Vector3(0.19f, ShoulderY, 0));
+            head = Pivot("Head", _leanGeo, new Vector3(0, NeckY, 0));
+            carry = Pivot("Carry", _leanGeo, new Vector3(0, 0.49f, 0.36f));
         }
 
         protected override void BuildGeometry()
         {
+            BuildWheel();
+            BuildBody();
             {
-                var b = new Batch();   // tyre + hub spin together
-                for (int k = 0; k < 10; k++)
+                var b = new Batch();   // brass gyro drums that spin
+                foreach (var s in new[] { -1f, 1f })
                 {
-                    float a = k * Mathf.PI / 5;
-                    b.Box(new Vector3(0, Mathf.Sin(a) * WheelR, Mathf.Cos(a) * WheelR), new Vector3(0.11f, 0.03f, 0.105f), M("tire", Rubber), false, Batch.R(Vector3.right, -a));
-                }
-                b.Cylinder(Vector3.zero, WheelR * 0.97f, 0.1f, M("tire", Rubber), AxisX, 20);
-                foreach (var x in new[] { -1f, 1f })
-                {
-                    b.Cylinder(new Vector3(x * 0.052f, 0, 0), WheelR * 0.62f, 0.012f, M("wheel hub", Red), AxisX, 20);
-                    b.Cylinder(new Vector3(x * 0.06f, 0, 0), 0.03f, 0.012f, M("wheel hub", Brass), AxisX);
+                    b.Lathe(new Vector3(s * 0.095f, 0, 0), Disc(0.045f, 0.05f, 0.008f), M("gyro stabilizer", Brass), SideRot(s), 18);
+                    b.Lathe(new Vector3(s * 0.145f, 0, 0), Disc(0.03f, 0.012f, 0.003f), M("gyro stabilizer", Gunmetal), SideRot(s), 14);
                     for (int k = 0; k < 6; k++)
                     {
                         float a = k * Mathf.PI / 3;
-                        b.Cylinder(new Vector3(x * 0.06f, Mathf.Sin(a) * 0.075f, Mathf.Cos(a) * 0.075f), 0.008f, 0.006f, M("wheel hub", Dark), AxisX);
+                        b.Box(new Vector3(s * 0.12f, Mathf.Sin(a) * 0.045f, Mathf.Cos(a) * 0.045f), new Vector3(0.04f, 0.008f, 0.008f), M("gyro stabilizer", Gunmetal), false, Batch.R(Vector3.right, a));
                     }
                 }
-                Done(b, _wheel);
-            }
-            {
-                var b = new Batch();
-                // fork from the axle up into the torso, gyro housings, torso
-                foreach (var x in new[] { -1f, 1f })
-                {
-                    b.Box(new Vector3(x * 0.075f, 0.27f, 0), new Vector3(0.025f, 0.2f, 0.04f), M("gyro stabilizer", Green));
-                    b.Cylinder(new Vector3(x * 0.075f, WheelR, 0), 0.025f, 0.03f, M("wheel hub", Dark), AxisX);
-                }
-                b.Box(new Vector3(0, 0.36f, 0), new Vector3(0.17f, 0.04f, 0.12f), M("gyro stabilizer", Dark));
-                b.Box(new Vector3(0, 0.47f, 0), new Vector3(0.24f, 0.2f, 0.18f), M("torso", Green));
-                b.Box(new Vector3(0, 0.5f, -0.092f), new Vector3(0.12f, 0.06f, 0.008f), M("torso", Dark));
-                for (int k = 0; k < 4; k++) b.Box(new Vector3(0, 0.477f + k * 0.015f, -0.097f), new Vector3(0.11f, 0.005f, 0.005f), M("torso", Brass));
-                b.Box(new Vector3(0, 0.415f, -0.092f), new Vector3(0.08f, 0.015f, 0.008f), M("torso", Dark));
-                b.Box(new Vector3(0, 0.49f, 0.092f), new Vector3(0.13f, 0.07f, 0.008f), M("torso", Dark));
-                b.Cylinder(new Vector3(0, 0.585f, 0), 0.04f, 0.035f, M("torso", Dark));
-                Done(b, _leanGeo);
-            }
-            {
-                var b = new Batch();   // brass gyro discs that spin
-                foreach (var x in new[] { -1f, 1f }) b.Cylinder(new Vector3(x * 0.1f, 0, 0), 0.04f, 0.018f, M("gyro stabilizer", Brass), AxisX, 12);
                 Done(b, _gyro);
             }
             foreach (var (arm, s, part) in new[] { (_armL, -1f, "left arm"), (_armR, 1f, "right arm") })
             {
                 var b = new Batch();
-                ArmKit(b, s, part, Green, 0.85f);
+                DetailedArm(b, s, part, part, ToyGreen, ToyGreenDeep, ToyRed, 0.92f);
                 Done(b, arm);
             }
-            HeadKit(head, Green, new Vector3(0.3f, 0.24f, 0.24f), 1, "head shell", "optical eye", "antenna pair", "antenna pair", "head shell", "head shell", null);
+            DetailedHead(head, ToyGreen, new Vector3(0.36f, 0.32f, 0.32f), 1, 0.078f,
+                "head shell", "optical eye", null, "antenna pair", "antenna pair", "head shell", "head shell", null, false, false);
+        }
+
+        void BuildWheel()
+        {
+            var b = new Batch();
+            const string Tire = "tire", Hub = "wheel hub";
+            // fat tyre: rounded cross-section revolved around the axle (X)
+            var tire = new[] { new Vector2(0.13f, -0.072f), new Vector2(0.175f, -0.075f), new Vector2(0.192f, -0.065f), new Vector2(0.2f, -0.04f), new Vector2(0.2f, 0.04f), new Vector2(0.192f, 0.065f), new Vector2(0.175f, 0.075f), new Vector2(0.13f, 0.072f) };
+            b.Lathe(Vector3.zero, tire, M(Tire, Rubber), RightRot, 32);
+            for (int k = 0; k < 20; k++)   // tread blocks in two staggered rows
+            {
+                float a = k * Mathf.PI / 10;
+                foreach (var x in new[] { -0.035f, 0.035f })
+                {
+                    float aa = a + (x > 0 ? Mathf.PI / 20 : 0);
+                    b.RoundedBox(new Vector3(x, Mathf.Sin(aa) * 0.203f, Mathf.Cos(aa) * 0.203f), new Vector3(0.06f, 0.016f, 0.03f), 0.005f, M(Tire, Rubber), 1, Batch.R(Vector3.right, -aa));
+                }
+            }
+            foreach (var s in new[] { -1f, 1f })
+            {
+                b.Lathe(new Vector3(s * 0.045f, 0, 0), Disc(0.13f, 0.025f, 0.008f), M(Hub, ToyRed), SideRot(s), 28);
+                b.Lathe(new Vector3(s * 0.07f, 0, 0), Disc(0.055f, 0.012f, 0.004f), M(Hub, Gunmetal), SideRot(s), 20);
+                b.Lathe(new Vector3(s * 0.082f, 0, 0), Dome(0.035f, 0.018f), M(Hub, Brass), SideRot(s), 16);
+                for (int k = 0; k < 6; k++)
+                {
+                    float a = k * Mathf.PI / 3;
+                    b.Rivet(new Vector3(s * 0.07f, Mathf.Sin(a) * 0.09f, Mathf.Cos(a) * 0.09f), new Vector3(s, 0, 0), 0.009f, M(Hub, Gunmetal));
+                }
+            }
+            Done(b, _wheel);
+        }
+
+        void BuildBody()
+        {
+            var b = new Batch();
+            // fork: olive arms from the hub up into the undercarriage, with dark bearings
+            foreach (var s in new[] { -1f, 1f })
+            {
+                b.RoundedBox(new Vector3(s * 0.115f, Axle + 0.12f, 0.01f), new Vector3(0.03f, 0.27f, 0.06f), 0.012f, M("wheel hub", ToyGreen), 2);
+                b.Lathe(new Vector3(s * 0.1f, Axle, 0), Disc(0.035f, 0.03f, 0.006f), M("wheel hub", Gunmetal), SideRot(s), 16);
+                b.Rivet(new Vector3(s * 0.131f, Axle + 0.17f, 0.01f), new Vector3(s, 0, 0), 0.008f, M("wheel hub", Brass));
+                // springs between fork and body
+                for (int k = 0; k < 6; k++)
+                    b.Lathe(new Vector3(s * 0.07f, 0.4f + k * 0.012f, 0.05f), Disc(0.014f, 0.006f, 0.002f), M("gyro stabilizer", Brass), null, 10);
+            }
+            // undercarriage
+            b.RoundedBox(new Vector3(0, 0.455f, 0), new Vector3(0.21f, 0.05f, 0.16f), 0.015f, M("torso", Gunmetal), 2);
+            foreach (var x in new[] { -0.07f, 0f, 0.07f }) b.Rivet(new Vector3(x, 0.455f, -0.081f), new Vector3(0, 0, -1), 0.008f, M("torso", Brass));
+            // torso
+            b.RoundedBox(new Vector3(0, TorsoY, 0), new Vector3(0.27f, 0.21f, 0.21f), 0.03f, M("torso", ToyGreen), 3);
+            Grille(b, "torso", new Vector3(0, 0.6f, -0.106f), 0.14f, 0.075f, 6, false, -1);
+            b.RoundedBox(new Vector3(0, 0.515f, -0.108f), new Vector3(0.08f, 0.016f, 0.008f), 0.004f, M("torso", Dark), 1);
+            foreach (var x in new[] { -0.115f, 0.115f })
+                foreach (var y in new[] { 0.5f, 0.66f })
+                    b.Rivet(new Vector3(x, y, -0.105f), new Vector3(0, 0, -1), 0.008f, M("torso", Gunmetal));
+            Grille(b, "torso", new Vector3(0, 0.6f, 0.106f), 0.15f, 0.08f, 6, false, 1);
+            b.Lathe(new Vector3(-0.19f, ShoulderY, 0), Disc(0.024f, 0.38f, 0.005f), M("torso", Gunmetal), RightRot, 12);   // shoulder axle
+            for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.685f + k * 0.009f, 0), Disc(0.05f - k * 0.004f, 0.009f, 0.003f), M("torso", Gunmetal), null, 16);
+            Done(b, _leanGeo);
         }
 
         public override void Animate(RobotAnim a)
         {
             float s = transform.lossyScale.x;
-            // the wheel rolls with the distance travelled (true radius at toy scale)
             float v = a.speed01;
             _spin += a.speed * a.dt / Mathf.Max(1e-4f, WheelR * s) * Mathf.Rad2Deg;
             _wheel.localRotation = Quaternion.Euler(_spin, 0, 0);
-            // leans into acceleration, wobbles to keep its balance
             float accel = (v - _lastSpeed) / Mathf.Max(a.dt, 1e-4f);
             _lastSpeed = v;
             _lean01 = Mathf.Lerp(_lean01, Mathf.Clamp(v * 8 + accel * 2.5f, -14, 22), a.dt * 4);
@@ -97,7 +132,7 @@ namespace WorkshopWreckage
             if (a.gesture > 0) _lean.localRotation *= Quaternion.Euler(0, Mathf.SmoothStep(0, 360, a.gesture), Mathf.Sin(a.gesture * Mathf.PI * 4) * 6);   // nervous pirouette
             float empty = 1 - Mathf.Max(a.armHold, a.armReach);
             float pitch = -70 * a.armHold - 40 * a.armLift - 45 * a.armReach;
-            float flap = Mathf.Sin(a.time * 2.7f) * 8 * empty;   // little balancing arm motions
+            float flap = Mathf.Sin(a.time * 2.7f) * 8 * empty;
             _armL.localRotation = Quaternion.Euler(pitch + flap, 0, 8 * a.armHold - 10 * empty);
             _armR.localRotation = Quaternion.Euler(pitch - flap, 0, -8 * a.armHold + 10 * empty);
             LookHead(a);

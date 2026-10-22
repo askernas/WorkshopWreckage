@@ -29,7 +29,7 @@ namespace WorkshopWreckage
     /// scaled to their configured height). Geometry is authored in Godot-local space
     /// (front = -Z) through Batch. Every primitive belongs to an assembly part; parts
     /// not yet installed at the repair bay render as translucent ghosts.</summary>
-    public abstract class RobotModel : MonoBehaviour
+    public abstract partial class RobotModel : MonoBehaviour
     {
         public Transform body, head, carry;
         public abstract float ModelHeight { get; }
