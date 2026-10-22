@@ -54,6 +54,8 @@ namespace WorkshopWreckage
                 int n = 0, gpuN = 0;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 long last = sw.ElapsedTicks;
+                int gc0 = System.GC.CollectionCount(0);
+                long mem0 = System.GC.GetTotalMemory(false);
                 while (sw.Elapsed.TotalSeconds < Json.Num(cfg, "measure_s", 5))
                 {
                     yield return null;
@@ -80,6 +82,9 @@ namespace WorkshopWreckage
                 e["triangles"] = System.Math.Round(tr / n);
                 e["gpu_ms"] = gpuN > 0 ? System.Math.Round(gpu / gpuN, 2) : -1.0;
                 e["cpu_main_ms"] = gpuN > 0 ? System.Math.Round(cpu / gpuN, 2) : -1.0;
+                e["gc_collections"] = (double)(System.GC.CollectionCount(0) - gc0);
+                e["managed_alloc_mb"] = System.Math.Round((System.GC.GetTotalMemory(false) - mem0) / 1048576.0, 1);
+                e["worst_frame_ms"] = System.Math.Round(frames.Max(), 1);
                 e["pick_avg_us"] = pick.avg;
                 e["pick_max_us"] = pick.max;
                 e["pick_hit_rate"] = pick.hit;
