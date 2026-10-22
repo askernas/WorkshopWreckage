@@ -55,7 +55,7 @@ namespace WorkshopWreckage
                 float maxY = 0;
                 for (float t = 0; t < 0.9f; t += Time.deltaTime) { maxY = Mathf.Max(maxY, g.player.transform.position.y); yield return null; }
                 UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState());
-                yield return Frames(3);
+                yield return new WaitForSeconds(0.5f);   // stepping up eases over a few frames
                 var pp = g.player.transform.position;
                 float under = g.debris.At(pp);
                 bool climbed = maxY > 0.05f;
@@ -64,7 +64,7 @@ namespace WorkshopWreckage
                 yield return new WaitForSeconds(1.0f);
                 var top = g.player.transform.position;
                 Check("player walks over parts, not through them", pp.y >= under - 0.05f && top.y >= g.debris.At(top) - 0.05f && top.y > 0.05f,
-                      $"{(climbed ? $"climbed to {maxY:0.00} m" : "blocked by a steep face")}; on the heap: feet {top.y:0.00} m over parts {g.debris.At(top):0.00} m");
+                      $"{(climbed ? $"climbed to {maxY:0.00} m" : "blocked by a steep face")}, feet {pp.y:0.00} m over parts {under:0.00} m; on the heap: feet {top.y:0.00} m over parts {g.debris.At(top):0.00} m");
                 yield return g.Capture(Path.Combine(outDir, "00b_standing_on_parts.png"), 2);
             }
             g.player.enabled = false;
@@ -119,9 +119,14 @@ namespace WorkshopWreckage
             // 3. wrong destination refused
             int held = g.inventory.HeldId();
             var heldDef = w.DefOf(held);
-            var wrong = g.db.boxes.Keys.First(b => b != heldDef.storageBox && g.db.IsOpenKind(b));
-            yield return AimAtDest(wrong);
-            ic.UpdateTarget();
+            // a wrong destination the crosshair can actually reach (stray parts may lie in front of some)
+            string wrong = null;
+            foreach (var cand in g.db.boxes.Keys.Where(b => b != heldDef.storageBox && g.db.IsOpenKind(b)).Take(25))
+            {
+                yield return AimAtDest(cand);
+                ic.UpdateTarget();
+                if (ic.targetType == "dest" && ic.targetDest == cand) { wrong = cand; break; }
+            }
             int before = g.inventory.Count;
             ic.Primary();
             Check("wrong destination refused, nothing lost", ic.targetDest == wrong && g.inventory.Count == before && w.instances[held].state == ItemState.Carried, "target " + (ic.targetDest ?? ic.targetType));
@@ -433,6 +438,22 @@ namespace WorkshopWreckage
             float dz = firstTarget >= 0 ? new Vector2(g.world.instances[firstTarget].Position.x - hc.x, g.world.instances[firstTarget].Position.z - hc.z).magnitude : -1;
             Check("Task Coordination: an assigned robot works only in its zone", firstTarget >= 0 && dz <= zr.zoneRadius, $"target {dz:0.0} m from the zone centre (radius {zr.zoneRadius})");
             zr.AssignZone(null);
+
+            // Sorting tray: parts put there are picked up by the robots first
+            if (g.inventory.Count < 6) { g.player.Teleport(hc + new Vector3(1.0f, 0, 0)); yield return Frames(2); g.tools.AreaSweep(); yield return Frames(5); }
+            g.player.Teleport(g.TrayCenter + new Vector3(0, 0, 1.2f));
+            int put = 0;
+            foreach (var id in g.inventory.items.ToList()) { if (put >= 8) break; if (g.interaction.DropInTray(id, false)) put++; }
+            yield return new WaitForSeconds(0.5f);
+            int inTray = g.TrayCount;
+            LookFrom(g.TrayCenter + new Vector3(0.9f, 1.1f, 1.4f), g.TrayCenter);
+            g.interaction.UpdateTarget();   // automated runs don't update the aim every frame
+            yield return g.Capture(Path.Combine(outDir, "22_sorting_tray.png"), 3);
+            Time.timeScale = 4;
+            float t2 = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - t2 < 60 && g.TrayCount > inTray - 3) yield return null;
+            Time.timeScale = 1;
+            Check("robots empty the sorting tray first", put > 0 && inTray >= put && g.TrayCount <= inTray - 3, $"{put} put in, {inTray} in tray, {g.TrayCount} left");
         }
 
         void Install(int id)

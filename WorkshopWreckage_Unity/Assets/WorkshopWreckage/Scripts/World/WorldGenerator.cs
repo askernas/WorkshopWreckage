@@ -201,7 +201,7 @@ namespace WorkshopWreckage
             foreach (var s in layout.surfaces)
             {
                 var surf = new PileSurface(s.rect, s.y);
-                if (s.floor) surf.blockers.AddRange(layout.floorBlockers);
+                if (s.floor) { surf.blockers.AddRange(layout.floorBlockers); surf.blockers.AddRange(layout.keepClear); }
                 foreach (var o in s.obstacles) surf.blockers.Add(o.rect);
                 surfaces.Add(surf);
             }

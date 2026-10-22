@@ -49,6 +49,8 @@ namespace WorkshopWreckage
         public readonly List<string> placementErrors = new();
         public readonly Dictionary<string, List<int>> robotPartPiles = new();
         public Vector3 repairBayPos;
+        public Rect trayRect;                                     // sorting tray (Godot XZ); kept clear of generated debris
+        public readonly List<Rect> keepClear = new();             // no starting piles here, but walkable
         public float repairBayRot;
         readonly List<Dictionary<string, object>> _runs = new();
 
@@ -103,6 +105,11 @@ namespace WorkshopWreckage
             repairBayPos = new Vector3(west + 1.55f, 0, south - 0.5f);
             repairBayRot = Mathf.PI;
             Block(new Vector2(repairBayPos.x, repairBayPos.z), new Vector2(3.0f, 1.0f));
+            // sorting tray in front of the repair bay: drop any parts here and the robots sort them
+            trayRect = new Rect(west + 2.3f, south - 2.85f, 1.3f, 0.8f);   // clear of the west pallet run and the door
+            F("sorting_tray", new Vector3(trayRect.center.x, 0, trayRect.center.y), new Vector3(trayRect.width, 0.12f, trayRect.height));
+            keepClear.Add(new Rect(trayRect.position - Vector2.one * 0.5f, trayRect.size + Vector2.one));
+            keepClear.Add(new Rect(repairBayPos.x - 1.6f, repairBayPos.z - 2.0f, 3.2f, 1.6f));   // robots' home spots
 
             int nWin = Mathf.Max(3, Mathf.RoundToInt(D / 5f));
             for (int k = 0; k < nWin; k++)
@@ -352,6 +359,7 @@ namespace WorkshopWreckage
                 var p = new Vector2(Mathf.Lerp(roomMin.x + 1.6f, roomMax.x - 1.6f, (float)rng.NextDouble()), Mathf.Lerp(roomMin.z + 1.8f, roomMax.z - 1.6f, (float)rng.NextDouble()));
                 if (Vector2.Distance(p, new Vector2(spawn.x, spawn.z)) < 1.8f) continue;
                 if (floorBlockers.Any(b => new Rect(b.position - Vector2.one * 0.9f, b.size + Vector2.one * 1.8f).Contains(p))) continue;
+                if (keepClear.Any(b => new Rect(b.position - Vector2.one * 0.9f, b.size + Vector2.one * 1.8f).Contains(p))) continue;
                 if (o.Any(q => Vector2.Distance(p, q) < minDist)) continue;
                 o.Add(p);
                 if (attempt > wanted * 150) minDist *= 0.97f;

@@ -99,7 +99,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
-            if (g == null || g.world == null || P == null || g.state != "play" || g.interaction.inspecting) return;
+            if (g == null || g.world == null || P == null || g.state != "play" || g.interaction.inspecting || g.Automated) return;
             var kb = Keyboard.current;
             if (kb == null) return;
             if (kb.bKey.isPressed) MagnetTick(Time.deltaTime);

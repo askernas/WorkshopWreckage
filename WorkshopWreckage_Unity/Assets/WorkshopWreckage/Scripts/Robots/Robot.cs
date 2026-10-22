@@ -291,7 +291,7 @@ namespace WorkshopWreckage
         /// <summary>Task Coordination: restrict work to a zone (null clears it).</summary>
         public void AssignZone(Vector3? center)
         {
-            zoneCenter = center;
+            zoneCenter = center.HasValue ? new Vector3(center.Value.x, 0, center.Value.z) : null;   // a floor point
             _unreachable.Clear();
             if (_step == Step.ToItem && targetId >= 0 && center.HasValue && Flat(g.world.instances[targetId].Position - center.Value).magnitude > zoneRadius)
             {
@@ -378,7 +378,7 @@ namespace WorkshopWreckage
                 return;
             }
             if (_step == Step.ToDest && _stepT > 60f) { DropCarried($"{displayName} got stuck and set its load down"); return; }
-            if (_step == Step.ToPlayer && _stepT > 40f) { _step = Step.Choose; return; }
+            if (_step == Step.ToPlayer && _stepT > 40f) { _step = Step.Choose; g.hud.Toast($"{displayName} couldn't reach you"); return; }
             // battery: drains while working; when low (and not carrying) it goes home to charge
             if (_step != Step.Charging) Battery = Mathf.Max(0, Battery - dt / (_batteryMinutes * 60f));
             if (Battery < 0.12f && carried.Count == 0 && (_step == Step.Choose || _step == Step.ToItem))
@@ -408,18 +408,20 @@ namespace WorkshopWreckage
                 case Step.ToPlayer:
                 {
                     var pp = g.player.transform.position;
-                    if (Flat(pp - transform.position).magnitude < 0.9f) { TakeFromPlayer(); break; }
+                    float dist = Flat(pp - transform.position).magnitude;
+                    if (dist < 0.9f) { TakeFromPlayer(); break; }
                     if (Flies) { FlyTo(pp - Flat(pp - transform.position).normalized * 0.6f + Vector3.up * 0.9f, dt, false); break; }
                     _repathT -= dt;
                     if (_path == null || _repathT <= 0)
                     {
+                        // the player may stand among heaps (obstacles for small robots): get as close as possible
                         _repathT = 0.5f;
-                        var goal = _nav.NearestFree(pp - Flat(pp - transform.position).normalized * 0.5f, 1.0f);
+                        var goal = _nav.NearestFree(pp - Flat(pp - transform.position).normalized * 0.5f, 1.0f) ?? _nav.NearestFree(pp, 2.5f);
                         _path = goal.HasValue ? _nav.Path(transform.position, goal.Value) : null;
                         _pathIdx = 0;
-                        if (_path == null) { _step = Step.Choose; g.hud.Toast($"{displayName} can't get to you"); }
                     }
-                    if (_path != null) Steer(dt);
+                    if (_path == null) { Brake(dt); break; }   // keep trying until the request times out
+                    if (Steer(dt) && dist < 2.5f) TakeFromPlayer();   // as close as it can get
                     break;
                 }
                 case Step.Gesture:
@@ -472,6 +474,9 @@ namespace WorkshopWreckage
             if (!Flies) _nav.RefreshItems(g.world, _stepH);
             var types = carried.Select(c => g.world.instances[c].defId).ToHashSet();
             IEnumerable<ItemInstance> pool = g.world.instances;
+            // parts the player put in the sorting tray come first
+            var tray = g.index.QuerySphere(g.TrayCenter, 1f).Select(i => g.world.instances[i]).Where(i => g.InTray(i.Position) && Pickable(i)).ToList();
+            if (tray.Count > 0 && preferDef < 0) pool = tray;
             if (preferDef >= 0)
             {
                 var pref = g.world.IdsOf(preferDef).Select(i => g.world.instances[i]).Where(Pickable).ToList();
@@ -736,7 +741,18 @@ namespace WorkshopWreckage
             carried.Clear();
             _path = null;
             _step = Step.Choose;
-            if (why != "") g.hud.Toast(why);
+            if (why != "") Notice(why);
+        }
+
+        float _noticeT = -999;
+
+        /// <summary>Routine robot troubles are only worth a toast when the robot is near
+        /// the player, and at most once every 30 s per robot.</summary>
+        void Notice(string text)
+        {
+            if (Vector3.Distance(transform.position, g.player.transform.position) > 8f || _time - _noticeT < 30f) return;
+            _noticeT = _time;
+            g.hud.Toast(text);
         }
 
         // ---------------------------------------------------------------- movement

@@ -72,6 +72,8 @@ namespace WorkshopWreckage
             foreach (var l in FindObjectsByType<Light>()) Destroy(l.gameObject);
             Physics.IgnoreLayerCollision(Layers.Player, Layers.Target);
             Sfx.Init(transform);
+            // tests, screenshots and benchmarks run silently (--mute does it for normal runs too)
+            if (args.ContainsKey("mute") || Automated) { AudioListener.volume = 0; Sfx.masterVolume = 0; }
 
             if (args.TryGetValue("preset", out var pr)) presetId = pr;
             bool valid = LoadPreset(presetId);
@@ -155,6 +157,11 @@ namespace WorkshopWreckage
             builder.transform.SetParent(transform, false);
             Debug.Log("[boot] layout generated");
             builder.Build(layout);
+            var trayTarget = new GameObject("Target_Tray") { layer = Layers.Target };
+            trayTarget.transform.SetParent(builder.transform, false);
+            trayTarget.transform.position = Shared.Pos(layout.trayRect.center.x, 0.15f, layout.trayRect.center.y);
+            trayTarget.AddComponent<BoxCollider>().size = new Vector3(layout.trayRect.width, 0.3f, layout.trayRect.height);
+            trayTarget.AddComponent<StorageTarget>().destId = "TRAY";
             Debug.Log("[boot] workshop built");
             BuildStorage();
             Debug.Log("[boot] storage built");
@@ -331,7 +338,9 @@ namespace WorkshopWreckage
             {
                 var p = player.transform.position;
                 // prefer a free robot; otherwise the nearest one comes right after its delivery
-                var r = robots.Where(x => x.Active && !x.handoverPending).OrderBy(x => x.Free ? 0 : 1).ThenBy(x => x.carried.Count).ThenBy(x => (x.transform.position - p).sqrMagnitude).FirstOrDefault();
+                // whoever can be here soonest: travel time, plus a penalty while busy; not robots about to charge
+                var r = robots.Where(x => x.Active && !x.handoverPending && x.Battery >= 0.2f)
+                    .OrderBy(x => Vector3.Distance(x.transform.position, p) / Mathf.Max(0.1f, x.WalkSpeed) + (x.Free ? 0 : 15 + x.carried.Count * 2)).FirstOrDefault();
                 msg = r != null && r.RequestHandover() ? (r.Free ? $"{r.displayName} is coming for your parts" : $"{r.displayName} is coming for your parts after its delivery") : "No robot is running yet";
             }
             hud.OnFeedback(msg, msg.Contains("coming"));
@@ -363,6 +372,12 @@ namespace WorkshopWreckage
             hud.OnFeedback(msg, msg.Contains("now works") || msg.Contains("again"));
             return msg;
         }
+
+        /// <summary>Sorting tray footprint in Unity XZ.</summary>
+        public Rect TrayRectU => new(layout.trayRect.xMin, -layout.trayRect.yMax, layout.trayRect.width, layout.trayRect.height);
+        public Vector3 TrayCenter => Shared.Pos(layout.trayRect.center.x, 0, layout.trayRect.center.y);
+        public bool InTray(Vector3 p) => TrayRectU.Contains(new Vector2(p.x, p.z));
+        public int TrayCount => index.QuerySphere(TrayCenter, 1f).Count(i => InTray(world.instances[i].Position));
 
         /// <summary>The storage unit whose footprint contains a world point, if any.</summary>
         public StorageUnit UnitAt(Vector3 p)
@@ -610,7 +625,7 @@ namespace WorkshopWreckage
             bool playing = s == "play";
             player.inputEnabled = playing && !interaction.inspecting;
             player.lookEnabled = playing && !interaction.inspecting;
-            interaction.enabledInput = playing;
+            interaction.enabledInput = playing && !Automated;   // automated runs drive interaction directly; real mouse clicks must not interfere
             hud.SetScreen(s);
             if (!Automated)
             {

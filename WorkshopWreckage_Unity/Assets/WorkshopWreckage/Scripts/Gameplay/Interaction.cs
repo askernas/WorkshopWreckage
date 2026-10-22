@@ -157,6 +157,7 @@ namespace WorkshopWreckage
             {
                 var st = hit.Value.collider.GetComponent<StorageTarget>();
                 if (st != null && st.station) targetType = "station";
+                else if (st != null && st.destId == "TRAY") targetType = "tray";
                 else if (st != null) { targetType = "dest"; targetDest = st.destId; targetUnit = st.unit; }
             }
             ShowHover();
@@ -255,6 +256,12 @@ namespace WorkshopWreckage
                     }
                     return new TargetInfo { title = title, sub = sub, hint = Storage.ResultText(r, targetDest, held), tone = -1 };
                 }
+                case "tray":
+                {
+                    int n = Inv.items.Count(i => !World.DefOf(i).IsRobotPart);
+                    return new TargetInfo { title = "Sorting Tray", sub = $"{game.TrayCount} parts waiting · the robots sort what you put here",
+                        hint = n > 0 ? $"[LMB] Put the held part in    [G] Put all {n} in" : "Drop any parts here for the robots", tone = n > 0 ? 1 : 0 };
+                }
                 case "station":
                 {
                     var parts = StationParts();
@@ -287,6 +294,9 @@ namespace WorkshopWreckage
                 case "station":
                     var p = StationParts();
                     if (p.Count > 0) DepositStation(p[0]);
+                    break;
+                case "tray":
+                    if (Inv.HeldId() >= 0) DropInTray(Inv.HeldId());
                     break;
             }
         }
@@ -347,6 +357,30 @@ namespace WorkshopWreckage
             return true;
         }
 
+        /// <summary>Puts a carried part into the sorting tray: it lies there unsorted
+        /// until a robot picks it up (robots take tray parts first).</summary>
+        public bool DropInTray(int id, bool feedback = true)
+        {
+            var def = World.DefOf(id);
+            if (def.IsRobotPart) { if (feedback) Feedback?.Invoke("Robot parts belong at the repair bay", false); return false; }
+            var r = game.TrayRectU;
+            var p = new Vector3(UnityEngine.Random.Range(r.xMin + 0.12f, r.xMax - 0.12f), 0, UnityEngine.Random.Range(r.yMin + 0.12f, r.yMax - 0.12f));
+            var e = ItemDatabase.Extents(def);
+            var m = Matrix4x4.TRS(new Vector3(p.x, game.debris.At(p) + 0.02f + e[2] * 0.5f, p.z),
+                Quaternion.Euler(UnityEngine.Random.Range(-10f, 10f), UnityEngine.Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+            var from = game.held.HandWorld();
+            Inv.Remove(id);
+            World.SetTransform(id, m);
+            World.SetState(id, ItemState.InWorld, "tray");
+            game.index.Insert(id);
+            busy.Add(id);
+            game.renderer.SetHidden(id, true);
+            StartCoroutine(Fly(def, from, m, 0.25f, () => { busy.Remove(id); game.renderer.SetHidden(id, false); }));
+            Sfx.Play("drop_floor", p, -6);
+            if (feedback) Feedback?.Invoke($"In the sorting tray: {def.displayName}", true);
+            return true;
+        }
+
         public void DepositStation(int id)
         {
             var def = World.DefOf(id);
@@ -370,6 +404,11 @@ namespace WorkshopWreckage
             }
             else if (targetType == "station")
                 foreach (var id in StationParts()) DepositStation(id);
+            else if (targetType == "tray")
+            {
+                int n = Inv.items.ToList().Count(id => DropInTray(id, false));
+                if (n > 0) Feedback?.Invoke($"{n} parts in the sorting tray — the robots will sort them", true);
+            }
         }
 
         List<int> MatchingCarried(string dest)

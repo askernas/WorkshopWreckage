@@ -157,6 +157,19 @@ namespace WorkshopWreckage
                     b.colliders.Add((G(0, size.y / 2, 0), new Vector3(size.x, size.y, size.x), Quaternion.identity));
                     break;
                 case "machine": Machine(g, b, size); break;
+                case "sorting_tray":
+                {
+                    var wood = EnvMaterials.Wood(new Color(0.55f, 0.4f, 0.24f));
+                    var dark = EnvMaterials.Wood(new Color(0.35f, 0.24f, 0.14f));
+                    b.Box(new Vector3(0, 0.01f, 0), new Vector3(size.x, 0.02f, size.z), dark);
+                    foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(sx * size.x / 2, size.y / 2, 0), new Vector3(0.04f, size.y, size.z + 0.04f), wood, true);
+                    foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(0, size.y / 2, sz * size.z / 2), new Vector3(size.x, size.y, 0.04f), wood, true);
+                    b.Box(new Vector3(-size.x / 2 + 0.05f, 0.45f, size.z / 2 + 0.03f), new Vector3(0.04f, 0.9f, 0.04f), dark);   // sign post
+                    var sign = TextAtlas.RenderSingle("SORTING TRAY", 512, 128, new Color(0.3f, 0.2f, 0.13f), new Color(0.95f, 0.8f, 0.4f), 60, true);
+                    b.Box(new Vector3(-size.x / 2 + 0.3f, 0.82f, size.z / 2 + 0.03f), new Vector3(0.52f, 0.14f, 0.02f), dark);
+                    b.Quad(new Vector3(-size.x / 2 + 0.3f, 0.82f, size.z / 2 + 0.015f), new Vector2(0.5f, 0.125f), EnvMaterials.Atlas(sign), new Rect(0, 0, 1, 1), R(Vector3.up, Mathf.PI));
+                    break;
+                }
                 case "door":
                     b.Box(new Vector3(0, size.y / 2, 0), new Vector3(size.x, size.y, 0.06f), EnvMaterials.Wood(new Color(0.35f, 0.22f, 0.13f)));
                     b.Box(new Vector3(0, size.y + 0.05f, 0), new Vector3(size.x + 0.2f, 0.1f, 0.1f), EnvMaterials.Wood(new Color(0.25f, 0.16f, 0.1f)));
