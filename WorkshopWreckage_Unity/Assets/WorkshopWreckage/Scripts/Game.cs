@@ -107,6 +107,7 @@ namespace WorkshopWreckage
             if (!StartWorld(seed, null)) return;
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
             StartCoroutine(ProbeLater());
+            if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
             else if (args.TryGetValue("bench", out var bp)) { SetState("play"); StartCoroutine(new Benchmark().Run(this, bp)); }
@@ -283,6 +284,31 @@ namespace WorkshopWreckage
         public bool MachineRunning => _machineRunning;
 
         readonly Dictionary<Light, (float intensity, int zone)> _lampBase = new();
+
+        /// <summary>QA tool (--gallery=gear [--lod=0|1]): every mesh whose geometry key starts
+        /// with the prefix, in a grid 2.5 m north of the spawn, each scaled to 25 cm.
+        /// Camera: --cam=spawnX,1.75,spawnZ,0,0 (Godot pose).</summary>
+        void BuildGallery(string prefix, int lod)
+        {
+            var keys = db.order.Select(d => db.Get(d)).GroupBy(d => d.geometryKey).Where(gk => gk.Key.StartsWith(prefix)).OrderBy(gk => gk.Key).ToList();
+            var root = new GameObject("Gallery").transform;
+            root.SetParent(transform, false);
+            int cols = 10;
+            for (int k = 0; k < keys.Count; k++)
+            {
+                var def = keys[k].First();
+                var e = MeshLibrary.Get(def.geometryKey, lod);
+                var go = new GameObject(def.geometryKey);
+                go.AddComponent<MeshFilter>().sharedMesh = e.mesh;
+                go.AddComponent<MeshRenderer>().sharedMaterials = ItemAppearance.SlotMaterials(e, ItemAppearance.For(def));
+                go.transform.SetParent(root, false);
+                var size = e.bounds.size;
+                go.transform.localScale = Vector3.one * (0.25f / Mathf.Max(size.x, size.y, size.z));
+                go.transform.position = Shared.Pos(layout.spawn.x - 1.6f + (k % cols) * 0.35f, 2.35f - (k / cols) * 0.35f, layout.spawn.z - 2.5f);
+                go.transform.rotation = Quaternion.Euler(-35, 25, 0);
+                Debug.Log($"[gallery] {k}: {def.geometryKey}");
+            }
+        }
 
         /// <summary>Unity-XZ footprints of storage units, benches and other furniture:
         /// parts lying there rest on furniture, not on the floor.</summary>

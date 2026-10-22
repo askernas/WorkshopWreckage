@@ -60,6 +60,9 @@ Shader "WorkshopWreckage/Item"
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
+            // Double-sided: any hole or wrongly wound face in a procedural part still renders
+            // (back faces get a flipped normal) instead of letting you see into the part.
+            Cull Off
             HLSLPROGRAM
             #pragma target 4.5
             #pragma vertex vert
@@ -109,8 +112,9 @@ Shader "WorkshopWreckage/Item"
                 return o;
             }
 
-            half4 frag(Varyings i) : SV_Target
+            half4 frag(Varyings i, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target
             {
+                i.normalWS = IS_FRONT_VFACE(face, i.normalWS, -i.normalWS);
                 float4 c = i.custom;
                 float n = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.xy * 0.45 + i.objPos.zz * 0.21 + c.w * 7.0).r;
                 float grime = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.zx * 0.13 + c.w * 3.0).r;
@@ -150,7 +154,7 @@ Shader "WorkshopWreckage/Item"
         {
             Name "ShadowCaster"
             Tags { "LightMode" = "ShadowCaster" }
-            ZWrite On ZTest LEqual ColorMask 0 Cull Back
+            ZWrite On ZTest LEqual ColorMask 0 Cull Off
             HLSLPROGRAM
             #pragma target 4.5
             #pragma vertex vert
@@ -188,7 +192,7 @@ Shader "WorkshopWreckage/Item"
         {
             Name "DepthOnly"
             Tags { "LightMode" = "DepthOnly" }
-            ZWrite On ColorMask R
+            ZWrite On ColorMask R Cull Off
             HLSLPROGRAM
             #pragma target 4.5
             #pragma vertex vert
@@ -207,7 +211,7 @@ Shader "WorkshopWreckage/Item"
         {
             Name "DepthNormals"
             Tags { "LightMode" = "DepthNormals" }
-            ZWrite On
+            ZWrite On Cull Off
             HLSLPROGRAM
             #pragma target 4.5
             #pragma vertex vert
@@ -222,7 +226,7 @@ Shader "WorkshopWreckage/Item"
                 o.n = TransformObjectToWorldNormal(v.normalOS);
                 return o;
             }
-            half4 frag(V2F i) : SV_Target { return half4(NormalizeNormalPerPixel(i.n), 0); }
+            half4 frag(V2F i, FRONT_FACE_TYPE face : FRONT_FACE_SEMANTIC) : SV_Target { return half4(NormalizeNormalPerPixel(IS_FRONT_VFACE(face, i.n, -i.n)), 0); }
             ENDHLSL
         }
     }
