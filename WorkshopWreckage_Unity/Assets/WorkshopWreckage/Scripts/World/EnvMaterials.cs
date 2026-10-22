@@ -129,6 +129,37 @@ namespace WorkshopWreckage
         // --- painted metal with chips ---------------------------------------------
         static readonly Dictionary<string, Texture2D> _paint = new();
         static Texture2D _paintMask;
+        /// <summary>Weathered toy-robot paint, tiled at toy scale (a few cm): rust blooms,
+        /// darker grime, fine scratches and chipped edges showing bare metal.</summary>
+        public static Material ToyPaint(Color paint)
+        {
+            var key = "toy" + ColorUtility.ToHtmlStringRGB(paint);
+            if (_cache.TryGetValue(key, out var m)) return m;
+            if (!_paint.TryGetValue(key, out var tex))
+            {
+                tex = Tex(512, key, (u, v) =>
+                {
+                    float grain = Noise(u * 22f + 0.37f, v * 22f, 2);
+                    float rust = SS(0.5f, 0.74f, Noise(u * 3f + 1.3f, v * 3f, 4));
+                    float grime = SS(0.4f, 0.78f, Noise(u * 1.6f + 7.1f, v * 1.6f, 3));
+                    float scratch = SS(0.93f, 0.98f, Noise(u * 40f, v * 3f, 2));
+                    float chip = SS(0.78f, 0.84f, Noise(u * 7f + 3.3f, v * 7f, 3) * 0.75f + grain * 0.35f);
+                    var c = paint * (0.86f + 0.22f * grain);
+                    c = Color.Lerp(c, c * new Color(0.6f, 0.48f, 0.36f), grime * 0.55f);
+                    c = Color.Lerp(c, new Color(0.4f, 0.21f, 0.09f), rust * 0.85f);
+                    c = Color.Lerp(c, new Color(0.25f, 0.2f, 0.17f), scratch * 0.6f);
+                    c = Color.Lerp(c, new Color(0.48f, 0.46f, 0.43f), chip);
+                    c.a = 1;
+                    return c;
+                });
+                _paint[key] = tex;
+            }
+            _paintMask ??= Tex(512, "paint_mask", (u, v) => new Color(0.3f, 0.5f, 0, 1), true);
+            m = Make(key, tex, _paintMask, 3f, 1, 1, Color.white);   // object space: tiles per model unit
+            m.EnableKeyword("_WW_OBJECT");
+            return m;
+        }
+
         public static Material Metal(Color paint, float chip = 0.35f)
         {
             var key = "metal" + ColorUtility.ToHtmlStringRGB(paint) + chip.ToString("0.00");

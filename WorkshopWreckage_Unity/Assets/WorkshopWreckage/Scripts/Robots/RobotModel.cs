@@ -38,6 +38,8 @@ namespace WorkshopWreckage
         protected readonly List<Renderer> eyes = new(), beacons = new();
         protected readonly List<Transform> pivots = new();
         static Material _eyeOff, _eyeOn, _beaconOff, _beaconOn;
+        protected static Material EyeOffMat => _eyeOff;
+        protected static Material BeaconOffMat => _beaconOff;
 
         protected static Material Paint(Color c, float chip = 0.5f) => EnvMaterials.Metal(c, chip);
         protected static Material Red => EnvMaterials.Metal(new Color(0.72f, 0.1f, 0.07f), 0.45f);

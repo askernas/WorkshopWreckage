@@ -59,7 +59,7 @@ Shader "WorkshopWreckage/Env"
             #pragma vertex vert
             #pragma fragment frag
             #pragma multi_compile_instancing
-            #pragma multi_compile_local _ _WW_UV
+            #pragma multi_compile_local _ _WW_UV _WW_OBJECT
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
             #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
@@ -78,6 +78,8 @@ Shader "WorkshopWreckage/Env"
                 float3 normalWS : TEXCOORD1;
                 float2 uv : TEXCOORD2;
                 float fog : TEXCOORD3;
+                float3 positionOS : TEXCOORD4;
+                float3 normalOS : TEXCOORD5;
             };
 
             Varyings vert(Attributes v)
@@ -89,6 +91,8 @@ Shader "WorkshopWreckage/Env"
                 o.positionWS = p.positionWS;
                 o.normalWS = TransformObjectToWorldNormal(v.normalOS);
                 o.uv = v.uv;
+                o.positionOS = v.positionOS.xyz;
+                o.normalOS = v.normalOS;
                 o.fog = ComputeFogFactor(p.positionCS.z);
                 return o;
             }
@@ -99,6 +103,11 @@ Shader "WorkshopWreckage/Env"
                 #if defined(_WW_UV)
                     float4 albedo = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv);
                     float4 mask = float4(1, 1, 1, 1);
+                #elif defined(_WW_OBJECT)
+                    // things that move (robots): the wear sticks to the object instead of the room
+                    float3 on = normalize(i.normalOS);
+                    float4 albedo = SampleTri(TEXTURE2D_ARGS(_MainTex, sampler_MainTex), i.positionOS, on);
+                    float4 mask = SampleTri(TEXTURE2D_ARGS(_MaskTex, sampler_MaskTex), i.positionOS, on);
                 #else
                     float4 albedo = SampleTri(TEXTURE2D_ARGS(_MainTex, sampler_MainTex), i.positionWS, n);
                     float4 mask = SampleTri(TEXTURE2D_ARGS(_MaskTex, sampler_MaskTex), i.positionWS, n);

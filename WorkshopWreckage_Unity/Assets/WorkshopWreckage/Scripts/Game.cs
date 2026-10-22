@@ -107,6 +107,7 @@ namespace WorkshopWreckage
             if (!StartWorld(seed, null)) return;
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
             StartCoroutine(ProbeLater());
+            if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
@@ -284,6 +285,32 @@ namespace WorkshopWreckage
         public bool MachineRunning => _machineRunning;
 
         readonly Dictionary<Light, (float intensity, int zone)> _lampBase = new();
+
+        /// <summary>Model QA (--robotview=retrobot): the robot fully assembled, frozen in its
+        /// rest pose 1.2 m north of the spawn, facing south, with a soft studio key / fill /
+        /// rim light. Cameras (Godot poses): front spawnX,0.2,spawnZ-0.7,0,-4 ·
+        /// side spawnX+0.5,0.2,spawnZ-1.2,90,-4 · back spawnX,0.2,spawnZ-1.7,180,-4.</summary>
+        void RobotView(string id)
+        {
+            var r = robots.Find(x => x.id == id);
+            if (r == null) return;
+            foreach (var d in db.RobotPartIds(id))
+                foreach (var i in world.IdsOf(d))
+                {
+                    if (world.instances[i].state == ItemState.InWorld) { index.Remove(i); world.SetState(i, ItemState.Carried, "player"); }
+                    if (world.instances[i].state != ItemState.Stored) storage.Deposit(world.DefOf(i).storageBox, i);
+                }
+            repairBay.Refresh();
+            r.enabled = false;
+            var pos = Shared.Pos(layout.spawn.x, 0, layout.spawn.z - 1.2f);
+            r.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(Vector3.back));   // faces south, towards the camera
+            foreach (var (off, col, inten) in new[] { (new Vector3(0.45f, 0.55f, -0.5f), new Color(1f, 0.93f, 0.82f), 0.6f), (new Vector3(-0.5f, 0.35f, -0.4f), new Color(0.75f, 0.82f, 1f), 0.25f), (new Vector3(0.1f, 0.6f, 0.6f), new Color(1f, 0.9f, 0.75f), 0.45f) })
+            {
+                var lg = new GameObject("StudioLight").AddComponent<Light>();
+                lg.type = LightType.Point; lg.range = 2.5f; lg.color = col; lg.intensity = inten;
+                lg.transform.position = pos + off;
+            }
+        }
 
         /// <summary>QA tool (--gallery=gear [--lod=0|1]): every mesh whose geometry key starts
         /// with the prefix, in a grid 2.5 m north of the spawn, each scaled to 25 cm.
