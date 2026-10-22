@@ -13,7 +13,11 @@ namespace WorkshopWreckage
         const int Chunk = 500;
         /// <summary>Parts smaller than this (bounding radius, m) don't cast shadows: their
         /// shadows are barely visible but every group is drawn again per shadow cascade.</summary>
-        const float ShadowMinRadius = 0.07f;   // parts under ~14 cm across cast no shadow (GPU budget, Massive)
+        /// <summary>Part shadows (Settings, saved in PlayerPrefs "ww_part_shadows"): 0 = every part,
+        /// 1 = parts from ~14 cm across (default: the GPU budget on Massive), 2 = none (slower PCs).</summary>
+        public static int ShadowMode = UnityEngine.PlayerPrefs.GetInt("ww_part_shadows", 1);
+        public static readonly string[] ShadowModeNames = { "every part", "larger parts only", "off" };
+        static float ShadowMinRadius => ShadowMode == 0 ? 0.045f : ShadowMode == 1 ? 0.07f : float.MaxValue;
 
         class Group
         {
@@ -88,9 +92,11 @@ namespace WorkshopWreckage
                     var (albedo, custom) = ItemAppearance.Params(def);
                     float jitter = 0.9f + 0.2f * Rand01(id);
                     var lin = albedo * jitter;   // raw values, as Godot's instance colours
-                    custom.z = Mathf.Clamp01(custom.z * (0.7f + 0.6f * Rand01(id * 7 + 3)));
+                    // salvage workshop: most parts are used and worn; ~15 % are new (clean, still matte)
+                    bool fresh = Rand01(id * 31 + 5) < 0.15f;
+                    custom.z = fresh ? custom.z * 0.15f : Mathf.Clamp01(0.45f + custom.z * 0.8f + 0.25f * Rand01(id * 7 + 3));
                     custom.w = Rand01(id * 13 + 1);
-                    data[(offset + k) * 2] = new Vector4(lin.r, lin.g, lin.b, 1);
+                    data[(offset + k) * 2] = new Vector4(lin.r, lin.g, lin.b, ItemAppearance.SurfaceClass(def));
                     data[(offset + k) * 2 + 1] = custom;
                 }
                 offset += ids.Count;

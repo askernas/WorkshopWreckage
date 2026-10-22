@@ -29,6 +29,9 @@ Shader "WorkshopWreckage/Item"
     TEXTURE2D(_WearNoise); SAMPLER(sampler_WearNoise);
     StructuredBuffer<float4> _ItemData;
     float _ItemOffset;
+    // salvage look: the share of the PBR reflection kept (0.12: far below a clean part's);
+    // a global so QA can compare (0 or unset = the 0.25 default)
+    float _WWItemGloss;
     float _WWItemDebug;   // QA (--itemdebug): 1 normals, 2 ambient only, 3 main light only, 4 additional lights only
 
     struct Attributes
@@ -94,6 +97,7 @@ Shader "WorkshopWreckage/Item"
                 float3 axisWS : TEXCOORD5;
                 float4 custom : TEXCOORD6;
                 float fog : TEXCOORD7;
+                float matClass : TEXCOORD8;   // 1 bare metal, 0.5 painted, ~0 electronics / accents
             };
 
             Varyings vert(Attributes v)
@@ -111,6 +115,7 @@ Shader "WorkshopWreckage/Item"
                 o.color = float4(v.color.rgb * albedo.rgb, v.color.a);
                 o.objPos = v.positionOS.xyz;
                 o.custom = custom;
+                o.matClass = albedo.a;
                 o.fog = ComputeFogFactor(p.positionCS.z);
                 return o;
             }
@@ -124,10 +129,38 @@ Shader "WorkshopWreckage/Item"
                 float thread = i.color.a;
                 float ridge = sin(i.uv.y * 6.2831853);
                 float3 baseCol = i.color.rgb;
-                baseCol *= lerp(1.0, 0.62 + 0.55 * n, wear);
-                baseCol = lerp(baseCol, baseCol * float3(0.55, 0.45, 0.35), smoothstep(0.62, 0.85, grime) * wear * 0.6);
+                // ---- salvage: grime, rust, chipped paint, scratches, dents, dust (all scale with wear)
+                float cls = i.matClass;
+                float metalW = saturate((cls - 0.6) * 4.0);
+                float paintW = saturate(1.0 - abs(cls - 0.5) * 6.0);
+                float big = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.xz * 0.31 + i.objPos.yy * 0.17 + c.w * 5.0).r;
+                float fine = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.xy * 2.3 + i.objPos.zz * 1.7 + c.w * 11.0).r;
+                float scr = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, float2(i.objPos.x * 9.0 + i.objPos.z * 3.0, i.objPos.y * 0.6) + c.w * 13.0).r;
+                baseCol *= lerp(1.0, 0.55 + 0.6 * n, wear);                                       // uneven, handled surface
+                baseCol *= lerp(1.0, 0.78, wear);                                                 // salvage is dull, never factory-bright
+                float oil = smoothstep(0.5, 0.8, grime) * wear;
+                baseCol = lerp(baseCol, baseCol * float3(0.42, 0.36, 0.3), oil * 0.8);            // oily grime (large)
+                float dirt = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.yz * 1.1 + i.objPos.xx * 0.7 + c.w * 23.0).r;
+                baseCol = lerp(baseCol, baseCol * float3(0.5, 0.44, 0.38), smoothstep(0.55, 0.75, dirt) * wear * 0.6);   // smudges (small)
+                float3 rustCol = lerp(float3(0.30, 0.17, 0.09), float3(0.45, 0.25, 0.12), fine);
+                // rust in patches (about a third of a fully worn part), steel stays steel elsewhere
+                float rustMask = smoothstep(0.64 - 0.25 * wear, 0.76 - 0.25 * wear, big * 0.6 + fine * 0.4) * wear * metalW;
+                // paint chips: small and mostly at the part's edges / corners (far from its centre)
+                float chipN = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.xy * 7.0 + i.objPos.zz * 5.0 + c.w * 17.0).r;
+                float edge = saturate(length(i.objPos) * 1.6 - 0.45);
+                float chip = smoothstep(0.76 - 0.15 * wear, 0.80 - 0.15 * wear, chipN * (0.75 + 0.45 * edge)) * paintW * wear;
+                baseCol = lerp(baseCol, lerp(float3(0.24, 0.22, 0.2), rustCol, 0.35), chip);
+                baseCol = lerp(baseCol, rustCol, rustMask);
+                float scratch = smoothstep(0.74, 0.77, scr) * wear * (1.0 - rustMask);
+                baseCol = lerp(baseCol, baseCol * 1.3 + 0.05, scratch * 0.45);                     // bright scratches
+                float up = saturate(i.normalWS.y);
+                float dust = up * up * wear * (0.3 + 0.45 * grime);
+                baseCol = lerp(baseCol, float3(0.41, 0.39, 0.36), dust * 0.55);                    // dust on top faces
                 baseCol *= 1.0 - thread * 0.32 * (0.5 - 0.5 * ridge);
                 float rough = clamp(c.y + (n - 0.5) * 0.4 * wear + thread * 0.08, 0.18, 1.0);
+                rough = lerp(rough, 1.0, max(max(rustMask, chip), saturate(dust * 1.5)));
+                rough = lerp(rough, 1.0, 0.35 * wear);
+                i.normalWS += (float3(fine - 0.5, 0, big - 0.5)) * 0.35 * wear;                   // small dents
 
                 InputData d = (InputData)0;
                 d.positionWS = i.positionWS;
@@ -141,8 +174,9 @@ Shader "WorkshopWreckage/Item"
 
                 SurfaceData s = (SurfaceData)0;
                 s.albedo = baseCol;
-                s.metallic = c.x;
-                s.smoothness = 1.0 - rough;
+                float gloss = _WWItemGloss > 0 ? _WWItemGloss : 0.12;
+                s.metallic = c.x * (1.0 - rustMask) * (1.0 - chip) * 0.3;
+                s.smoothness = (1.0 - rough) * gloss;   // 75 % less reflection: no plastic sheen, even on new parts
                 s.occlusion = 1.0;
                 s.alpha = 1.0;
                 half4 col = UniversalFragmentPBR(d, s);

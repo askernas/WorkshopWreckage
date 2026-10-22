@@ -13,12 +13,12 @@ namespace WorkshopWreckage
             // workshop parts are oily and worn: metals are only partly mirror-like, so a part on the
             // floor shows the light falling on it instead of reflecting the dark room above
             // without environment reflections metals would look dark: they are mostly diffuse here
-            ["steel"] = new P(new Color(0.58f, 0.59f, 0.6f), 0.3f, 0.5f, 0.5f),
-            ["stainless"] = new P(new Color(0.7f, 0.71f, 0.73f), 0.35f, 0.38f, 0.15f),
-            ["brass"] = new P(new Color(0.86f, 0.66f, 0.30f), 0.35f, 0.4f, 0.40f),
-            ["copper"] = new P(new Color(0.88f, 0.50f, 0.33f), 0.35f, 0.42f, 0.45f),
-            ["aluminium"] = new P(new Color(0.75f, 0.76f, 0.78f), 0.3f, 0.5f, 0.20f),
-            ["painted"] = new P(new Color(0.7f, 0.7f, 0.7f), 0.05f, 0.5f, 0.6f),
+            ["steel"] = new P(new Color(0.40f, 0.40f, 0.41f), 0.3f, 0.6f, 0.5f),
+            ["stainless"] = new P(new Color(0.46f, 0.47f, 0.48f), 0.35f, 0.5f, 0.15f),
+            ["brass"] = new P(new Color(0.62f, 0.47f, 0.22f), 0.35f, 0.55f, 0.40f),
+            ["copper"] = new P(new Color(0.62f, 0.36f, 0.24f), 0.35f, 0.55f, 0.45f),
+            ["aluminium"] = new P(new Color(0.50f, 0.51f, 0.52f), 0.3f, 0.6f, 0.20f),
+            ["painted"] = new P(new Color(0.6f, 0.6f, 0.6f), 0.05f, 0.6f, 0.6f),
             ["oxidized"] = new P(new Color(0.52f, 0.26f, 0.11f), 0.1f, 0.9f, 1.0f),
             ["worn"] = new P(new Color(0.42f, 0.42f, 0.43f), 0.25f, 0.65f, 0.70f),
             ["electronic"] = new P(new Color(1, 1, 1), 0.0f, 0.45f, 0.15f),
@@ -30,16 +30,20 @@ namespace WorkshopWreckage
         public static (Color albedo, Vector4 custom) Params(ItemDefinition def)
         {
             var p = Materials.TryGetValue(def.material, out var m) ? m : Materials["steel"];
-            if (def.material == "painted" || def.material == "electronic") p.albedo = def.variantColor;
+            if (def.material == "painted") p.albedo = def.variantColor * 0.85f;   // worn paint, never bright
+            if (def.material == "electronic") p.albedo = def.variantColor;
             switch (def.finish)
             {
-                case "zinc": p.albedo = new Color(0.6f, 0.64f, 0.68f); p.roughness = 0.30f; break;
+                case "zinc": p.albedo = new Color(0.42f, 0.44f, 0.46f); p.roughness = 0.45f; break;
                 case "black_oxide": p.albedo = new Color(0.2f, 0.2f, 0.21f); p.metallic = 0.25f; p.roughness = 0.5f; break;
-                case "polished": p.roughness = Mathf.Max(0.18f, p.roughness - 0.15f); p.wear *= 0.3f; break;
+                case "polished": p.roughness = Mathf.Max(0.35f, p.roughness - 0.15f); p.wear *= 0.3f; p.albedo *= 1.12f; break;
             }
             if (def.subcategory == "led") p.roughness = 0.15f;
             return (p.albedo, new Vector4(p.metallic, p.roughness, p.wear, 0));
         }
+
+        /// <summary>For the shader's wear: 1 bare metal (rusts), 0.5 painted (chips), 0.05 electronics.</summary>
+        public static float SurfaceClass(ItemDefinition def) => def.material == "electronic" ? 0.05f : def.material == "painted" ? 0.5f : 1f;
 
         static Shader _shader;
         static Texture2D _noise;
@@ -80,7 +84,8 @@ namespace WorkshopWreckage
             var (albedo, c) = Params(def);
             var key = def.material + "|" + def.finish + "|" + ColorUtility.ToHtmlStringRGB(albedo);
             if (_cache.TryGetValue(key, out var m)) return m;
-            m = Make(albedo, c.x, c.y, c.z);
+            albedo.a = SurfaceClass(def);
+            m = Make(albedo, c.x, c.y, Mathf.Clamp01(0.45f + c.z * 0.8f));   // held / inspected: as worn as the parts on the floor
             _cache[key] = m;
             return m;
         }
@@ -98,8 +103,8 @@ namespace WorkshopWreckage
         }
 
         static Material _tin, _accent;
-        public static Material Tin => _tin ??= Make(new Color(0.78f, 0.78f, 0.76f), 1, 0.35f, 0);
-        public static Material Accent => _accent ??= Make(Color.white, 0, 0.6f, 0.1f);
+        public static Material Tin => _tin ??= Make(new Color(0.5f, 0.5f, 0.49f), 0.4f, 0.6f, 0.3f);   // tinned pins: dull, not chrome
+        public static Material Accent => _accent ??= Make(new Color(1, 1, 1, 0.05f), 0, 0.6f, 0.1f);   // accents: no rust or chips
 
         /// <summary>Materials for each submesh of an entry (slot 0 = part material).</summary>
         public static Material[] SlotMaterials(MeshLibrary.Entry e, Material primary)

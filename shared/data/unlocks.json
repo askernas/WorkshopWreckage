@@ -1,7 +1,7 @@
 {
 	"note": "TEST-PHASE CONFIG: every level at which something unlocks. Robot blueprints (incl. crafted extra units) and player skills. Edit freely while testing: the game reads this file at start, and a test build also reads an edited copy placed next to the exe (WorkshopWreckage_Data/../unlocks.json) without a rebuild. A release build (WW_RELEASE) compiles the values in and ignores external copies. debug_mode: shows the 'DEBUG: unlock now' button at the Robot Workbench (also --debug on the command line); ignored in release builds.",
 	"debug_mode": true,
-	"robots": {"retrobot": 2, "unibot": 5, "spiderbot": 9, "caterpillarbot": 14, "hoverbot": 19, "hoverbot_2": 21, "hoverbot_3": 23, "sorting_arm": 11, "sorting_arm_2": 15, "sorting_arm_3": 20},
+	"robots": {"retrobot": 2, "unibot": 5, "spiderbot": 9, "caterpillarbot": 14, "hoverbot": 19, "hoverbot_2": 20, "hoverbot_3": 21, "sorting_arm": 11, "sorting_arm_2": 15, "sorting_arm_3": 20},
 	"skills": {"pockets_1": 5, "pockets_2": 12, "organiser": 6, "quick_hands": 3, "inventory_manifest": 4, "long_reach": 4, "bulk_pickup": 5, "magnet_1": 7, "magnet_2": 10, "filter_material": 9, "filter_category": 11, "scanner_1": 3, "scanner_2": 13, "supermagnet": 18, "robot_coordination": 8, "robot_coordination_2": 16, "auto_delivery": 20, "area_collection": 22},
 	"respec": 12
 }

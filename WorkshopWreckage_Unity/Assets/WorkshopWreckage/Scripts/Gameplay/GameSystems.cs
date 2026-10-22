@@ -452,7 +452,9 @@ namespace WorkshopWreckage
     /// <summary>Versioned JSON delta saves (same structure as the Godot SaveSystem).</summary>
     public static class SaveSystem
     {
-        public const int Version = 1;
+        /// <summary>2: every saved part also records its definition id (item_defs), so a save
+        /// survives catalog changes (SaveMigration). Version 1 saves still load unchanged.</summary>
+        public const int Version = 2;
         public static readonly string[] Slots = { "quick", "slot1", "slot2", "slot3" };
         public static string Dir => System.IO.Path.Combine(Application.persistentDataPath, "saves");
         public static string PathOf(string slot) => System.IO.Path.Combine(Dir, slot + ".json");
@@ -460,9 +462,11 @@ namespace WorkshopWreckage
         public static Dictionary<string, object> Serialize(Game g)
         {
             var items = new List<object>();
+            var itemDefs = new List<object>();
             foreach (var i in g.world.instances)
             {
                 if (i.state == ItemState.InWorld && !i.moved) continue;
+                itemDefs.Add((double)i.defId);
                 var e = new List<object> { (double)i.id, (double)(int)i.state, i.owner };
                 if (i.state == ItemState.InWorld)
                     for (int k = 0; k < 16; k++) e.Add((double)i.transform[k]);
@@ -480,7 +484,7 @@ namespace WorkshopWreckage
                 ["robots"] = g.robots.ToDictionary(r => r.id, r => (object)r.ToDict()),
                 ["objectives"] = g.objectives.ToList(),
                 ["workbench"] = g.workbench.ToDict(),
-                ["items"] = items, ["storage"] = storage,
+                ["items"] = items, ["item_defs"] = itemDefs, ["storage"] = storage,
                 ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),
                 ["player"] = new Dictionary<string, object> { ["pos"] = new List<object> { (double)p.position.x, (double)p.position.y, (double)p.position.z }, ["yaw"] = (double)g.player.Yaw, ["pitch"] = (double)g.player.Pitch },
@@ -521,10 +525,14 @@ namespace WorkshopWreckage
             if (d == null) return "No save in that slot.";
             if (Json.Int(d, "version") > Version) return "This save was made by a newer version of the game.";
             if (Json.Str(d, "preset", "standard") != db.presetId) return $"This save belongs to the {Json.Str(d, "preset")} world size.";
-            if (Json.Int(d, "catalog_version", 1) != Json.Int(db.config, "version", 1)) return "This save was made with a different catalog version.";
-            if (Json.Str(d, "catalog_hash") != db.catalogHash.ToString()) return "This save was made with a different item catalog.";
+            bool sameCatalog = Json.Int(d, "catalog_version", 1) == Json.Int(db.config, "version", 1) && Json.Str(d, "catalog_hash") == db.catalogHash.ToString();
+            if (!sameCatalog && !d.ContainsKey("item_defs")) return "This save was made with an older item catalog and can't be converted (saves from before 2026-10-22).";
             return "";
         }
+
+        /// <summary>Does this save need SaveMigration for the current catalog?</summary>
+        public static bool NeedsMigration(Dictionary<string, object> d, ItemDatabase db)
+            => Json.Int(d, "catalog_version", 1) != Json.Int(db.config, "version", 1) || Json.Str(d, "catalog_hash") != db.catalogHash.ToString();
 
         public static void ApplyItems(Dictionary<string, object> d, ItemWorld w)
         {
@@ -550,6 +558,79 @@ namespace WorkshopWreckage
             if (d == null) return slot + " — empty";
             var st = Json.Obj(d["stats"]);
             return $"{slot} — {WorldLabel(d)}  ·  {Json.Str(d, "saved_at").Replace('T', ' ')}  ·  level {Json.Int(st, "level", 1)}  ·  {Json.Int(st, "sorted")} sorted ({Json.Num(st, "percent"):0.0}%)";
+        }
+    }
+
+    /// <summary>Carries a save over to a changed item catalog (IMPLEMENTATION_AUDIT P1-4).
+    /// The world is generated from the new catalog with the save's seed; every saved part is
+    /// matched to an unused part of the same definition (definition ids are stable), keeping
+    /// its state, owner, place and storage. A part stored in a destination that no longer
+    /// holds its definition goes to the definition's current destination. Parts of removed
+    /// definitions are dropped (XP already earned stays); extra copies stay unsorted in the
+    /// world. Instance ids in the inventory and the per-part sort-XP record are remapped.</summary>
+    public static class SaveMigration
+    {
+        public static Dictionary<string, object> Remap(Dictionary<string, object> d, ItemWorld w, ItemDatabase db, out string report)
+        {
+            var rows = Json.Arr(d["items"]);
+            var defs = Json.Arr(d["item_defs"]);
+            var free = new Dictionary<int, Queue<int>>();
+            foreach (var inst in w.instances)
+            {
+                if (!free.TryGetValue(inst.defId, out var q)) free[inst.defId] = q = new Queue<int>();
+                q.Enqueue(inst.id);
+            }
+            // sorted / installed / carried parts first: they carry progress
+            var order = Enumerable.Range(0, rows.Count).OrderBy(k => (int)(double)((List<object>)rows[k])[1] == (int)ItemState.InWorld ? 1 : 0).ThenBy(k => k).ToList();
+            var map = new Dictionary<int, int>();
+            var newRows = new List<object>();
+            var storage = new Dictionary<string, object>();
+            int dropped = 0, rehomed = 0;
+            foreach (int k in order)
+            {
+                var e = new List<object>((List<object>)rows[k]);
+                int oldId = (int)(double)e[0], defId = (int)(double)defs[k];
+                if (!free.TryGetValue(defId, out var q) || q.Count == 0) { dropped++; continue; }
+                int nid = q.Dequeue();
+                map[oldId] = nid;
+                e[0] = (double)nid;
+                var state = (ItemState)(int)(double)e[1];
+                // unsorted parts go back to where the new world generated them: the layout may
+                // have changed with the catalog, so an old position could be inside furniture now
+                if (state == ItemState.InWorld) { e = new List<object> { e[0], e[1], "world" }; }
+                if (state == ItemState.Stored && e[2] is string owner && owner.StartsWith("box:"))
+                {
+                    string box = owner.Substring(4);
+                    var def = db.Get(defId);
+                    bool station = db.stations.ContainsKey(box);
+                    if (!station && (!db.boxes.ContainsKey(box) || def.storageBox != box)) { box = def.storageBox; e[2] = "box:" + box; rehomed++; }
+                    if (!storage.TryGetValue(box, out var l)) storage[box] = l = new List<object>();
+                    ((List<object>)l).Add((double)nid);
+                }
+                newRows.Add(e);
+            }
+            var o = new Dictionary<string, object>(d)
+            {
+                ["items"] = newRows,
+                ["item_defs"] = newRows.Select(r => (object)(double)w.instances[(int)(double)((List<object>)r)[0]].defId).ToList(),
+                ["storage"] = storage,
+                ["catalog_hash"] = db.catalogHash.ToString(),
+                ["catalog_version"] = (double)Json.Int(db.config, "version", 1),
+                ["item_count"] = (double)w.Count,
+            };
+            var inv = new Dictionary<string, object>(Json.Obj(d["inventory"]));
+            inv["items"] = Json.Arr(inv.GetValueOrDefault("items")).Select(x => (int)(double)x).Where(map.ContainsKey).Select(x => (object)(double)map[x]).ToList();
+            if (db.Get(Json.Int(inv, "held_def", -1)) == null) inv["held_def"] = -1.0;
+            o["inventory"] = inv;
+            var prog = new Dictionary<string, object>(Json.Obj(d["progression"]));
+            prog["sort_rewarded"] = Json.Arr(prog.GetValueOrDefault("sort_rewarded")).Select(x => (int)(double)x).Where(map.ContainsKey).Select(x => (object)(double)map[x]).ToList();
+            o["progression"] = prog;
+            var progress = new Dictionary<string, object>(Json.Obj(d["progress"]));
+            progress["discovered"] = Json.Arr(progress.GetValueOrDefault("discovered")).Where(x => db.Get((int)(double)x) != null).ToList();
+            progress["revealed"] = Json.Arr(progress.GetValueOrDefault("revealed")).Where(x => db.Get((int)(double)x) != null).ToList();
+            o["progress"] = progress;
+            report = $"{map.Count} parts carried over" + (rehomed > 0 ? $", {rehomed} moved to their new destinations" : "") + (dropped > 0 ? $", {dropped} of removed kinds dropped" : "");
+            return o;
         }
     }
 }

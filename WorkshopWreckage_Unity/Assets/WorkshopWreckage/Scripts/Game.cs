@@ -120,6 +120,7 @@ namespace WorkshopWreckage
             if (!StartWorld(seed, null)) return;
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
             StartCoroutine(ProbeLater());
+            if (args.TryGetValue("partshadows", out var psm)) ItemRenderer.ShadowMode = Mathf.Clamp(int.Parse(psm), 0, 2);   // QA / benchmark
             // QA: item lighting terms (1 normals, 2 ambient, 3 main light, 4 additional lights)
             if (args.TryGetValue("itemdebug", out var idm)) Shader.SetGlobalFloat("_WWItemDebug", float.Parse(idm, System.Globalization.CultureInfo.InvariantCulture));
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
@@ -193,8 +194,12 @@ namespace WorkshopWreckage
         Transform _posters;
         WorkshopLayout _postersFor;
 
+        /// <summary>What the last load had to convert (empty if the catalog was unchanged).</summary>
+        public string migrationReport = "";
+
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
+            migrationReport = "";
             if (_layoutSeed != seed && !BuildWorkshop(seed)) return false;
             var gen = new WorldGenerator { forbidden = InsideContainerG };
             int total = Json.Int(db.config, "total_items", 4096);
@@ -208,6 +213,12 @@ namespace WorkshopWreckage
             renderer.transform.SetParent(transform, false);
             storage = new StorageSystem(db, world) { placement = StoragePlacement, straysIn = box => StraysIn(box).Count };
             inventory = new Inventory(world);
+            if (save != null && SaveSystem.NeedsMigration(save, db))
+            {
+                save = SaveMigration.Remap(save, world, db, out var report);
+                migrationReport = report;
+                Debug.Log("[save] migrated to the current catalog: " + report);
+            }
             if (save != null) SaveSystem.ApplyItems(save, world);
             progress = new ProgressTracker(world, layout.zones.Select(z => z.name).ToList());
             if (save != null)
@@ -226,6 +237,7 @@ namespace WorkshopWreckage
             }
             renderer.Build(world);
             index = new ItemSpatialIndex(world);
+            if (save != null) SettleAfterLoad();
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
             interaction.ResetState();
@@ -289,6 +301,113 @@ namespace WorkshopWreckage
 
         /// <summary>Highest furniture surface (bench, shelf deck, pallet) or the floor under a
         /// Unity-space point, no higher than maxY.</summary>
+        /// <summary>Is this part covered: do parts lying on top of it hide at least half of its
+        /// top (bounding boxes)? Covered parts can't be grabbed until what lies on them is gone:
+        /// the same for the player's tools and the ground robots (IMPLEMENTATION_AUDIT §E.2).</summary>
+        public bool Covered(int id)
+        {
+            var b = index.WorldBounds(id);
+            float area = b.size.x * b.size.z;
+            if (area <= 1e-6f) return false;
+            float cover = 0;
+            foreach (var o in index.QuerySphere(b.center + Vector3.up * b.extents.y, Mathf.Max(b.extents.x, b.extents.z) + 0.3f))
+            {
+                if (o == id || world.instances[o].state != ItemState.InWorld || interaction.busy.Contains(o)) continue;
+                var ob = index.WorldBounds(o);
+                if (ob.min.y < b.max.y - 0.02f) continue;   // beside or below, not on top
+                float ox = Mathf.Min(b.max.x, ob.max.x) - Mathf.Max(b.min.x, ob.min.x), oz = Mathf.Min(b.max.z, ob.max.z) - Mathf.Max(b.min.z, ob.min.z);
+                if (ox > 0 && oz > 0) cover += ox * oz;
+                if (cover >= area * 0.5f) return true;
+            }
+            return false;
+        }
+
+        /// <summary>A part saved while it was still falling would load hanging in the air: after a
+        /// load every moved part comes down onto its real support (lowest first, so stacks settle).</summary>
+        void SettleAfterLoad()
+        {
+            var moved = world.instances.Where(i => i.state == ItemState.InWorld && i.moved).OrderBy(i => i.Position.y).ToList();
+            var none = new Dictionary<int, float>();
+            int n = 0;
+            foreach (var i in moved)
+            {
+                var b = index.WorldBounds(i.id);
+                float dy = b.min.y - interaction.SupportUnder(i.id, b, none);
+                if (dy < 0.012f) continue;
+                var m = i.transform;
+                m.m13 -= dy;
+                index.Remove(i.id);
+                world.SetTransform(i.id, m);
+                index.Insert(i.id);
+                n++;
+            }
+            if (n > 0) Debug.Log($"[load] {n} part(s) saved mid-fall settled");
+        }
+
+        /// <summary>Highest deck a dropped part may rest on (bench, pallet, tray, low open shelf).</summary>
+        public const float MaxDropDeck = 1.25f;
+
+        bool InBlocker(Vector3 p)
+        {
+            var q = new Vector2(p.x, -p.z);
+            foreach (var b in layout.floorBlockers) if (b.Contains(q)) return true;
+            return false;
+        }
+
+        /// <summary>Where a part may be set down near `want`: inside the room, never on top of
+        /// a storage unit or inside furniture or a closed container (it slides back towards
+        /// `from` until the floor is open), resting on the floor or a low deck (up to MaxDropDeck).</summary>
+        public Vector3 SafeDropPoint(Vector3 want, Vector3 from)
+        {
+            float m = 0.25f;
+            Vector3 Clamp(Vector3 v) => new(Mathf.Clamp(v.x, layout.roomMin.x + m, layout.roomMax.x - m), 0, Mathf.Clamp(v.z, -layout.roomMax.z + m, -layout.roomMin.z - m));
+            var p = Clamp(new Vector3(want.x, 0, want.z));
+            var f = Clamp(new Vector3(from.x, 0, from.z));
+            for (int k = 0; k <= 40; k++)
+            {
+                var q = Vector3.Lerp(p, f, k / 40f);
+                float deck = SurfaceBelow(q, Mathf.Min(want.y + 0.1f, MaxDropDeck));
+                bool onDeck = deck > 0.01f;
+                if ((!InBlocker(q) || onDeck) && !InsideContainer(q + Vector3.up * (deck + 0.05f), 0)) return new Vector3(q.x, deck, q.z);
+            }
+            return new Vector3(f.x, 0, f.z);
+        }
+
+        /// <summary>World integrity (log only, never repairs by itself): unsorted parts a player
+        /// could not reach: outside the room, higher than any deck a part may rest on, inside a
+        /// closed container, or on the floor under a storage unit.</summary>
+        public List<(int id, string why)> UnreachableParts()
+        {
+            var o = new List<(int, string)>();
+            if (world == null) return o;
+            float maxY = WorkshopLayout.MaxStrayShelf + 0.7f;
+            foreach (var i in world.instances)
+            {
+                if (i.state != ItemState.InWorld || interaction.busy.Contains(i.id)) continue;
+                var p = i.Position;
+                if (p.x < layout.roomMin.x || p.x > layout.roomMax.x || -p.z < layout.roomMin.z || -p.z > layout.roomMax.z) o.Add((i.id, "outside the room"));
+                else if (p.y > maxY && !InTray(p)) o.Add((i.id, $"too high ({p.y:0.00} m)"));
+                else if (InsideContainer(p, 0)) o.Add((i.id, "inside a container"));
+                else if (p.y < 0.2f && UnitAt(p) != null && SurfaceBelow(p, p.y + 0.05f) < 0.01f) o.Add((i.id, "under a storage unit"));
+            }
+            return o;
+        }
+
+        /// <summary>Moves every unreachable part (see UnreachableParts) into the sorting tray.</summary>
+        public int RecoverUnreachable()
+        {
+            int n = 0;
+            foreach (var (id, _) in UnreachableParts())
+            {
+                index.Remove(id);
+                world.SetTransform(id, interaction.TrayMatrix(world.DefOf(id)));
+                world.SetState(id, ItemState.InWorld, "tray");
+                index.Insert(id);
+                n++;
+            }
+            return n;
+        }
+
         public float SurfaceBelow(Vector3 p, float maxY)
         {
             float best = 0;
@@ -696,6 +815,8 @@ namespace WorkshopWreckage
                 return;
             }
             _overwriteArmed = null;
+            var bad = UnreachableParts();
+            if (bad.Count > 0) Debug.LogWarning($"[integrity] {bad.Count} unreachable part(s) at save: " + string.Join("; ", bad.Take(8).Select(b => $"{db.Get(world.instances[b.id].defId).displayName}: {b.why}")));
             if (SaveSystem.Write(slot, SaveSystem.Serialize(this)))
             {
                 Sfx.Play("save", null, -6);
@@ -713,8 +834,14 @@ namespace WorkshopWreckage
             var problem = SaveSystem.Check(d, db);
             if (problem != "") { hud.OnFeedback(problem, false); hud.SetStatus(problem); return; }
             int count = Json.Int(d, "item_count", -1);
-            itemCount = count == Json.Int(db.config, "total_items", 4096) ? -1 : count;
-            if (StartWorld(Json.Int(d, "seed"), d)) { SetState("play"); hud.Toast("Loaded " + slot); }
+            itemCount = count == Json.Int(db.config, "total_items", 4096) || SaveSystem.NeedsMigration(d, db) ? -1 : count;
+            if (StartWorld(Json.Int(d, "seed"), d))
+            {
+                SetState("play");
+                hud.Toast("Loaded " + slot + (migrationReport != "" ? $"  ·  converted to the current parts catalog: {migrationReport}" : ""), migrationReport != "");
+                var bad = UnreachableParts();
+                if (bad.Count > 0) Debug.LogWarning($"[integrity] {bad.Count} unreachable part(s) after load (Esc: Recover unreachable parts)");
+            }
         }
 
         // ---------------------------------------------------------------- storage

@@ -164,11 +164,17 @@ namespace WorkshopWreckage
                 // unsorted parts lying on shelves and pallets could never be aimed at
                 if (h.collider.gameObject.layer == Layers.Env) { envT = h.distance; break; }
             }
-            var (pid, _) = game.index.Pick(o, dir, envT + 0.03f, busy);
+            var (pid, pdist) = game.index.Pick(o, dir, envT + 0.03f, busy);
             targetType = "none";
             targetItem = -1;
             targetDest = null;
             targetUnit = null;
+            // a pile in front of a drawer must not stop you storing into it: while you hold a part
+            // that belongs right there, aiming through the pile (within 0.8 m of it) selects the drawer
+            if (pid >= 0 && hit.HasValue && Inv.HeldId() >= 0 && hit.Value.distance - pdist < 0.8f
+                && hit.Value.collider.GetComponent<StorageTarget>() is StorageTarget aimed && !aimed.station && aimed.unit != null && aimed.destId != null
+                && game.db.boxes.ContainsKey(aimed.destId) && Storage.Check(aimed.destId, Inv.HeldId()) == StorageSystem.Result.Ok)
+                pid = -1;
             if (pid >= 0) { targetType = "item"; targetItem = pid; }
             else if (hit.HasValue)
             {
@@ -414,19 +420,25 @@ namespace WorkshopWreckage
 
         /// <summary>Puts a carried part into the sorting tray: it lies there unsorted
         /// until a robot picks it up (robots take tray parts first).</summary>
+        /// <summary>Where a part lands in the sorting tray: on its bottom, or on the parts already there.</summary>
+        public Matrix4x4 TrayMatrix(ItemDefinition def)
+        {
+            var r = game.TrayRectU;
+            var p = new Vector3(UnityEngine.Random.Range(r.xMin + 0.1f, r.xMax - 0.1f), 0, UnityEngine.Random.Range(r.yMin + 0.1f, r.yMax - 0.1f));
+            var e = ItemDatabase.Extents(def);
+            float rest = WorkshopLayout.TrayFloor;
+            foreach (var o in game.index.QuerySphere(p + Vector3.up * 0.1f, Mathf.Max(e[0], e[1]) * 0.5f + 0.05f))
+                if (World.instances[o].state == ItemState.InWorld && !busy.Contains(o)) rest = Mathf.Max(rest, game.index.WorldBounds(o).max.y);
+            return Matrix4x4.TRS(new Vector3(p.x, rest + e[2] * 0.5f + 0.003f, p.z),
+                Quaternion.Euler(UnityEngine.Random.Range(-10f, 10f), UnityEngine.Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+        }
+
         public bool DropInTray(int id, bool feedback = true)
         {
             var def = World.DefOf(id);
             if (def.IsRobotPart) { if (feedback) Feedback?.Invoke("Robot parts go to the Robot Workbench — carry them there yourself", false); return false; }
-            var r = game.TrayRectU;
-            var p = new Vector3(UnityEngine.Random.Range(r.xMin + 0.1f, r.xMax - 0.1f), 0, UnityEngine.Random.Range(r.yMin + 0.1f, r.yMax - 0.1f));
-            var e = ItemDatabase.Extents(def);
-            // it lands on the tray's bottom, or on top of the parts already lying there
-            float rest = WorkshopLayout.TrayFloor;
-            foreach (var o in game.index.QuerySphere(p + Vector3.up * 0.1f, Mathf.Max(e[0], e[1]) * 0.5f + 0.05f))
-                if (World.instances[o].state == ItemState.InWorld && !busy.Contains(o)) rest = Mathf.Max(rest, game.index.WorldBounds(o).max.y);
-            var m = Matrix4x4.TRS(new Vector3(p.x, rest + e[2] * 0.5f + 0.003f, p.z),
-                Quaternion.Euler(UnityEngine.Random.Range(-10f, 10f), UnityEngine.Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+            var m = TrayMatrix(def);
+            var p = (Vector3)m.GetColumn(3);
             var from = game.held.HandWorld();
             Inv.Remove(id);
             World.SetTransform(id, m);
@@ -527,8 +539,9 @@ namespace WorkshopWreckage
             if (id < 0) return;
             var def = World.DefOf(id);
             var (o, dir) = Ray();
-            var aim = o + dir * 1.2f;
-            Vector3 p = Physics.Raycast(aim + Vector3.up * 0.5f, Vector3.down, out var hit, 3.5f, 1 << Layers.Env) ? hit.point : new Vector3(aim.x, 0, aim.z);
+            // never onto a unit's top or into furniture: open floor (or a low deck: bench, pallet,
+            // tray, open shelf up to 1.25 m) on the way back towards the player
+            Vector3 p = game.SafeDropPoint(o + dir * 1.2f, game.player.transform.position);
             var b = MeshLibrary.UnitBounds(def.geometryKey).size * def.worldScale;
             var rot = Quaternion.Euler(0, UnityEngine.Random.value * 360, 0);
             float halfH = b.y / 2;

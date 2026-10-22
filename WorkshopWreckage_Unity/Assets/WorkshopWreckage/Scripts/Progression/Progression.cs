@@ -216,6 +216,31 @@ namespace WorkshopWreckage
         /// every preset must reach every blueprint level this way).</summary>
         public long CollectionXp(int ordinaryItems, int ordinaryDefs, double fraction)
             => (long)((ordinaryItems * (Reward("sort_item") + Reward("complete_definition_per_copy")) + ordinaryDefs * (Reward("complete_definition") + Reward("discover_definition"))) * fraction);
+        /// <summary>XP from sorting alone after `fraction` of all parts, sorted in a random broad
+        /// order (the real rules: per-part XP, discovery, partial set credit, set completion; the
+        /// same model as tools/audit/progression_sim.py style A without objectives or zones).</summary>
+        public long SimulatedCollectionXp(IList<int> copiesPerDef, double fraction, int seed = 1)
+        {
+            var order = new List<int>();
+            for (int d = 0; d < copiesPerDef.Count; d++) for (int k = 0; k < copiesPerDef[d]; k++) order.Add(d);
+            var rng = new System.Random(seed);
+            for (int i = order.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); (order[i], order[j]) = (order[j], order[i]); }
+            var have = new int[copiesPerDef.Count];
+            double x = 0, share = HalfShare;
+            int n = (int)(order.Count * fraction);
+            for (int i = 0; i < n; i++)
+            {
+                int d = order[i], total = copiesPerDef[d];
+                if (have[d] == 0) x += Reward("discover_definition");
+                x += Reward("sort_item");
+                have[d]++;
+                double set = SetXp(total);
+                if (total >= 2 && share > 0 && have[d] == (total + 1) / 2 && have[d] < total) x += set * share;
+                if (have[d] == total) x += total >= 2 && share > 0 ? set * (1 - share) : set;
+            }
+            return (long)x;
+        }
+
         public long XpIntoLevel => xp - XpAtLevelStart(level);
         public float LevelFraction => level >= maxLevel ? 1f : (float)XpIntoLevel / XpForLevel(level);
 

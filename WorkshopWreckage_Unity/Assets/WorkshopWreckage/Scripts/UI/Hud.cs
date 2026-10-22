@@ -256,6 +256,22 @@ namespace WorkshopWreckage
             MakeButton(p, "Save Game", () => ShowSub("save"));
             MakeButton(p, "Load Game", () => ShowSub("load"));
             MakeButton(p, "Settings", () => ShowSub("settings"));
+            {
+                // safety net: parts that ended up where nobody can reach them go to the sorting tray
+                float armed = -99;
+                Button rb = null;
+                rb = MakeButton(p, "Recover unreachable parts", () =>
+                {
+                    var bad = _g.UnreachableParts();
+                    var label = rb.GetComponentInChildren<Text>();
+                    if (bad.Count == 0) { OnFeedback("Every unsorted part can be reached: nothing to recover", true); return; }
+                    if (Time.unscaledTime - armed > 6) { armed = Time.unscaledTime; label.text = $"Move {bad.Count} part{(bad.Count == 1 ? "" : "s")} to the sorting tray? Click again"; return; }
+                    int n = _g.RecoverUnreachable();
+                    label.text = "Recover unreachable parts";
+                    armed = -99;
+                    OnFeedback($"{n} part{(n == 1 ? "" : "s")} moved to the sorting tray", true);
+                });
+            }
             MakeButton(p, "Main Menu", () => _g.SetState("menu"));
             MakeButton(p, "Quit", Application.Quit);
 
@@ -295,6 +311,16 @@ namespace WorkshopWreckage
             ToggleRow(st, "Fullscreen", UnityEngine.Screen.fullScreen, on => UnityEngine.Screen.fullScreen = on);
             ToggleRow(st, "Invert mouse Y", false, on => _g.player.invertY = on);
             ToggleRow(st, "Show performance stats", false, on => _debug.transform.parent.gameObject.SetActive(on));
+            {
+                // part shadows: the main GPU cost on Massive; "off" for slower PCs
+                Button sb = null;
+                sb = MakeButton(st, "Part shadows: " + ItemRenderer.ShadowModeNames[ItemRenderer.ShadowMode], () =>
+                {
+                    ItemRenderer.ShadowMode = (ItemRenderer.ShadowMode + 1) % 3;
+                    PlayerPrefs.SetInt("ww_part_shadows", ItemRenderer.ShadowMode);
+                    sb.GetComponentInChildren<Text>().text = "Part shadows: " + ItemRenderer.ShadowModeNames[ItemRenderer.ShadowMode];
+                });
+            }
             MakeButton(st, "Back", () => ShowScreenRaw(_backTo));
 
             var inv = Screen("inventory", 1100);

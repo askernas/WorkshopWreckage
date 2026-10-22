@@ -91,6 +91,28 @@ namespace WorkshopWreckage
             return true;
         }
 
+        /// <summary>A pulled part that no longer fits in the pockets flies into the sorting tray.</summary>
+        void ToTray(int id, float flyTime)
+        {
+            if (!Takeable(id)) return;
+            var inst = g.world.instances[id];
+            var from = inst.transform;
+            var def = g.world.DefOf(id);
+            var m = g.interaction.TrayMatrix(def);
+            g.index.Remove(id);
+            g.world.SetTransform(id, m);
+            g.world.SetState(id, ItemState.InWorld, "tray");
+            g.index.Insert(id);
+            _toSettle.Add((from, def));
+            g.interaction.StartFly(def, from, m, flyTime);
+        }
+
+        /// <summary>How many of `ids` fit in the pockets (the rest go to the tray).</summary>
+        int Fits(int n) => Mathf.Min(n, Mathf.Max(0, Inv.capacity - Inv.Count));
+
+        /// <summary>Recharge in proportion to what was pulled (at least 30 %).</summary>
+        static float Recharge(float full, int pulled, int max) => full * Mathf.Clamp(pulled / (float)Mathf.Max(1, max), 0.3f, 1f);
+
         void SettleBatch()
         {
             foreach (var (from, def) in _toSettle) g.interaction.SettleNeighbours(from, def);
@@ -124,7 +146,7 @@ namespace WorkshopWreckage
             var p = g.world.instances[id].Position;
             int def = g.world.instances[id].defId;
             int taken = 0;
-            foreach (var o in g.index.QuerySphere(p, r).Where(o => o != id && g.world.instances[o].defId == def)
+            foreach (var o in g.index.QuerySphere(p, r).Where(o => o != id && g.world.instances[o].defId == def && !g.Covered(o))
                          .OrderBy(o => (g.world.instances[o].Position - p).sqrMagnitude).Take(n - 1).ToList())
                 if (Take(o, 0.18f + taken * 0.04f, false)) taken++;
             SettleBatch();
@@ -239,16 +261,18 @@ namespace WorkshopWreckage
                 {
                     id = i, defId = inst.defId, inWorld = inst.state == ItemState.InWorld && !g.interaction.busy.Contains(i),
                     reservedByRobot = g.robotReserved.Contains(i), robotPart = g.db.Get(def).IsRobotPart, distance = dist,
-                    lineOfSight = dist <= radius && (!los || LineOfSight(hand, inst.Position)),
+                    lineOfSight = dist <= radius && (!los || LineOfSight(hand, inst.Position)) && (inst.state != ItemState.InWorld || !g.Covered(i)),   // not from under a pile
                 };
             }).ToList();
             var ids = WorkshopWreckage.Supermagnet.Select(def, candidates, cfg, Inv.capacity - Inv.Count);
-            if (ids.Count == 0) { g.hud.OnFeedback(Inv.IsFull ? "Supermagnet: your hands are full" : "Supermagnet: no more of those in range", false); return 0; }
+            if (ids.Count == 0) { g.hud.OnFeedback("Supermagnet: no more of those in range", false); return 0; }
+            int toHand = Fits(ids.Count);
             StartCoroutine(Pull(ids));
-            _superReady = Time.time + (float)Json.Num(cfg, "cooldown_s", 20);
+            _superReady = Time.time + Recharge((float)Json.Num(cfg, "cooldown_s", 20), ids.Count, Json.Int(cfg, "max_items_per_activation", 25));
             lastSuperCount = ids.Count;
+            lastToTray = ids.Count - toHand;
             Sfx.Play("supermagnet", hand, -2, 0);
-            g.hud.OnFeedback($"Supermagnet: {ids.Count} × {g.db.Get(def).displayName}", true);
+            g.hud.OnFeedback($"Supermagnet: {ids.Count} × {g.db.Get(def).displayName}" + (lastToTray > 0 ? $"  ({toHand} to your pockets, {lastToTray} to the sorting tray)" : ""), true);
             g.telemetry?.SkillUsed("supermagnet");
             return ids.Count;
         }
@@ -262,21 +286,24 @@ namespace WorkshopWreckage
             float r = (float)P.Effect("area_collect_radius_m") * g.Scale("tool_range");
             if (r <= 0) { g.hud.OnFeedback("You need the Area Sweep skill (Esc → Skills)", false); return 0; }
             if (Time.time < _sweepReady) { g.hud.OnFeedback($"Area Sweep recharging ({_sweepReady - Time.time:0} s)", false); return 0; }
-            int max = Mathf.Min(Mathf.RoundToInt((float)P.Effect("area_collect_max_items") * g.Scale("tool_items")), Inv.capacity - Inv.Count);
-            if (max <= 0) { g.hud.OnFeedback("Area Sweep: your hands are full", false); return 0; }
+            int max = Mathf.RoundToInt((float)P.Effect("area_collect_max_items") * g.Scale("tool_items"));   // what doesn't fit goes to the tray
             var me = g.player.transform.position + Vector3.up * 0.5f;
-            var ids = g.index.QuerySphere(me, r).Where(Takeable).Where(i => LineOfSight(Hand, g.world.instances[i].Position))
+            var ids = g.index.QuerySphere(me, r).Where(Takeable).Where(i => LineOfSight(Hand, g.world.instances[i].Position) && !g.Covered(i))
                 .OrderBy(i => (g.world.instances[i].Position - me).sqrMagnitude).Take(max).ToList();
             if (ids.Count == 0) { g.hud.OnFeedback("Area Sweep: nothing loose around you", false); return 0; }
+            int toHand = Fits(ids.Count);
             StartCoroutine(Pull(ids));
-            _sweepReady = Time.time + 8;
+            _sweepReady = Time.time + Recharge((float)Mathf.Max(1f, (float)P.Effect("area_collect_cooldown_s")), ids.Count, max);
+            lastToTray = ids.Count - toHand;
             Sfx.Play("supermagnet", Hand, -4, 0);
-            g.hud.OnFeedback($"Area Sweep: {ids.Count} parts", true);
+            g.hud.OnFeedback($"Area Sweep: {ids.Count} parts" + (lastToTray > 0 ? $"  ({toHand} to your pockets, {lastToTray} to the sorting tray)" : ""), true);
             g.telemetry?.SkillUsed("area_collection");
             return ids.Count;
         }
 
         float _sweepReady;
+        /// <summary>How many parts the last Supermagnet / Area Sweep sent to the sorting tray.</summary>
+        public int lastToTray;
 
         /// <summary>All parts change hands at once (nothing can grab them in between);
         /// only the flights are staggered for the effect.</summary>
@@ -287,6 +314,7 @@ namespace WorkshopWreckage
             foreach (var id in ids)
             {
                 float dist = (g.world.instances[id].Position - hand).magnitude;
+                if (Inv.IsFull) { ToTray(id, 0.6f + 0.03f * k++); continue; }   // overflow: the robots sort it from the tray
                 Take(id, Mathf.Lerp(0.25f, 0.7f, dist / 6f) + 0.04f * k++, false);
             }
             SettleBatch();

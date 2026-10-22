@@ -81,7 +81,7 @@ namespace WorkshopWreckage
         public string StepName => _step.ToString();
         public float Speed => _speedNow;
         public float WalkSpeed => _walk;
-        float Walk => _walk * g.Scale("robot_speed") * (1f + (float)(g.progression?.Effect("robot_speed") ?? 0));   // preset scaling, Shift Planner
+        float Walk => _walk * g.Scale("robot_speed") * (1f + (float)(g.progression?.Effect("robot_speed") ?? 0)) * (Battery <= 0.01f ? 0.4f : 1f);   // preset scaling, Shift Planner; an empty battery limps home
         public float Height => _height;
         public bool CanDirectStore => _canStore;
         public bool CanClimb => _canClimb;
@@ -527,7 +527,24 @@ namespace WorkshopWreckage
                 p.y = ground > p.y ? Mathf.MoveTowards(p.y, ground, dt * 1.2f) : Mathf.MoveTowards(p.y, ground, dt * 2.5f);
                 transform.position = p;
             }
+            if (Active && !Flies && !_climbing) Separate(dt);
             Animate(dt);
+        }
+
+        /// <summary>Ground robots don't walk through each other: overlapping ones ease apart
+        /// (never into a blocked cell), the busy one keeps its way.</summary>
+        void Separate(float dt)
+        {
+            foreach (var o in g.robots)
+            {
+                if (o == this || !o.Active || o.Flies || o.Stationary) continue;
+                var d = Flat(transform.position - o.transform.position);
+                float min = _radius + o._radius + 0.04f, dist = d.magnitude;
+                if (dist >= min) continue;
+                var away = dist > 1e-4f ? d / dist : Quaternion.Euler(0, (id.GetHashCode() & 255) * 1.4f, 0) * Vector3.forward;
+                var p = transform.position + away * Mathf.Min(min - dist, dt * 0.6f);
+                if (_nav == null || _nav.Walkable(p)) transform.position = p;
+            }
         }
 
         float Ground(Vector3 p) => g.debris != null ? g.debris.Under(p, _radius * 0.5f) : 0;
@@ -575,7 +592,11 @@ namespace WorkshopWreckage
             if (_step == Step.ToDest && _stepT > 60f) { DropCarried($"{displayName} got stuck and set its load down"); return; }
             if (_step == Step.ToPlayer && _stepT > 40f) { _step = Step.Choose; g.hud.Toast($"{displayName} couldn't reach you"); return; }
             // battery: drains while working; when low (and not carrying) it goes home to charge
-            if (_step != Step.Charging) Battery = Mathf.Max(0, Battery - dt / (_batteryMinutes * 60f));
+            // batteries (cosmetic but consistent, IMPLEMENTATION_AUDIT §G): drain only while moving
+            // or handling a part; an idle robot trickle-charges at a quarter of the mat's rate
+            bool busy = _speedNow > 0.02f || _climbing || _step == Step.Picking || _step == Step.Depositing;
+            if (_step != Step.Charging)
+                Battery = busy ? Mathf.Max(0, Battery - dt / (_batteryMinutes * 60f)) : Mathf.Min(1, Battery + 0.25f * dt / (_chargeMinutes * 60f));
             if (Battery < 0.12f && carried.Count == 0 && (_step == Step.Choose || _step == Step.ToItem))
             {
                 Release();
@@ -616,10 +637,12 @@ namespace WorkshopWreckage
                         _repathT = 0.5f;
                         var goal = _nav.NearestFree(pp - Flat(pp - transform.position).normalized * 0.5f, 1.0f) ?? _nav.NearestFree(pp, 2.5f);
                         _path = goal.HasValue ? _nav.Path(transform.position, goal.Value) : null;
+                        // deep in a heap: the nearest open floor within 4 m, and it reaches over from there
+                        if (_path == null && _nav.NearestFree(pp, 4f) is Vector3 far) _path = _nav.Path(transform.position, far);
                         _pathIdx = 0;
                     }
                     if (_path == null) { Brake(dt); break; }   // keep trying until the request times out
-                    if (Steer(dt) && dist < 2.5f) TakeFromPlayer();   // as close as it can get
+                    if (Steer(dt) && dist < 4f) TakeFromPlayer();   // as close as it can get
                     break;
                 }
                 case Step.Gesture:
@@ -635,7 +658,14 @@ namespace WorkshopWreckage
                     if (Flies) home = FlyTo(this.home + Vector3.up * 0.25f, dt, true);
                     else
                     {
-                        if (_path == null) { _path = _nav.Path(transform.position, this.home); _pathIdx = 0; if (_path == null) { _step = Step.Charging; break; } }
+                        if (_path == null)
+                        {
+                            var goal = _nav.NearestFree(this.home, 1.5f) ?? this.home;
+                            _path = _nav.Path(transform.position, goal);
+                            _pathIdx = 0;
+                            // no charging away from the mat: it waits (trickle-charging) and tries again
+                            if (_path == null) { status = "can't reach its charger"; Notice($"{displayName} can't reach its charging mat"); _step = Step.Choose; _idleT = 5f; break; }
+                        }
                         home = Steer(dt);
                     }
                     if (home) { _step = Step.Charging; _path = null; }
@@ -749,12 +779,14 @@ namespace WorkshopWreckage
                 }
             }
             int tries = 0, maxTries = 6 + 3 * _searchRank;
+            int coveredSkips = 0;
             var prof = System.Diagnostics.Stopwatch.StartNew();
             var ordered = pool.Where(Pickable).OrderBy(score).ToList();
             _tSort = prof.Elapsed.TotalMilliseconds;
             foreach (var inst in ordered)
             {
                 if (carried.Count > 0 && ((inst.Position - me).magnitude > _gather || (!types.Contains(inst.defId) && types.Count >= _types) || SlotsUsed + SlotsOf(inst.id) > _capacity)) break;
+                if (!Flies && g.Covered(inst.id)) { if (++coveredSkips > 40) break; continue; }   // under other parts: wait until it is uncovered
                 if (++tries > maxTries) break;   // keep the frame cheap; continue next frame
                 if (Flies)
                 {
@@ -785,6 +817,9 @@ namespace WorkshopWreckage
         /// reports WAITING_FOR_ACCESS (and retries later) instead of looping; when every
         /// copy is accounted for, COLLECTION_COMPLETE — after a short pause it picks the
         /// nearest unfinished set itself unless the player assigns one.</summary>
+        readonly HashSet<int> _failedDefs = new();
+        float _failedDefsT;
+
         bool ChooseAssigned(ref IEnumerable<ItemInstance> pool, Vector3 me)
         {
             if (assignedDef >= 0 && g.progress.IsComplete(assignedDef))
@@ -802,7 +837,9 @@ namespace WorkshopWreckage
             if (assignedDef < 0)
             {
                 // no assignment: take the nearest unfinished set it can actually reach
-                var first = g.world.instances.Where(Pickable).OrderBy(i => (i.Position - me).sqrMagnitude).FirstOrDefault();
+                // (never straight back to a set it just gave up on: it would idle on it forever)
+                if (_time - _failedDefsT > 180f) { _failedDefs.Clear(); _failedDefsT = _time; }
+                var first = g.world.instances.Where(i => !_failedDefs.Contains(i.defId) && Pickable(i)).OrderBy(i => (i.Position - me).sqrMagnitude).FirstOrDefault();
                 if (first == null) { specialistState = "WAITING_FOR_ACCESS"; return false; }
                 Assign(first.defId, true);
             }
@@ -811,7 +848,7 @@ namespace WorkshopWreckage
             {
                 specialistState = "WAITING_FOR_ACCESS";
                 if ((_waitT += 0.5f) > 20f) { _waitT = 0; _unreachable.Clear(); }   // try the blocked ones again later
-                if (autoAssigned && _waitT > 6f) { _waitT = 0; assignedDef = -1; }   // its own pick: move on to another set
+                if (autoAssigned && _waitT > 6f) { _waitT = 0; _failedDefs.Add(assignedDef); assignedDef = -1; }   // its own pick: move on to another set
                 return false;
             }
             _waitT = 0;
@@ -1111,7 +1148,10 @@ namespace WorkshopWreckage
                 // a full zone overflows into a wider loose pile around the same spot
                 float spread = 0.1f + 0.012f * Mathf.Max(0, StagingCount(_destBox) - StagingCapacity / 2);
                 var jitter = new Vector3(Random.Range(-spread, spread), 0, Random.Range(-spread, spread));
-                float y = e[2] * 0.5f + Mathf.Min(nearby, 5) * e[2] * 0.45f;
+                // a wide pile never spreads under the unit: the spot slides out to open floor
+                var at = g.SafeDropPoint(spot + jitter, spot + UnitFront(_destUnit) * 0.4f);
+                jitter = new Vector3(at.x, 0, at.z) - spot;
+                float y = at.y + e[2] * 0.5f + Mathf.Min(nearby, 5) * e[2] * 0.45f;
                 var rot = Quaternion.Euler(Random.Range(-12f, 12f), Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 + Random.Range(-10f, 10f) : Random.Range(-12f, 12f));
                 HideCarried(itemId);
                 carried.Remove(itemId);
@@ -1140,8 +1180,8 @@ namespace WorkshopWreckage
             foreach (var itemId in carried.ToList())
             {
                 var def = g.world.DefOf(itemId);
-                var p = transform.position + transform.forward * 0.3f + new Vector3(Random.Range(-0.1f, 0.1f), 0, Random.Range(-0.1f, 0.1f));
-                p.y = Ground(p);
+                var p = g.SafeDropPoint(transform.position + transform.forward * 0.3f + new Vector3(Random.Range(-0.1f, 0.1f), 0, Random.Range(-0.1f, 0.1f)), transform.position);
+                p.y = Mathf.Max(p.y, Ground(p));   // never under a shelf: open floor towards the robot
                 var b = MeshLibrary.UnitBounds(def.geometryKey).size * def.worldScale;
                 var m = Matrix4x4.TRS(new Vector3(p.x, p.y + Mathf.Min(b.x, b.y, b.z) * 0.5f, p.z), Quaternion.Euler(0, Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
                 HideCarried(itemId);

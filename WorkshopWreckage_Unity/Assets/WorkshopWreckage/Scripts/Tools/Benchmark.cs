@@ -112,6 +112,16 @@ namespace WorkshopWreckage
                 Debug.Log($"[bench] {e["name"]}: {e["fps_avg"]} fps avg, {e["fps_1pct_low"]} 1% low, {e["draw_calls"]} draw calls, gpu {e["gpu_ms"]} ms, pick {pick.avg} us");
             }
             results["poses"] = poses;
+            // save / load timing on this preset (P2-6)
+            var swSave = System.Diagnostics.Stopwatch.StartNew();
+            g.SaveGame("bench_tmp");
+            results["save_ms"] = System.Math.Round(swSave.Elapsed.TotalMilliseconds, 1);
+            var swLoad = System.Diagnostics.Stopwatch.StartNew();
+            g.LoadGame("bench_tmp");
+            results["load_ms"] = System.Math.Round(swLoad.Elapsed.TotalMilliseconds, 1);
+            results["save_kb"] = System.Math.Round(new FileInfo(SaveSystem.PathOf("bench_tmp")).Length / 1024.0, 1);
+            File.Delete(SaveSystem.PathOf("bench_tmp"));
+            Debug.Log($"[bench] save {results["save_ms"]} ms, load {results["load_ms"]} ms, {results["save_kb"]} kB");
             results["overall"] = Stats(all);
             results["system_used_mem_mb"] = System.Math.Round(sysMem.LastValue / 1048576.0, 1);
             results["total_used_mem_mb"] = System.Math.Round(totalMem.LastValue / 1048576.0, 1);

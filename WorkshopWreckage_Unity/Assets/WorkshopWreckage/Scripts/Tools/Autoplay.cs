@@ -185,6 +185,10 @@ namespace WorkshopWreckage
             yield return AllRobotsChecks();
             // 7b. the Sorting Arm: sockets, assembly, carry, mount, local sorting, save/load
             yield return ArmChecks();
+            // 7c. no part can end up out of reach (drops, integrity check, recover action)
+            yield return ReachChecks();
+            // 7d. a save survives a change of the item catalog (P1-4)
+            yield return MigrationChecks();
             {
                 // partial set credit: half a set pays its share of the completion XP, the rest comes at the end
                 var pr = g.progression;
@@ -529,7 +533,7 @@ namespace WorkshopWreckage
 
             // Scenario C: Spiderbot on an assignment that needs climbing
             var shelfPart = g.world.instances.Where(i => Loose(i) && i.Position.y > 0.55f && i.Position.y < spider.ReachHeight - 0.05f && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= spider.MaxItemSize
-                                                                && g.UnitAt(i.Position) != null)
+                                                                && g.UnitAt(i.Position) != null && !g.Covered(i.id))   // an uncovered part: covered ones wait
                 .OrderBy(i => (i.Position - spider.transform.position).sqrMagnitude).FirstOrDefault();
             if (shelfPart != null)
             {
@@ -656,8 +660,9 @@ namespace WorkshopWreckage
                 int pulled = g.tools.Supermagnet();
                 yield return new WaitForSeconds(1.5f);
                 var got = g.inventory.items.Skip(before).ToList();
-                Check("Supermagnet pulls only exact matches, unsorted, within range", pulled > 0 && got.Count == pulled && got.All(i => g.world.instances[i].defId == c.defId),
-                      $"{pulled} × {g.world.DefOf(c.id).displayName}");
+                int superInTray = g.world.IdsOf(c.defId).Count(i => g.world.instances[i].state == ItemState.InWorld && g.world.instances[i].owner == "tray");
+                Check("Supermagnet pulls only exact matches, unsorted, within range (what doesn't fit goes to the sorting tray)", pulled > 0 && got.Count == pulled - g.tools.lastToTray && superInTray >= g.tools.lastToTray && got.All(i => g.world.instances[i].defId == c.defId),
+                      $"{pulled} × {g.world.DefOf(c.id).displayName}: {got.Count} to the pockets, {g.tools.lastToTray} to the tray");
             }
             else Check("Supermagnet pulls only exact matches, unsorted, within range", false, "no group found");
 
@@ -687,9 +692,12 @@ namespace WorkshopWreckage
             int b0 = g.inventory.Count;
             int swept = g.tools.AreaSweep();
             yield return new WaitForSeconds(2.5f);
-            Check("Area Sweep collects the loose parts around you", swept > 0 && g.inventory.Count - b0 == swept, $"{swept} parts swept, inventory +{g.inventory.Count - b0} (capacity {g.inventory.capacity}, now {g.inventory.Count})");
+            Check("Area Sweep collects the loose parts around you (overflow to the sorting tray)", swept > 0 && g.inventory.Count - b0 == swept - g.tools.lastToTray, $"{swept} parts swept, inventory +{g.inventory.Count - b0}, tray +{g.tools.lastToTray} (capacity {g.inventory.capacity}, now {g.inventory.Count})");
 
             // Automatic Storage Delivery: a robot fetches the player's load and stores it
+            // (from open floor by the start: the feature, not a robot squeezing into a heap)
+            g.player.Teleport(Shared.Pos(g.layout.spawn.x, 0, g.layout.spawn.z));
+            yield return Frames(2);
             var handed = g.inventory.items.ToList();
             string hm = g.RobotHandover();
             Time.timeScale = 4;
@@ -907,7 +915,9 @@ namespace WorkshopWreckage
             var cfgRobots = Robot.AllConfig();
             int maxBp = wb.projects.Where(p => !p.crafted).Max(p => p.level), maxCraft = wb.projects.Max(p => p.level);
             int oItems = g.world.Count - g.db.RobotPartIds().Count, oDefs = g.db.order.Count(d => !g.db.Get(d).IsRobotPart && g.world.TotalOf(d) > 0);
-            long at75 = pr.CollectionXp(oItems, oDefs, 0.75), at100 = pr.CollectionXp(oItems, oDefs, 1.0);
+            // the real reward rules in a random broad order (not a linear estimate: IMPLEMENTATION_AUDIT P2-7)
+            var copies = g.db.order.Where(d => !g.db.Get(d).IsRobotPart && g.world.TotalOf(d) > 0).Select(d => g.world.TotalOf(d)).ToList();
+            long at75 = pr.SimulatedCollectionXp(copies, 0.75), at100 = pr.SimulatedCollectionXp(copies, 1.0);
             Check("every blueprint level is reachable from collection work alone (robots by 75% of the sets, crafted Hoverbots by 100%)", at75 >= pr.XpAtLevelStart(maxBp) && at100 >= pr.XpAtLevelStart(maxCraft),
                   $"{g.presetId}: {at75:N0} XP at 75% vs {pr.XpAtLevelStart(maxBp):N0} for level {maxBp}; {at100:N0} XP at 100% vs {pr.XpAtLevelStart(maxCraft):N0} for level {maxCraft}");
 
@@ -1059,6 +1069,60 @@ namespace WorkshopWreckage
             g.world.SetTransform(id, Matrix4x4.TRS(spot + Vector3.up * (e[2] * 0.5f), Quaternion.identity, Vector3.one * def.worldScale));
             g.world.SetState(id, ItemState.InWorld, "stage:" + box);
             g.index.Insert(id);
+        }
+
+        /// <summary>Parts never end up where nobody can reach them (IMPLEMENTATION_AUDIT P1-3).</summary>
+        IEnumerator ReachChecks()
+        {
+            var bad = g.UnreachableParts();
+            Check("integrity: every unsorted part can be reached (after robots, drops and settling)", bad.Count == 0,
+                  bad.Count == 0 ? "" : string.Join("; ", bad.Take(5).Select(b => $"{g.world.DefOf(b.id).displayName}: {b.why}")));
+            // a drop aimed at the top of tall shelving lands on open floor or a low deck instead
+            var shelf = g.units.Values.FirstOrDefault(u => u.type == "shelving");
+            var part = g.world.instances.FirstOrDefault(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart && !g.robotReserved.Contains(i.id) && !g.interaction.busy.Contains(i.id));
+            if (shelf != null && part != null)
+            {
+                var front = shelf.transform.TransformDirection(new Vector3(0, 0, -1));
+                front = new Vector3(front.x, 0, front.z).normalized;
+                var top = shelf.transform.position + Vector3.up * 2.7f;
+                LookFrom(shelf.transform.position + front * 1.1f + Vector3.up * PlayerController.Eye, top);
+                Take(part.id);
+                g.inventory.Select(g.world.DefOf(part.id).id);
+                g.interaction.DropHeld();
+                yield return new WaitForSeconds(0.5f);
+                var p = g.world.instances[part.id].Position;
+                Check("a part dropped at the top of tall shelving lands within reach (floor or a low deck)", g.world.instances[part.id].state == ItemState.InWorld && p.y < Game.MaxDropDeck + 0.4f && !g.UnreachableParts().Any(b => b.id == part.id),
+                      $"landed at {p.y:0.00} m");
+                // the safety net: a part forced onto a unit's top is found and recovered into the tray
+                g.index.Remove(part.id);
+                g.world.SetTransform(part.id, Matrix4x4.TRS(top, Quaternion.identity, Vector3.one * g.world.DefOf(part.id).worldScale));
+                g.index.Insert(part.id);
+                bool found = g.UnreachableParts().Any(b => b.id == part.id);
+                int moved = g.RecoverUnreachable();
+                Check("unreachable parts are detected and 'Recover unreachable parts' moves them to the sorting tray", found && moved >= 1 && g.InTray(g.world.instances[part.id].Position) && g.UnreachableParts().Count == 0,
+                      $"found {found}, moved {moved}");
+            }
+        }
+
+        /// <summary>Save migration: a save whose catalog differs is mapped by definition id.</summary>
+        IEnumerator MigrationChecks()
+        {
+            int sorted0 = g.progress.sortedTotal, inv0 = g.inventory.items.Count;
+            long xp0 = g.progression.xp;
+            var perDef = g.db.order.ToDictionary(d => d, d => g.progress.SortedOf(d));
+            g.SaveGame("autotest_mig");
+            var save = SaveSystem.Read("autotest_mig");
+            save["catalog_hash"] = "an-older-catalog";   // pretend the parts catalog changed since
+            SaveSystem.Write("autotest_mig", save);
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_mig");
+            yield return Frames(5);
+            bool same = g.db.order.All(d => g.progress.SortedOf(d) == perDef[d]);
+            Check("a save from an older parts catalog is converted, keeping every sorted part, XP and pockets", g.migrationReport != "" && same && g.progress.sortedTotal == sorted0 && g.progression.xp == xp0 && g.inventory.items.Count == inv0,
+                  $"{g.migrationReport}; sorted {sorted0} -> {g.progress.sortedTotal}, xp {xp0} -> {g.progression.xp}");
+            save.Remove("item_defs");   // a pre-migration (version 1) save can't be mapped: refused with a message
+            Check("an old save without part identities is refused with a clear message", SaveSystem.Check(save, g.db).Contains("older item catalog"), SaveSystem.Check(save, g.db));
+            File.Delete(SaveSystem.PathOf("autotest_mig"));
         }
 
         void Check(string name, bool ok, string detail)
