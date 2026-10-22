@@ -11,6 +11,9 @@ namespace WorkshopWreckage
     public class ItemRenderer : MonoBehaviour
     {
         const int Chunk = 500;
+        /// <summary>Parts smaller than this (bounding radius, m) don't cast shadows: their
+        /// shadows are barely visible but every group is drawn again per shadow cascade.</summary>
+        const float ShadowMinRadius = 0.045f;
 
         class Group
         {
@@ -168,7 +171,7 @@ namespace WorkshopWreckage
                         var rp = new RenderParams(g.mats[sub])
                         {
                             worldBounds = g.chunkBounds[c],
-                            shadowCastingMode = ShadowCastingMode.On,
+                            shadowCastingMode = g.radius >= ShadowMinRadius ? ShadowCastingMode.On : ShadowCastingMode.Off,
                             receiveShadows = true,
                             matProps = g.blocks[c],
                         };

@@ -35,6 +35,7 @@ namespace WorkshopWreckage
                 ["items"] = (double)g.world.Count,
                 ["seed"] = (double)g.world.seed,
                 ["item_meshes"] = (double)g.renderer.GroupCount,
+                ["scene_renderers"] = SceneRenderers(g),
                 ["startup_ms"] = g.startupMs,
                 ["development_build"] = Debug.isDebugBuild,
             };
@@ -129,6 +130,21 @@ namespace WorkshopWreckage
                 if (id >= 0) hits++;
             }
             return (System.Math.Round(total / count, 1), System.Math.Round(worst, 1), System.Math.Round((double)hits / count, 2));
+        }
+        /// <summary>Active mesh renderers in the scene, by top-level owner (draw-call budget).</summary>
+        static Dictionary<string, object> SceneRenderers(Game g)
+        {
+            var o = new Dictionary<string, object>();
+            foreach (var r in Object.FindObjectsByType<MeshRenderer>())
+            {
+                if (!r.enabled || !r.gameObject.activeInHierarchy) continue;
+                var t = r.transform;
+                while (t.parent != null && t.parent != g.transform) t = t.parent;
+                string key = t.name.StartsWith("Unit_") ? "storage units" : t.name.StartsWith("Robot_") ? "robots" : t.name;
+                o[key] = (o.TryGetValue(key, out var v) ? (double)v : 0) + 1.0;
+                o["materials:" + key] = (o.TryGetValue("materials:" + key, out var m) ? (double)m : 0) + r.sharedMaterials.Length;
+            }
+            return o;
         }
     }
 }

@@ -106,7 +106,8 @@ namespace WorkshopWreckage
         public Vector2 front;
         const float Plinth = 0.15f, RowH = 0.27f;
         public const float TrayDepth = 0.42f;
-        readonly Dictionary<int, GameObject> _drawerClosed = new();
+        readonly Dictionary<int, Material> _frontMat = new();   // per drawer slot (4 shades per cabinet)
+        GameObject _fronts;                                       // all closed drawers of the cabinet, one batched mesh
         readonly Dictionary<int, (GameObject node, float timer, bool closing)> _open = new();
 
         public void Setup(Dictionary<string, object> u, List<Dictionary<string, object>> d)
@@ -182,22 +183,37 @@ namespace WorkshopWreckage
             b.Quad(new Vector3(0, top + 0.17f, d / 2 - 0.024f), new Vector2(w * 0.9f, w * 0.9f * 160 / 1024f), EnvMaterials.Atlas(header), new Rect(0, 0, 1, 1));
             // drawer fronts and handles: one batched mesh each (per material)
             var rng = new System.Random(id.GetHashCode());
-            var handle = EnvMaterials.Plain(new Color(0.78f, 0.6f, 0.3f), 1, 0.68f);
             dests.Sort((a, c) => (Json.Int(a, "row") * 100 + Json.Int(a, "col")).CompareTo(Json.Int(c, "row") * 100 + Json.Int(c, "col")));
+            var shades = new[] { 0.88f, 0.96f, 1.04f, 1.12f };   // few materials -> few draw calls
             for (int slot = 0; slot < rows * cols; slot++)
             {
-                var fb = new Batch();
-                var c = FrontCenterG(slot);
-                float v = 0.85f + (float)rng.NextDouble() * 0.25f;
-                var fm = EnvMaterials.Plain(new Color(color.r * v, color.g * v, color.b * v), 0.25f, 0.45f);
-                fb.Box(c, new Vector3(front.x, front.y, 0.025f), fm);
-                fb.Box(c + new Vector3(0, -0.06f, 0.02f), new Vector3(0.08f, 0.018f, 0.02f), handle);
-                var go = new GameObject("Front" + slot);
-                go.transform.SetParent(transform, false);
-                fb.Build(go.transform, "front");
-                _drawerClosed[slot] = go;
-                if (slot < dests.Count) AddTarget(Json.Str(dests[slot], "id"), c, new Vector3(front.x, front.y, 0.04f), slot);
+                float v = shades[rng.Next(shades.Length)];
+                _frontMat[slot] = EnvMaterials.Plain(new Color(color.r * v, color.g * v, color.b * v), 0.25f, 0.45f);
+                if (slot < dests.Count) AddTarget(Json.Str(dests[slot], "id"), FrontCenterG(slot), new Vector3(front.x, front.y, 0.04f), slot);
             }
+            RebuildFronts();
+        }
+
+        static Material Handle => EnvMaterials.Plain(new Color(0.78f, 0.6f, 0.3f), 1, 0.68f);
+
+        /// <summary>One drawer front with handle and label, at its place in the cabinet.</summary>
+        void AddFront(Batch b, int slot)
+        {
+            var c = FrontCenterG(slot);
+            b.Box(c, new Vector3(front.x, front.y, 0.025f), _frontMat[slot]);
+            b.Box(c + new Vector3(0, -0.06f, 0.02f), new Vector3(0.08f, 0.018f, 0.02f), Handle);
+            if (_atlas != null && slot < dests.Count) b.Quad(LabelPosG(dests[slot], slot), new Vector2(0.17f, 0.068f), _atlasMat, _atlas.CellUV(slot));
+        }
+
+        /// <summary>All closed drawers as one batched mesh (open drawers are separate objects).</summary>
+        void RebuildFronts()
+        {
+            if (_fronts != null) Destroy(_fronts);
+            _fronts = new GameObject("Fronts");
+            _fronts.transform.SetParent(transform, false);
+            var b = new Batch();
+            for (int slot = 0; slot < rows * cols; slot++) if (!_open.ContainsKey(slot)) AddFront(b, slot);
+            b.Build(_fronts.transform, "fronts");
         }
 
         // ------------------------------------------------------------ shelving
@@ -376,15 +392,7 @@ namespace WorkshopWreckage
                 if (type == "drawer_cabinet") continue;   // drawer labels belong to the drawer fronts
                 b.Quad(LabelPosG(dests[i], i), new Vector2(0.17f, 0.068f), _atlasMat, _atlas.CellUV(i), rot);
             }
-            if (type == "drawer_cabinet")
-            {
-                for (int slot = 0; slot < dests.Count; slot++)
-                {
-                    var lb = new Batch();
-                    lb.Quad(LabelPosG(dests[slot], slot), new Vector2(0.17f, 0.068f), _atlasMat, _atlas.CellUV(slot));
-                    lb.Build(_drawerClosed[slot].transform, "label", false);
-                }
-            }
+            if (type == "drawer_cabinet") RebuildFronts();   // labels are part of the batched fronts
             else b.Build(transform, "labels", false);
             RefreshLabels();
         }
@@ -414,10 +422,13 @@ namespace WorkshopWreckage
                 FillTray(o.node.transform.Find("Tray"), contents);
                 return;
             }
-            var closed = _drawerClosed[slot];
-            var node = Instantiate(closed, transform);
-            node.name = "OpenDrawer" + slot;
-            closed.SetActive(false);
+            var node = new GameObject("OpenDrawer" + slot);
+            node.transform.SetParent(transform, false);
+            var fb = new Batch();
+            AddFront(fb, slot);
+            fb.Build(node.transform, "front");
+            _open[slot] = (node, hold, false);
+            RebuildFronts();
             var tray = new GameObject("Tray");
             tray.transform.SetParent(node.transform, false);
             var c = FrontCenterG(slot);
@@ -487,7 +498,7 @@ namespace WorkshopWreckage
         {
             float time = 0;
             var start = node.transform.localPosition;
-            var end = _drawerClosed[slot].transform.localPosition;
+            var end = Vector3.zero;
             while (time < 0.14f)
             {
                 time += Time.deltaTime;
@@ -496,8 +507,8 @@ namespace WorkshopWreckage
                 yield return null;
             }
             Destroy(node);
-            _drawerClosed[slot].SetActive(true);
             _open.Remove(slot);
+            RebuildFronts();
             Sfx.Play("drawer_close", FrontWorld(slot).GetColumn(3), -8);
         }
 

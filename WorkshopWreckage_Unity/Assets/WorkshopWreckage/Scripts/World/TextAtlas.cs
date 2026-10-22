@@ -13,6 +13,7 @@ namespace WorkshopWreckage
     {
         public const int Layer = 31;
         static Font _font, _display;
+        static float _nextX;
         static int _slot;
 
         public static Font Font => _font ??= Font.CreateDynamicFontFromOSFont(new[] { "Bahnschrift", "Segoe UI", "Arial" }, 32);
@@ -71,8 +72,12 @@ namespace WorkshopWreckage
 
         static (Camera, RectTransform) MakeStage(RenderTexture rt)
         {
-            // each stage lives far away on the private layer so stages never overlap
-            var origin = new Vector3(10000 + 100 * (_slot++), 10000, 0);
+            // each stage lives far away on the private layer, side by side: a canvas is as
+            // wide in world units as its texture is in pixels, so stages are spaced by width
+            // (fixed small spacing made atlas cameras capture their neighbours' labels)
+            var origin = new Vector3(10000 + _nextX, 10000, 0);
+            _nextX += rt.width + 200;
+            _slot++;
             var camGo = new GameObject("TextAtlasCamera");
             camGo.transform.position = origin + new Vector3(rt.width / 2f, -rt.height / 2f, -10);
             var cam = camGo.AddComponent<Camera>();
