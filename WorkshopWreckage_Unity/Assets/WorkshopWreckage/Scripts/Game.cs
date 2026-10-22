@@ -137,6 +137,7 @@ namespace WorkshopWreckage
         /// seed and (re)builds room, furniture and storage units.</summary>
         bool BuildWorkshop(int seed)
         {
+            _lampBase.Clear();
             var l = WorkshopLayout.Generate(db, seed);
             if (l.placementErrors.Count > 0) { hud.ShowFatal("The workshop layout is invalid:\n\n" + string.Join("\n", l.placementErrors.Take(20))); return false; }
             layout = l;
@@ -225,6 +226,27 @@ namespace WorkshopWreckage
             }
             return true;
         }
+
+        float _lightT;
+
+        /// <summary>Workshop restoration made visible: each zone's lamps glow brighter as
+        /// the zone is restored (up to +45% at 100%), easing towards the new level.</summary>
+        void RestorationLighting()
+        {
+            _lightT -= Time.deltaTime;
+            bool step = _lightT <= 0;
+            if (step) _lightT = 0.25f;
+            foreach (var l in builder.lamps)
+            {
+                if (l == null) continue;
+                if (!_lampBase.TryGetValue(l, out var b)) _lampBase[l] = b = (l.intensity, layout.ZoneAt(l.transform.position));
+                if (!step) continue;
+                float want = b.intensity * (1f + 0.45f * progress.ZonePercent(b.zone) / 100f);
+                l.intensity = Mathf.MoveTowards(l.intensity, want, 0.25f * 0.4f);
+            }
+        }
+
+        readonly Dictionary<Light, (float intensity, int zone)> _lampBase = new();
 
         /// <summary>Unity-XZ footprints of storage units, benches and other furniture:
         /// parts lying there rest on furniture, not on the floor.</summary>
@@ -514,6 +536,7 @@ namespace WorkshopWreckage
                 foreach (var u in us) if (units.TryGetValue(u, out var su)) su.RefreshLabels();
                 _labelsDirty.Clear();
             }
+            if (world != null && progress != null && builder != null) RestorationLighting();
             if (world != null && telemetry != null && state == "play")
             {
                 playTime += Time.deltaTime;

@@ -19,7 +19,7 @@ namespace WorkshopWreckage
     public class Robot : MonoBehaviour
     {
         public enum Mode { Assembling, Activating, Working, Following }
-        enum Step { Choose, ToItem, Picking, ToDest, Depositing, ToPlayer }
+        enum Step { Choose, ToItem, Picking, ToDest, Depositing, ToPlayer, ToCharge, Charging }
 
         public string id, displayName, locomotion;
         public string Owner => "robot:" + id;
@@ -86,6 +86,8 @@ namespace WorkshopWreckage
             _depositTime = (float)Json.Num(c, "deposit_time", 0.9);
             _followDist = (float)Json.Num(c, "follow_distance", 1.1);
             _radius = (float)Json.Num(c, "radius", 0.12);
+            _batteryMinutes = (float)Json.Num(c, "battery_minutes", 8);
+            _chargeMinutes = (float)Json.Num(c, "charge_minutes", 1);
             if (!Flies)
             {
                 _nav = new NavGrid(g.layout, _radius, _height);
@@ -223,6 +225,9 @@ namespace WorkshopWreckage
         }
 
         public bool handoverPending;
+        float _batteryMinutes = 8, _chargeMinutes = 1;
+        public float Battery { get; private set; } = 1f;   // 0..1
+        public void SetBattery(float v) => Battery = Mathf.Clamp01(v);
         AudioSource _loop;
         string _loopName;
         float _lastStepPhase;
@@ -339,6 +344,14 @@ namespace WorkshopWreckage
             }
             if (_step == Step.ToDest && _stepT > 60f) { DropCarried($"{displayName} got stuck and set its load down"); return; }
             if (_step == Step.ToPlayer && _stepT > 40f) { _step = Step.Choose; return; }
+            // battery: drains while working; when low (and not carrying) it goes home to charge
+            if (_step != Step.Charging) Battery = Mathf.Max(0, Battery - dt / (_batteryMinutes * 60f));
+            if (Battery < 0.12f && carried.Count == 0 && (_step == Step.Choose || _step == Step.ToItem))
+            {
+                Release();
+                _step = Step.ToCharge;
+                _path = null;
+            }
             switch (_step)
             {
                 case Step.Choose:
@@ -374,6 +387,26 @@ namespace WorkshopWreckage
                     if (_path != null) Steer(dt);
                     break;
                 }
+                case Step.ToCharge:
+                {
+                    bool home;
+                    if (Flies) home = FlyTo(this.home + Vector3.up * 0.25f, dt, true);
+                    else
+                    {
+                        if (_path == null) { _path = _nav.Path(transform.position, this.home); _pathIdx = 0; if (_path == null) { _step = Step.Charging; break; } }
+                        home = Steer(dt);
+                    }
+                    if (home) { _step = Step.Charging; _path = null; }
+                    break;
+                }
+                case Step.Charging:
+                    Brake(dt);
+                    transform.rotation = Quaternion.RotateTowards(transform.rotation, homeRot, _turn * dt);
+                    if (Flies) HoverHold(dt, 0.25f);
+                    Battery = Mathf.Min(1, Battery + dt / (_chargeMinutes * 60f));
+                    _model.SetBeacon(Mathf.Repeat(_time, 1.6f) < 0.2f);   // slow charging blink
+                    if (Battery >= 1) { _model.SetBeacon(false); _step = Step.Choose; Sfx.Play("servo", transform.position + Vector3.up * 0.3f, -10); }
+                    break;
                 case Step.ToDest:
                     if (carried.Count == 0) { _step = Step.Choose; break; }
                     if (_path == null && !PlanDelivery()) { DropCarried($"{displayName} can't reach where that part belongs"); break; }
@@ -790,6 +823,8 @@ namespace WorkshopWreckage
                 case Mode.Following: return carried.Count > 0 ? $"{displayName}: delivering, then following" : $"{displayName}: following you";
             }
             if (_step == Step.ToPlayer) return $"{displayName}: coming to take your parts";
+            if (_step == Step.ToCharge) return $"{displayName}: going to charge ({Battery * 100:0}%)";
+            if (_step == Step.Charging) return $"{displayName}: charging {Battery * 100:0}%";
             string zone = zoneCenter.HasValue ? " (zone)" : "";
             return _step switch
             {

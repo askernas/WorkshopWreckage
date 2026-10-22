@@ -407,7 +407,7 @@ namespace WorkshopWreckage
                 var h = row.GetComponent<HorizontalLayoutGroup>();
                 h.spacing = 8; h.childControlWidth = true; h.childForceExpandWidth = false; h.childControlHeight = true;
                 string zone = r.zoneCenter.HasValue ? "  ·  zone" : "";
-                var info = Para(row.transform, $"<b>{r.displayName}</b>   {r.Describe().Substring(r.displayName.Length + 2)}   ·   stored {r.delivered}, piled {r.staged}{zone}", 17, r.Active ? Cream : Muted, 40);
+                var info = Para(row.transform, $"<b>{r.displayName}</b>   {r.Describe().Substring(r.displayName.Length + 2)}   ·   battery {r.Battery * 100:0}%  ·  stored {r.delivered}, piled {r.staged}{zone}", 17, r.Active ? Cream : Muted, 40);
                 info.alignment = TextAnchor.MiddleLeft;
                 info.GetComponent<LayoutElement>().preferredWidth = 820;
                 if (!r.Active) continue;

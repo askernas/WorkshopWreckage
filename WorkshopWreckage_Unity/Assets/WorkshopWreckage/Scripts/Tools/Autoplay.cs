@@ -266,6 +266,20 @@ namespace WorkshopWreckage
             var hover = g.robots.First(r => r.id == "hoverbot");
             Check("no part is ever held by two robots", !doubleHeld && g.world.instances.Where(i => i.state == ItemState.Carried && i.owner.StartsWith("robot:")).All(i => g.robots.Count(r => r.carried.Contains(i.id)) == 1), "");
             Check("Hoverbot stores into destinations the small robots can't reach", hover.delivered > before["hoverbot"].delivered, $"{hover.delivered - before["hoverbot"].delivered} stored by Hoverbot");
+            // battery: a robot running low finishes its load, goes home, charges and resumes
+            var sp = g.robots.First(r => r.id == "spiderbot");
+            sp.SetBattery(0.05f);
+            Time.timeScale = 4;
+            float tc = Time.realtimeSinceStartup;
+            bool charged = false, wentHome = false;
+            while (Time.realtimeSinceStartup - tc < 60 && !charged)
+            {
+                if (sp.StepName == "Charging") wentHome = (new Vector2(sp.transform.position.x - sp.home.x, sp.transform.position.z - sp.home.z)).magnitude < 0.4f;
+                if (wentHome && sp.StepName != "Charging" && sp.Battery >= 0.99f) charged = true;
+                yield return null;
+            }
+            Time.timeScale = 1;
+            Check("a robot low on battery goes home, charges and goes back to work", charged, sp.Describe());
             g.SetState("paused");
             g.hud.OpenScreen("robots");
             yield return g.Capture(Path.Combine(outDir, "20_robots_screen.png"), 5);
