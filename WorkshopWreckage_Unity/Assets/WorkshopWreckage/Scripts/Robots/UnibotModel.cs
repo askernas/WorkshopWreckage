@@ -3,7 +3,7 @@ using UnityEngine;
 namespace WorkshopWreckage
 {
     /// <summary>Unibot after resources/unibot.png, built from the family component catalogue
-    /// (RobotFamilyKit): the family head in olive with one big lamp eye, red side housings and
+    /// (RobotFamilyKit), keeping its own big riveted head with one lamp eye, red ear discs and
     /// antennas; family arms with the two-stage telescopic forearms and the articulated red grippers;
     /// an olive pressed-steel torso with a framed grille and slot, bolted shoulder flanges and a dark
     /// undercarriage with brass gyro stabilisers and springs. Its own locomotion (Layer B): an olive
@@ -76,7 +76,9 @@ namespace WorkshopWreckage
             }
             foreach (var (arm, s, part) in new[] { (_armL, -1f, "left arm"), (_armR, 1f, "right arm") })
                 FamilyArm(arm, s, part, new ArmSpec { paint = ToyGreen, paintDeep = ToyGreenDeep, red = ToyRed, clawScale = 1.08f, twist = 20f });
-            FamilyHead(head, "head shell", new HeadSpec { w = 0.36f, h = 0.32f, d = 0.32f, eyes = 1, eyeScale = 1.75f, eyeY = 0.52f, earY = 0.5f, paint = ToyGreen, antennas = true, eyePart = "optical eye", antennaPart = "antenna pair" });
+            // Unibot keeps its own head design (the user's choice, 2026-10-24): the earlier detailed head
+            DetailedHead(head, ToyGreen, new Vector3(0.36f, 0.32f, 0.32f), 1, 0.078f,
+                "head shell", "optical eye", null, "antenna pair", "antenna pair", "head shell", "head shell", null, false, false);
         }
 
         void BuildWheel()
