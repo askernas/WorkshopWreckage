@@ -2,21 +2,25 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Unibot after resources/unibot.png: an olive-green single-wheeled
-    /// balancing courier. Big rounded riveted head with one large lamp eye in a bolted
-    /// bezel, red ear discs, antennas from the top corners to red balls, a slatted back
-    /// vent; rounded torso with slatted chest grille and slot, red shoulder discs and
-    /// segmented arms with red pincers; a dark undercarriage with brass gyro
-    /// stabilisers and springs; an olive fork down to a fat treaded tyre with a red
-    /// bolted hub. Leans into acceleration and wobbles to keep its balance.
-    /// Parts: head shell, optical eye, antenna pair, torso, left arm, right arm,
-    /// gyro stabilizer, wheel hub, tire.</summary>
+    /// <summary>Unibot after resources/unibot.png, built from the family component catalogue
+    /// (RobotFamilyKit): the family head in olive with one big lamp eye, red side housings and
+    /// antennas; family arms with the two-stage telescopic forearms and the articulated red grippers;
+    /// an olive pressed-steel torso with a framed grille and slot, bolted shoulder flanges and a dark
+    /// undercarriage with brass gyro stabilisers and springs. Its own locomotion (Layer B): an olive
+    /// fork down to a fat treaded tyre on a red bolted hub. It rides upright when still, leans forward
+    /// with its speed and a little more into acceleration (back when braking), and banks into turns like
+    /// a cyclist; the wheel turns by the distance actually travelled. Manipulation and attention come
+    /// from the family layer (Layer A).
+    /// Parts: head shell, optical eye, antenna pair, torso, left arm, right arm, gyro stabilizer,
+    /// wheel hub, tire.</summary>
     public class UnibotModel : RobotModel
     {
         Transform _wheel, _lean, _leanGeo, _armL, _armR, _gyro;
-        float _spin, _lean01, _lastSpeed;
         public override float ModelHeight => 1.2f;
-        const float WheelR = 0.215f, Axle = 0.215f, TorsoY = 0.58f, ShoulderY = 0.63f, NeckY = 0.71f;
+        const float WheelR = 0.215f, Axle = 0.215f, TorsoY = 0.58f, ShoulderY = 0.63f, NeckY = 0.71f, TorsoW = 0.27f, TorsoD = 0.21f, TorsoH = 0.21f;
+
+        protected override Material Skin(Material m) => FamilySkin(m);
+        protected override Material BoltSkin(Material m) => FamilyBoltSkin(m);
 
         protected override void CreatePivots()
         {
@@ -26,6 +30,7 @@ namespace WorkshopWreckage
             _gyro = Pivot("Gyro", _leanGeo, new Vector3(0, 0.43f, 0));
             _armL = Pivot("ArmL", _leanGeo, new Vector3(-0.19f, ShoulderY, 0));
             _armR = Pivot("ArmR", _leanGeo, new Vector3(0.19f, ShoulderY, 0));
+            _armL.localScale = _armR.localScale = Vector3.one * 1.08f;               // the concept's long arms
             head = Pivot("Head", _leanGeo, new Vector3(0, NeckY, 0));
             carry = Pivot("Carry", _leanGeo, new Vector3(0, 0.49f, 0.36f));
             Mount(head, "head shell", Vector3.up, 0.05f);
@@ -43,10 +48,11 @@ namespace WorkshopWreckage
         {
             if (Has("torso")) return;
             var b = new Batch();
-            b.RoundedBox(new Vector3(0, 0.57f, 0), new Vector3(0.05f, 0.24f, 0.05f), 0.01f, Gunmetal, 2);
-            b.RoundedBox(new Vector3(0, ShoulderY, 0), new Vector3(0.38f, 0.03f, 0.03f), 0.008f, Gunmetal, 2);
-            b.RoundedBox(new Vector3(0, 0.455f, 0), new Vector3(0.21f, 0.02f, 0.16f), 0.006f, Gunmetal, 2);
-            b.RoundedBox(new Vector3(0, NeckY - 0.01f, 0), new Vector3(0.08f, 0.02f, 0.08f), 0.006f, Brass, 2);
+            Material G = Skin(Gunmetal), Br = Skin(Brass);
+            b.RoundedBox(new Vector3(0, 0.57f, 0), new Vector3(0.05f, 0.24f, 0.05f), 0.01f, G, 2);
+            b.RoundedBox(new Vector3(0, ShoulderY, 0), new Vector3(0.3f, 0.03f, 0.03f), 0.008f, G, 2);
+            b.RoundedBox(new Vector3(0, 0.455f, 0), new Vector3(0.21f, 0.02f, 0.16f), 0.006f, G, 2);
+            b.RoundedBox(new Vector3(0, NeckY - 0.01f, 0), new Vector3(0.08f, 0.02f, 0.08f), 0.006f, Br, 2);
             b.Build(_leanGeo, "G_frame", true);
         }
 
@@ -69,18 +75,14 @@ namespace WorkshopWreckage
                 Done(b, _gyro);
             }
             foreach (var (arm, s, part) in new[] { (_armL, -1f, "left arm"), (_armR, 1f, "right arm") })
-            {
-                DetailedArm(arm, s, part, part, ToyGreen, ToyGreenDeep, ToyRed, 1.15f, 1.35f);
-            }
-            DetailedHead(head, ToyGreen, new Vector3(0.36f, 0.32f, 0.32f), 1, 0.078f,
-                "head shell", "optical eye", null, "antenna pair", "antenna pair", "head shell", "head shell", null, false, false);
+                FamilyArm(arm, s, part, new ArmSpec { paint = ToyGreen, paintDeep = ToyGreenDeep, red = ToyRed, clawScale = 1.08f, twist = 20f });
+            FamilyHead(head, "head shell", new HeadSpec { w = 0.36f, h = 0.32f, d = 0.32f, eyes = 1, eyeScale = 1.75f, eyeY = 0.52f, earY = 0.5f, paint = ToyGreen, antennas = true, eyePart = "optical eye", antennaPart = "antenna pair" });
         }
 
         void BuildWheel()
         {
             var b = new Batch();
-            const string Tire = "tire", Hub = "wheel hub";
-            // fat tyre: rounded cross-section revolved around the axle (X)
+            const string Tire = "tire", HubP = "wheel hub";
             // a fat balloon tyre (rounded shoulders), shallow staggered tread: a tyre, not a cog
             var tire = new[] { new Vector2(0.135f, -0.083f), new Vector2(0.18f, -0.086f), new Vector2(0.203f, -0.074f), new Vector2(0.213f, -0.045f), new Vector2(0.213f, 0.045f), new Vector2(0.203f, 0.074f), new Vector2(0.18f, 0.086f), new Vector2(0.135f, 0.083f) };
             b.Lathe(Vector3.zero, tire, M(Tire, Rubber), RightRot, 40);
@@ -95,14 +97,8 @@ namespace WorkshopWreckage
             }
             foreach (var s in new[] { -1f, 1f })
             {
-                b.Lathe(new Vector3(s * 0.05f, 0, 0), Disc(0.135f, 0.028f, 0.008f), M(Hub, ToyRed), SideRot(s), 32);
-                b.Lathe(new Vector3(s * 0.078f, 0, 0), Disc(0.055f, 0.012f, 0.004f), M(Hub, Gunmetal), SideRot(s), 20);
-                b.Lathe(new Vector3(s * 0.09f, 0, 0), Dome(0.035f, 0.018f), M(Hub, Brass), SideRot(s), 16);
-                for (int k = 0; k < 6; k++)
-                {
-                    float a = k * Mathf.PI / 3;
-                    Bolt(b, new Vector3(s * 0.078f, Mathf.Sin(a) * 0.095f, Mathf.Cos(a) * 0.095f), new Vector3(s, 0, 0), 0.009f, M(Hub, Gunmetal));
-                }
+                b.Lathe(new Vector3(s * 0.05f, 0, 0), Disc(0.135f, 0.028f, 0.008f), M(HubP, ToyRed), SideRot(s), 32);
+                Hub(b, HubP, X(s * 0.078f), s, 0.06f, 6, 0.008f);   // the family bearing hub on the wheel
             }
             Done(b, _wheel);
         }
@@ -110,57 +106,128 @@ namespace WorkshopWreckage
         void BuildBody()
         {
             var b = new Batch();
-            // fork: olive arms from the hub up into the undercarriage, with dark bearings
+            const string P = "torso";
+            float front = -TorsoD / 2;
+            // fork: olive arms from the hub up into the undercarriage, bolted bearing hubs at the axle
             foreach (var s in new[] { -1f, 1f })
             {
-                b.RoundedBox(new Vector3(s * 0.125f, Axle + 0.11f, 0.01f), new Vector3(0.03f, 0.25f, 0.06f), 0.012f, M("wheel hub", ToyGreen), 2);
-                b.Lathe(new Vector3(s * 0.105f, Axle, 0), Disc(0.035f, 0.03f, 0.006f), M("wheel hub", Gunmetal), SideRot(s), 16);
-                b.Rivet(new Vector3(s * 0.141f, Axle + 0.16f, 0.01f), new Vector3(s, 0, 0), 0.008f, M("wheel hub", Brass));
-                // springs between fork and body
-                for (int k = 0; k < 6; k++)
+                b.ChamferBox(new Vector3(s * 0.125f, Axle + 0.11f, 0.01f), new Vector3(0.03f, 0.25f, 0.06f), 0.01f, M("wheel hub", ToyGreen), null, true);
+                Hub(b, "wheel hub", new Vector3(s * 0.142f, Axle, 0), s, 0.032f, 4, 0.005f);
+                Bolt(b, new Vector3(s * 0.141f, Axle + 0.16f, 0.01f), X(s), 0.007f, M("wheel hub", Gunmetal));
+                for (int k = 0; k < 6; k++)   // springs between fork and body
                     b.Lathe(new Vector3(s * 0.07f, 0.4f + k * 0.012f, 0.05f), Disc(0.014f, 0.006f, 0.002f), M("gyro stabilizer", Brass), null, 10);
+                GreaseRun(b, "wheel hub", new Vector3(s * 0.14f, Axle + 0.21f, 0.035f), X(s), 0.06f);
             }
-            // undercarriage
-            b.RoundedBox(new Vector3(0, 0.455f, 0), new Vector3(0.21f, 0.05f, 0.16f), 0.015f, M("torso", Gunmetal), 2);
-            foreach (var x in new[] { -0.07f, 0f, 0.07f }) b.Rivet(new Vector3(x, 0.455f, -0.081f), new Vector3(0, 0, -1), 0.008f, M("torso", Brass));
-            // torso
-            b.RoundedBox(new Vector3(0, TorsoY, 0), new Vector3(0.27f, 0.21f, 0.21f), 0.03f, M("torso", ToyGreen), 3);
-            Grille(b, "torso", new Vector3(0, 0.6f, -0.106f), 0.14f, 0.075f, 6, false, -1);
-            b.RoundedBox(new Vector3(0, 0.533f, -0.108f), new Vector3(0.08f, 0.016f, 0.008f), 0.004f, M("torso", Dark), 1);
-            PanelFrame(b, "torso", new Vector3(0, TorsoY, 0), new Vector3(0.27f, 0.21f, 0.21f), new Vector3(0, 0, -1), 0.04f);
-            Grille(b, "torso", new Vector3(0, 0.6f, 0.106f), 0.15f, 0.08f, 6, false, 1);
-            foreach (var n in new[] { Vector3.left, Vector3.right, new Vector3(0, 0, 1) }) PanelFrame(b, "torso", new Vector3(0, TorsoY, 0), new Vector3(0.27f, 0.21f, 0.21f), n, 0.042f);
-            b.Lathe(new Vector3(-0.19f, ShoulderY, 0), Disc(0.024f, 0.38f, 0.005f), M("torso", Gunmetal), RightRot, 12);   // shoulder axle
+            // undercarriage: a dark steel housing with a drive gear in front
+            b.ChamferBox(new Vector3(0, 0.455f, 0), new Vector3(0.21f, 0.05f, 0.16f), 0.012f, M(P, Gunmetal), null, true);
+            b.Lathe(new Vector3(0, 0.455f, -0.08f), Disc(0.026f, 0.012f, 0.003f), M(P, Gunmetal), FwdRot, 18);
+            Nut(b, new Vector3(0, 0.455f, -0.092f), FwdRot, 0.01f, 0.005f, M(P, Gunmetal));
+            foreach (var x in new[] { -0.07f, 0.07f }) Bolt(b, new Vector3(x, 0.455f, -0.081f), new Vector3(0, 0, -1), 0.007f, M(P, Gunmetal));
+            // torso: soft-edged pressed steel, a raised front panel, a framed grille and the slot below it
+            b.ChamferBox(new Vector3(0, TorsoY, 0), new Vector3(TorsoW, TorsoH, TorsoD), 0.026f, M(P, ToyGreen), null, true);
+            b.ChamferBox(new Vector3(0, TorsoY + 0.004f, front - 0.004f), new Vector3(TorsoW - 0.045f, TorsoH - 0.05f, 0.012f), 0.007f, M(P, ToyGreen), null, true);
+            b.ChamferBox(new Vector3(0, TorsoY - TorsoH / 2 + 0.011f, 0), new Vector3(TorsoW + 0.008f, 0.02f, TorsoD + 0.008f), 0.007f, M(P, ToyGreenDeep), null, true);   // bottom rim band
+            FramedGrille(b, P, new Vector3(0, 0.605f, front - 0.01f), 0.13f, 0.07f, 6, false, -1);
+            b.ChamferBox(new Vector3(0, 0.538f, front - 0.014f), new Vector3(0.09f, 0.03f, 0.008f), 0.004f, M(P, ToyGreenDeep), null, true);
+            b.ChamferBox(new Vector3(0, 0.538f, front - 0.019f), new Vector3(0.06f, 0.01f, 0.004f), 0.001f, M(P, Dark));
+            foreach (var x in new[] { -0.1f, 0.1f })
+                foreach (var y in new[] { 0.505f, 0.655f })
+                    Bolt(b, new Vector3(x, y, front - 0.01f), new Vector3(0, 0, -1), 0.0062f, M(P, Gunmetal));
+            // shoulder flanges on the sides, bolted; the shoulder drums turn against them
             foreach (var s in new[] { -1f, 1f })
             {
-                Pipe(b, "torso", new[] { new Vector3(s * 0.07f, 0.545f, 0.1f), new Vector3(s * 0.07f, 0.505f, 0.128f), new Vector3(s * 0.07f, 0.46f, 0.1f), new Vector3(s * 0.07f, 0.442f, 0.078f) }, 0.009f, Brass, Gunmetal);
-                Pipe(b, "torso", new[] { new Vector3(s * 0.133f, 0.505f, 0.03f), new Vector3(s * 0.158f, 0.465f, 0.05f), new Vector3(s * 0.13f, 0.43f, 0.04f) }, 0.0075f, Rubber, Brass);
+                b.ChamferBox(new Vector3(s * (TorsoW / 2 + 0.004f), ShoulderY, 0), new Vector3(0.008f, 0.09f, 0.1f), 0.006f, M(P, Gunmetal));
+                foreach (var y in new[] { -0.032f, 0.032f })
+                    foreach (var z in new[] { -0.036f, 0.036f })
+                        Bolt(b, new Vector3(s * (TorsoW / 2 + 0.008f), ShoulderY + y, z), X(s), 0.005f, M(P, Gunmetal));
+                GreaseRun(b, P, new Vector3(s * TorsoW / 2, ShoulderY - 0.048f, 0.02f), X(s), 0.07f, 0.012f);
             }
-            for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.685f + k * 0.009f, 0), Disc(0.05f - k * 0.004f, 0.009f, 0.003f), M("torso", Gunmetal), null, 16);
+            // back: bolted panel, framed vent; sides: bolted panels
+            foreach (var n in new[] { Vector3.left, Vector3.right, new Vector3(0, 0, 1) }) PanelFrame(b, P, new Vector3(0, TorsoY, 0), new Vector3(TorsoW, TorsoH, TorsoD), n, 0.04f);
+            FramedGrille(b, P, new Vector3(0, 0.6f, -front + 0.001f), 0.14f, 0.075f, 6, false, 1);
+            GrimeBand(b, P, new Vector3(0, TorsoY - TorsoH / 2 + 0.001f, front - 0.004f), new Vector3(0, 0, -1), Vector3.right, TorsoW, 0.02f);
+            foreach (var s in new[] { -1f, 1f })
+            {
+                Pipe(b, P, new[] { new Vector3(s * 0.07f, 0.545f, 0.1f), new Vector3(s * 0.07f, 0.505f, 0.128f), new Vector3(s * 0.07f, 0.46f, 0.1f), new Vector3(s * 0.07f, 0.442f, 0.078f) }, 0.009f, Brass, Gunmetal);
+                Pipe(b, P, new[] { new Vector3(s * 0.133f, 0.505f, 0.03f), new Vector3(s * 0.158f, 0.465f, 0.05f), new Vector3(s * 0.13f, 0.43f, 0.04f) }, 0.0075f, Rubber, Brass);
+            }
+            // neck: a dark collar and a bright steel ring the head turns on
+            b.Lathe(new Vector3(0, TorsoY + TorsoH / 2, 0), Disc(0.05f, 0.01f, 0.002f), M(P, Gunmetal), null, 20);
+            b.Lathe(new Vector3(0, TorsoY + TorsoH / 2 + 0.01f, 0), Disc(0.038f, 0.012f, 0.002f), M(P, BrightSteel), null, 20);
             Done(b, _leanGeo);
+        }
+
+        // ------------------------------------------------------------ Layer B: the wheel and the balance
+
+        float _spin, _gyroAng, _leanDeg, _leanVel, _bank, _lastV;
+        Vector3 _lastPos; bool _hasLast;
+        RobotAnim _fa;
+
+        /// <summary>Unibot's head: quick, looks into a turn and at its work, scans a little while rolling.</summary>
+        static readonly HeadAttention Attention = new() { aheadMax = 30f, scanDeg = 5f, scanRate = 0.9f, follow = 6f, watchWork = true };
+
+        /// <summary>The arms' pitch (deg): held forward with a load, raised to lift, angled down and forward
+        /// to reach (the body's lean brings the claws to the floor).</summary>
+        static float ArmPitch(float hold, float lift, float reach) => Mathf.Lerp(-70 * hold - 40 * lift - 16 * (1 - hold), -14, reach);
+
+        public override void ResetPose() { _hasLast = false; _leanDeg = _leanVel = _bank = 0; }
+
+        protected override void PoseForDepth(float depth) => PoseBody(_fa, depth);
+
+        /// <summary>The body above the axle and the arms for one frame at a pick-up depth: leaning forward
+        /// over the wheel to reach down (further for a part lower than the wheel's contact), plus the
+        /// balance lean and bank from the locomotion.</summary>
+        void PoseBody(RobotAnim a, float depth)
+        {
+            float bend = a.bend * depth;
+            float reach = Mathf.Min(1, a.armReach * depth);
+            float lean = _leanDeg + 26f * Ease(bend) + 16f * Mathf.Clamp01(bend - 1);
+            float still = (1 - Mathf.Clamp01(a.speed01 * 4)) * (1 - Mathf.Clamp01(bend));
+            float settle = 0.35f * Mathf.Sin(a.time * 1.9f) * still;   // a faint active stabilisation, never a wobble
+            _lean.localRotation = Quaternion.Euler(lean + settle, 0, _bank);
+            float hold = Mathf.Max(a.armHold, reach), empty = 1 - hold;
+            float pitch = ArmPitch(a.armHold, a.armLift, reach);
+            famArmPitch = pitch;
+            float flap = Mathf.Sin(a.time * 2.7f) * 3f * empty * Mathf.Clamp01(a.speed01 * 2);   // arms trail a little when rolling
+            _armL.localRotation = Quaternion.Euler(pitch + flap, 0, 8 * hold - 20 * empty);   // at rest the arms swing wide beside the wheel
+            _armR.localRotation = Quaternion.Euler(pitch - flap, 0, -8 * hold + 20 * empty);
+            PoseElbows(a, 38);
         }
 
         public override void Animate(RobotAnim a)
         {
-            float s = transform.lossyScale.x;
-            float v = a.speed01;
-            _spin += a.speed * a.dt / Mathf.Max(1e-4f, WheelR * s) * Mathf.Rad2Deg;
+            float sc = Mathf.Max(1e-4f, transform.lossyScale.y);
+            if (a.dt > 0)
+            {
+                float dt = Mathf.Min(a.dt, 0.05f);   // a long frame (or a QA pose) never upsets the spring
+                // the wheel turns by the distance actually travelled (forward or back), so it never slides
+                var p = transform.position;
+                if (_hasLast) _spin += Vector3.Dot(p - _lastPos, transform.forward) / (WheelR * sc) * Mathf.Rad2Deg;
+                _lastPos = p; _hasLast = true;
+                // balance: upright when still, leaning forward with speed and a little more into acceleration
+                // (back when braking); a damped spring, so it settles with one small corrective overshoot
+                float accel = (a.speed - _lastV) / dt; _lastV = a.speed;
+                float target = 15f * Mathf.Clamp01(a.speed01) + Mathf.Clamp(accel * 4f, -6f, 6f) - 2f * a.armHold * (1 - a.bend);
+                const float k = 80f, damp = 2f * 0.6f * 8.94f;   // stiffness, damping (zeta 0.6)
+                _leanVel += ((target - _leanDeg) * k - _leanVel * damp) * dt;
+                _leanDeg += _leanVel * dt;
+                // banking into turns like a cyclist: more the faster and tighter it turns
+                float bankTarget = Mathf.Clamp(-a.turnRate * a.speed * 0.22f, -18f, 18f);
+                _bank = Mathf.Lerp(_bank, bankTarget, dt * 5f);
+                _gyroAng += dt * (600f + Mathf.Abs(_leanVel) * 25f);
+            }
             _wheel.localRotation = Quaternion.Euler(_spin, 0, 0);
-            float accel = (v - _lastSpeed) / Mathf.Max(a.dt, 1e-4f);
-            _lastSpeed = v;
-            _lean01 = Mathf.Lerp(_lean01, Mathf.Clamp(v * 8 + accel * 2.5f, -14, 22), a.dt * 4);
-            float wobble = Mathf.Sin(a.time * 3.1f) * 2.2f + Mathf.Sin(a.time * 7.3f) * 0.8f;
-            _lean.localRotation = Quaternion.Euler(_lean01 + wobble, 0, Mathf.Sin(a.time * 2.3f) * 1.5f + a.turnRate * 0.03f);
-            _gyro.localRotation = Quaternion.Euler(a.time * 720f, 0, 0);
+            _gyro.localRotation = Quaternion.Euler(_gyroAng, 0, 0);
+            _fa = a;
+            PoseBody(a, 1);
+            FloorGuard(a);
+            PoseTelescopes(0);
+            float hold = Mathf.Max(a.armHold, a.armReach);
+            FamilyAim(a, ArmPitch(a.armHold, a.armLift, a.armReach), 8 * hold);
+            FamilyGrip(a, 8 * hold);
+            FamilyClaws(a);
             if (a.gesture > 0) _lean.localRotation *= Quaternion.Euler(0, Mathf.SmoothStep(0, 360, a.gesture), Mathf.Sin(a.gesture * Mathf.PI * 4) * 6);   // nervous pirouette
-            float empty = 1 - Mathf.Max(a.armHold, a.armReach);
-            float pitch = -70 * a.armHold - 40 * a.armLift - 45 * a.armReach - 16 * (1 - Mathf.Max(a.armHold, a.armReach));
-            float flap = Mathf.Sin(a.time * 2.7f) * 8 * empty;
-            _armL.localRotation = Quaternion.Euler(pitch + flap, 0, 8 * a.armHold - 20 * empty);   // at rest the arms swing wide beside the wheel
-            _armR.localRotation = Quaternion.Euler(pitch - flap, 0, -8 * a.armHold + 20 * empty);
-            PoseElbows(a, 38);
-            PoseTelescopes(a.armExtend / Mathf.Max(1e-4f, transform.lossyScale.y));   // the reach upgrade's telescopic forearms
-            LookHead(a);
+            FamilyLookHead(a, Mathf.Clamp01(a.speed01 * 2), Attention);
         }
     }
 }

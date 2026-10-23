@@ -14,6 +14,8 @@ namespace WorkshopWreckage
         // ------------------------------------------------------------ finish
 
         public static readonly Color FamilyYellow = new(0.8f, 0.55f, 0.12f), FamilyYellowDeep = new(0.68f, 0.45f, 0.09f), FamilyRed = new(0.68f, 0.1f, 0.06f);
+        /// <summary>Variant body paint (Unibot's olive), same finish and wear.</summary>
+        public static readonly Color FamilyGreen = new(0.33f, 0.38f, 0.18f), FamilyGreenDeep = new(0.26f, 0.3f, 0.14f);
         static Dictionary<Material, Material> _familySkin;
 
         /// <summary>The family finish (RobotFinish on WWRobot.shader): the kit's paints and metals mapped to
@@ -27,6 +29,8 @@ namespace WorkshopWreckage
                 [ToyYellow] = RobotFinish.Paint(FamilyYellow, 1f, 0.55f, 0.55f, 0.85f, 0.18f, 0.45f, 0.1f),
                 [ToyYellowDeep] = RobotFinish.Paint(FamilyYellowDeep, 1f, 0.55f, 0.55f, 0.85f, 0.25f, 0.35f, 0.1f),
                 [ToyRed] = RobotFinish.Paint(FamilyRed, 1f, 0.5f, 0.5f, 0.8f, 0.2f, 0.2f, 0.08f),
+                [ToyGreen] = RobotFinish.Paint(FamilyGreen, 1f, 0.55f, 0.55f, 0.85f, 0.18f, 0.4f, 0.1f),
+                [ToyGreenDeep] = RobotFinish.Paint(FamilyGreenDeep, 1f, 0.55f, 0.55f, 0.85f, 0.25f, 0.35f, 0.1f),
                 [Gunmetal] = RobotFinish.JointSteel,
                 [Dark] = RobotFinish.Blackened,
                 [Brass] = RobotFinish.BearingBrass,
@@ -151,6 +155,12 @@ namespace WorkshopWreckage
             public float w, h, d, eyeX, eyeY, earY;
             public Material paint;
             public bool beacon, antennas, mouth;
+            /// <summary>1 = one big central lamp eye (Unibot); 0 or 2 = two eyes (Retrobot).</summary>
+            public int eyes;
+            /// <summary>Eye size factor (0 = 1).</summary>
+            public float eyeScale;
+            /// <summary>Assembly parts of the eye(s) and the antennas (null = the head's part).</summary>
+            public string eyePart, antennaPart;
         }
 
         /// <summary>The family head (around its pivot at the bottom centre): a rounded pressed-steel shell
@@ -168,13 +178,15 @@ namespace WorkshopWreckage
             // face fasteners: a row along the top and one in each lower corner, clear of the mouth
             for (int k = 0; k < 6; k++) Bolt(b, new Vector3(-0.145f + k * 0.058f, H - 0.034f, z0), new Vector3(0, 0, -1), 0.0062f, M(P, Gunmetal));
             foreach (var x in new[] { -W / 2 + 0.036f, W / 2 - 0.036f }) Bolt(b, new Vector3(x, 0.036f, z0), new Vector3(0, 0, -1), 0.0062f, M(P, Gunmetal));
-            float eyeY = H * s.eyeY, eyeX = s.eyeX;
-            foreach (var x in new[] { -eyeX, eyeX })
+            float eyeY = H * s.eyeY, eyeX = s.eyeX, es = s.eyeScale > 0 ? s.eyeScale : 1;
+            string EP = s.eyePart ?? P, AP = s.antennaPart ?? P;
+            var eyeXs = s.eyes == 1 ? new[] { 0f } : new[] { -eyeX, eyeX };
+            foreach (var x in eyeXs)
             {
-                b.Lathe(new Vector3(x, eyeY, z0 + 0.01f), Ring(0.07f, 0.05f, 0.044f), M(P, Gunmetal), FwdRot, 32);
-                b.Lathe(new Vector3(x, eyeY, z0 - 0.008f), Ring(0.053f, 0.042f, 0.014f), M(P, Brass), FwdRot, 32);
-                b.Lathe(new Vector3(x, eyeY, z0 - 0.001f), new[] { new Vector2(0.026f, 0), new Vector2(0.043f, 0.02f), new Vector2(0.043f, 0.022f) }, M(P, Brass), FwdRot, 28, true);   // reflector
-                b.Lathe(new Vector3(x, eyeY, z0 + 0.001f), Disc(0.03f, 0.003f, 0.001f), M(P, Dark), FwdRot, 20);   // lamp socket
+                b.Lathe(new Vector3(x, eyeY, z0 + 0.01f), Ring(0.07f * es, 0.05f * es, 0.044f), M(EP, Gunmetal), FwdRot, 32);
+                b.Lathe(new Vector3(x, eyeY, z0 - 0.008f), Ring(0.053f * es, 0.042f * es, 0.014f), M(EP, Brass), FwdRot, 32);
+                b.Lathe(new Vector3(x, eyeY, z0 - 0.001f), new[] { new Vector2(0.026f * es, 0), new Vector2(0.043f * es, 0.02f), new Vector2(0.043f * es, 0.022f) }, M(EP, Brass), FwdRot, 28, true);   // reflector
+                b.Lathe(new Vector3(x, eyeY, z0 + 0.001f), Disc(0.03f * es, 0.003f, 0.001f), M(EP, Dark), FwdRot, 20);   // lamp socket
             }
             if (s.mouth) FramedGrille(b, P, new Vector3(0, 0.04f, z0), 0.104f, 0.04f, 7, true, -1);
             float earY = H * s.earY;
@@ -186,11 +198,11 @@ namespace WorkshopWreckage
                 Hub(b, P, new Vector3(x0 + sd * 0.062f, earY, 0), sd, 0.036f, 6, 0.005f);
                 if (!s.antennas) continue;
                 var collar = new Vector3(sd * (W / 2 + 0.036f), earY + 0.064f, 0);
-                b.Lathe(collar - new Vector3(0, 0.006f, 0), Disc(0.016f, 0.02f, 0.003f), M(P, Gunmetal), null, 14);
-                b.Lathe(collar + new Vector3(0, 0.014f, 0), Disc(0.012f, 0.008f, 0.002f), M(P, BrightSteel), null, 12);
+                b.Lathe(collar - new Vector3(0, 0.006f, 0), Disc(0.016f, 0.02f, 0.003f), M(AP, Gunmetal), null, 14);
+                b.Lathe(collar + new Vector3(0, 0.014f, 0), Disc(0.012f, 0.008f, 0.002f), M(AP, BrightSteel), null, 12);
                 float top = H + 0.07f;
-                b.Lathe(collar + new Vector3(0, 0.022f, 0), Disc(0.0065f, top - collar.y - 0.022f - 0.02f, 0.001f), M(P, Gunmetal), null, 10);
-                b.Lathe(new Vector3(collar.x, top - 0.029f, 0), Ball(0.029f), M(P, ToyRed), null, 18);
+                b.Lathe(collar + new Vector3(0, 0.022f, 0), Disc(0.0065f, top - collar.y - 0.022f - 0.02f, 0.001f), M(AP, Gunmetal), null, 10);
+                b.Lathe(new Vector3(collar.x, top - 0.029f, 0), Ball(0.029f), M(AP, ToyRed), null, 18);
             }
             foreach (var sd in new[] { -1f, 1f })
                 foreach (var z in new[] { -0.03f, 0.025f })
@@ -205,10 +217,11 @@ namespace WorkshopWreckage
             foreach (var n in new[] { Vector3.left, Vector3.right, Vector3.up, new Vector3(0, 0, 1) }) PanelFrame(b, P, hc, new Vector3(W, H, D), n, 0.054f);
             Done(b, pivot);
 
+            if (Has(EP))
+                foreach (var x in eyeXs)
+                    eyes.Add(Separate(pivot, "G_eye", lb => lb.Lathe(new Vector3(x, eyeY, z0 - 0.002f), Dome(0.027f * es, 0.012f * es, 8), EyeOffMat, FwdRot, 24)));
             if (Has(P))
             {
-                foreach (var x in new[] { -eyeX, eyeX })
-                    eyes.Add(Separate(pivot, "G_eye", lb => lb.Lathe(new Vector3(x, eyeY, z0 - 0.002f), Dome(0.027f, 0.012f, 8), EyeOffMat, FwdRot, 24)));
                 if (s.beacon) beacons.Add(Separate(pivot, "G_beacon", lb => lb.Lathe(new Vector3(0, H + 0.03f, 0), BeaconLamp(0.05f, 0.07f, 0.02f), BeaconOffMat, null, 28)));
             }
         }
@@ -296,6 +309,7 @@ namespace WorkshopWreckage
         /// grip strip and the knuckle hinge hub.</summary>
         protected void FamilyArm(Transform arm, float s, string P, ArmSpec spec)
         {
+            _famArm[s < 0 ? 0 : 1] = arm;
             var b = new Batch();
             b.Lathe(X(-s * 0.05f), Disc(0.045f, 0.012f, 0.003f), M(P, Gunmetal), SideRot(s), 24);
             b.Lathe(X(-s * 0.038f), Disc(0.066f, 0.06f, 0.012f), M(P, spec.paint), SideRot(s), 32);
@@ -385,6 +399,205 @@ namespace WorkshopWreckage
             }
             Done(hb, hg);
             Done(f, elbow);
+        }
+
+        // ------------------------------------------------------------ Layer A: shared manipulation and expression
+        // (docs/ROBOT_FAMILY_DESIGN_AND_ANIMATION_STANDARD.md). A family model owns its locomotion (Layer B)
+        // and calls these from its Animate: pose the body and arms for a depth (PoseForDepth), FloorGuard,
+        // FamilyAim, FamilyGrip, FamilyClaws, FamilyLookHead. They work on the two arms registered by
+        // FamilyArm and on the gripper tip markers; nothing here knows about legs, wheels or tracks.
+
+        readonly Transform[] _famArm = new Transform[2];
+        /// <summary>The arms' current pitch (deg), as the model's body pose last set it.</summary>
+        protected float famArmPitch;
+        float _gripPitch = float.NaN, _gripWant, _gripInward;
+        Vector3 _aimKey = new(float.NaN, 0, 0); float _aimExtMax = -1, _aimExt;
+        /// <summary>Gripper finger travel (deg) fully open and fully closed from the modelled pose.</summary>
+        protected const float ClawOpenDeg = 22f, ClawCloseDeg = 8f;
+
+        protected static float Ease(float x) { x = Mathf.Clamp01(x); return x * x * (3 - 2 * x); }
+        protected Vector3 FlatForward => new Vector3(transform.forward.x, 0, transform.forward.z).normalized;
+        protected bool HasGrippers => clawTipL != null && clawTipR != null;
+        protected float LowestClaw() => Mathf.Min(clawTipL.position.y, clawTipR.position.y);
+
+        /// <summary>Both family arms at one pitch, mirrored sideways by `inward` (deg).</summary>
+        protected void SetArmPitch(float pitch, float inward)
+        {
+            if (_famArm[0] != null) _famArm[0].localRotation = Quaternion.Euler(pitch, 0, inward);
+            if (_famArm[1] != null) _famArm[1].localRotation = Quaternion.Euler(pitch, 0, -inward);
+        }
+
+        /// <summary>The family zinc bolt finish on top of FamilySkin.</summary>
+        protected static Material FamilyBoltSkin(Material m) => m == RobotFinish.JointSteel ? RobotFinish.BoltSteel : m;
+
+        /// <summary>The model's full body-and-arms pose for one frame at a pick-up depth (0 = upright,
+        /// 1 = the normal reach down, up to 2 = further for a part lower than the feet). The floor guard
+        /// calls it with trial depths; the model keeps whatever else it needs for the frame in fields.</summary>
+        protected virtual void PoseForDepth(float depth) { }
+
+        /// <summary>Floor guard: the deepest pick-up pose whose claws stay at the part's height (never below
+        /// the floor); for a part lower than the full pose reaches, up to twice as deep.</summary>
+        protected void FloorGuard(RobotAnim a)
+        {
+            if (!(a.bend > 0.01f || a.armReach > 0.01f) || !HasGrippers) return;
+            float target = transform.position.y + Mathf.Max(a.reachHeight, -0.08f) + 0.008f * transform.lossyScale.y / 0.283f;
+            if (a.bend > 0.9f && LowestClaw() > target + 0.004f)
+            {
+                float lo = 1, hi = 2f;
+                PoseForDepth(hi);
+                if (LowestClaw() > target) lo = hi;
+                else
+                    for (int it = 0; it < 6; it++)
+                    {
+                        float m = (lo + hi) * 0.5f;
+                        PoseForDepth(m);
+                        if (LowestClaw() < target) hi = m; else lo = m;
+                    }
+                PoseForDepth(lo);
+            }
+            else if (LowestClaw() < target)
+            {
+                float lo = 0, hi = 1;
+                for (int it = 0; it < 7; it++)
+                {
+                    float m = (lo + hi) * 0.5f;
+                    PoseForDepth(m);
+                    if (LowestClaw() < target) hi = m; else lo = m;
+                }
+                PoseForDepth(lo);
+            }
+        }
+
+        /// <summary>Aim: raise the (straight) arms until the claws are at the target's height and at least as
+        /// far forward; when they can't, the telescopic forearms extend as far as needed (cached per target).
+        /// `basePitch` / `inward`: the arms' pose without the aim (weighted by a.aimWeight).</summary>
+        protected void FamilyAim(RobotAnim a, float basePitch, float inward)
+        {
+            if (a.aimWeight <= 0.001f || !HasGrippers) return;
+            float SolvePitch(float ext)
+            {
+                PoseTelescopes(ext);
+                float lo = -150f, hi = 0f;
+                for (int it = 0; it < 8; it++)
+                {
+                    float m = (lo + hi) * 0.5f;
+                    SetArmPitch(m, inward);
+                    if (GripPoint.Value.y < a.aim.y) hi = m; else lo = m;
+                }
+                float pm = (lo + hi) * 0.5f;
+                SetArmPitch(pm, inward);
+                return pm;
+            }
+            float targetFwd = Vector3.Dot(a.aim - transform.position, FlatForward);
+            bool Reached() => Mathf.Abs(GripPoint.Value.y - a.aim.y) < 0.01f && Vector3.Dot(GripPoint.Value - transform.position, FlatForward) >= targetFwd - 0.01f;
+            float extMax = armExtendMax / Mathf.Max(1e-4f, transform.lossyScale.y);
+            if (_aimKey != a.aim || _aimExtMax != extMax)
+            {
+                _aimKey = a.aim; _aimExtMax = extMax; _aimExt = 0;
+                SolvePitch(0);
+                if (!Reached() && extMax > 0)
+                {
+                    float lo = 0, hi = extMax;
+                    for (int it = 0; it < 7; it++)
+                    {
+                        float m = (lo + hi) * 0.5f;
+                        SolvePitch(m);
+                        if (Reached()) hi = m; else lo = m;
+                    }
+                    _aimExt = hi;   // the full extension when nothing reaches (it gets as close as it can)
+                }
+            }
+            float ew = _aimExt * Ease(a.aimWeight);
+            famArmPitch = Mathf.Lerp(basePitch, SolvePitch(ew), Ease(a.aimWeight));
+            PoseTelescopes(ew);
+            SetArmPitch(famArmPitch, inward);
+        }
+
+        /// <summary>The grip: the arms close in until the two grippers rest against the part's sides
+        /// (solved once per arm pitch and width). `restInward`: their sideways angle without a part.</summary>
+        protected void FamilyGrip(RobotAnim a, float restInward)
+        {
+            if (!HasGrippers || a.gripWidth <= 0) return;
+            float w = Ease(Mathf.Max(a.armHold, Mathf.Max(a.armReach, a.aimWeight)));
+            if (w <= 0.001f) return;
+            float want = a.gripWidth + 0.006f;
+            if (Mathf.Abs(_gripPitch - famArmPitch) > 0.05f || Mathf.Abs(_gripWant - want) > 1e-4f)
+            {
+                float lo = -10f, hi = 35f;
+                for (int it = 0; it < 7; it++)
+                {
+                    float m = (lo + hi) * 0.5f;
+                    SetArmPitch(famArmPitch, m);
+                    if (Vector3.Distance(clawTipL.position, clawTipR.position) > want) lo = m; else hi = m;
+                }
+                _gripPitch = famArmPitch; _gripWant = want; _gripInward = (lo + hi) * 0.5f;
+            }
+            SetArmPitch(famArmPitch, Mathf.Lerp(restInward, _gripInward, w));
+        }
+
+        /// <summary>The grippers' fingers for this frame (open / closed from the animation inputs).</summary>
+        protected void FamilyClaws(RobotAnim a) => PoseClaws(ClawOpenDeg * a.clawOpen - ClawCloseDeg * a.clawClose);
+
+        /// <summary>How a model's family head pays attention: how far it looks into a coming turn, its slow scan
+        /// while moving, how quickly it follows, and whether it watches the part or the destination it is
+        /// working on.</summary>
+        public struct HeadAttention
+        {
+            public float aheadMax, scanDeg, scanRate, follow;
+            public bool watchWork;
+        }
+
+        /// <summary>The family head's attention (shared hardware, per-model behaviour): idle it looks at the
+        /// player; moving it looks where the path goes and scans slowly; working (if watchWork) it watches the
+        /// part or the destination. `moving` 0..1 scales the scan.</summary>
+        protected void FamilyLookHead(RobotAnim a, float moving, HeadAttention h)
+        {
+            if (head == null) return;
+            if (a.lookWeight > 0 || a.dt <= 0) { LookHead(a); return; }
+            float yaw = 0, pitch = 0;
+            if (h.watchWork && a.focusWeight > 0)
+            {
+                var to = a.focus - head.position;
+                var flat = new Vector3(to.x, 0, to.z);
+                if (flat.sqrMagnitude > 1e-4f)
+                {
+                    yaw = Mathf.Clamp(Vector3.SignedAngle(FlatForward, flat, Vector3.up), -h.aheadMax, h.aheadMax);
+                    pitch = Mathf.Clamp(-Mathf.Atan2(to.y, flat.magnitude) * Mathf.Rad2Deg, -25f, 30f) * 0.6f;
+                }
+            }
+            else if (a.lookAheadWeight > 0)
+            {
+                var to = a.lookAhead - transform.position; to.y = 0;
+                if (to.sqrMagnitude > 1e-4f) yaw = Mathf.Clamp(Vector3.SignedAngle(FlatForward, to, Vector3.up), -h.aheadMax, h.aheadMax) * a.lookAheadWeight;
+            }
+            yaw += Mathf.Sin(a.time * h.scanRate) * h.scanDeg * moving * (1 - Mathf.Clamp01(Mathf.Abs(yaw) / 20f));
+            var want = Quaternion.Euler(a.bend * 10 + Mathf.Sin(a.phase * 2) * 2.5f * a.gait + pitch, yaw, 0);
+            head.localRotation = Quaternion.Slerp(head.localRotation, want, a.dt * h.follow);
+        }
+
+        // ------------------------------------------------------------ generic gripper measurements (base behaviour)
+
+        Vector3? FamilyGripPoint => HasGrippers ? (clawTipL.position + clawTipR.position) * 0.5f : null;
+
+        float? FamilyGripReach(float reachHeight)
+        {
+            if (!HasGrippers) return null;
+            SnapshotPose();
+            Animate(new RobotAnim { dt = 0, bend = 1, armReach = 1, reachHeight = reachHeight });
+            var gp = FamilyGripPoint.Value - transform.position;
+            RestorePose();
+            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
+        }
+
+        float? FamilyAimReach(float aimHeight, float ahead)
+        {
+            if (!HasGrippers) return null;
+            SnapshotPose();
+            Animate(new RobotAnim { dt = 0, armHold = 1, aimWeight = 1, aim = transform.position + FlatForward * ahead + Vector3.up * aimHeight });
+            var gp = FamilyGripPoint.Value - transform.position;
+            RestorePose();
+            if (Mathf.Abs(gp.y - aimHeight) > 0.012f) return -1f;   // the arms can't raise the claws to that height
+            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
         }
     }
 }

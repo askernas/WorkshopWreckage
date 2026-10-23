@@ -608,6 +608,7 @@ namespace WorkshopWreckage
             // the situations to film: floor pick-up, pick-up beside a pile, drawer store, other direct store,
             // staging, walking and turning with a load
             var left = new Dictionary<string, int> { ["pick"] = 1, ["pickpile"] = 1, ["drawer"] = 1, ["store"] = 1, ["stage"] = 1, ["carrywalk"] = 1, ["carryturn"] = 1 };
+            if (!r.CanDirectStore) { left.Remove("drawer"); left.Remove("store"); left["stage"] = 2; }   // a courier only stages
             string pending = null;
             Robot.QAMoment = (rb, what) => { if (rb == r && pending == null && left.TryGetValue(what, out var n) && n > 0) pending = what; };
             var cam = player.cam.transform;

@@ -42,7 +42,7 @@ namespace WorkshopWreckage
         /// <summary>The family finish (RobotFamilyKit.FamilySkin); the legacy look keeps the kit materials.</summary>
         protected override Material Skin(Material m) => LegacyLook ? m : FamilySkin(m);
 
-        protected override Material BoltSkin(Material m) => !LegacyLook && m == RobotFinish.JointSteel ? RobotFinish.BoltSteel : m;
+        protected override Material BoltSkin(Material m) => LegacyLook ? m : FamilyBoltSkin(m);
 
         static Color YellowC => FamilyYellow;
         static Color RedC => FamilyRed;
@@ -246,44 +246,6 @@ namespace WorkshopWreckage
             return Mathf.Max(6f, speed / (lh * MaxStride * Mathf.Deg2Rad));
         }
 
-        public override Vector3? GripPoint => clawTipL != null && clawTipR != null ? (clawTipL.position + clawTipR.position) * 0.5f : null;
-
-        public override float? GripReach(float reachHeight)
-        {
-            if (clawTipL == null || clawTipR == null) return null;
-            SnapshotPose();
-            Animate(new RobotAnim { dt = 0, bend = 1, armReach = 1, reachHeight = reachHeight });
-            var gp = GripPoint.Value - transform.position;
-            RestorePose();
-            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
-        }
-
-        public override float? AimReach(float aimHeight)
-        {
-            if (clawTipL == null || clawTipR == null) return null;
-            SnapshotPose();
-            // a target straight above the feet: the shortest extension that reaches the height (none if it can)
-            Animate(new RobotAnim { dt = 0, armHold = 1, aimWeight = 1, aim = transform.position + Vector3.up * aimHeight });
-            var gp = GripPoint.Value - transform.position;
-            RestorePose();
-            if (Mathf.Abs(gp.y - aimHeight) > 0.012f) return -1f;   // the arms can't raise the claws to that height
-            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
-        }
-
-        public override float? AimReachMax(float aimHeight)
-        {
-            if (clawTipL == null || clawTipR == null) return null;
-            SnapshotPose();
-            // a target far ahead at that height: the arms extend fully, lowered to keep the height
-            Animate(new RobotAnim { dt = 0, armHold = 1, aimWeight = 1, aim = transform.position + FlatForward * 2f + Vector3.up * aimHeight });
-            var gp = GripPoint.Value - transform.position;
-            RestorePose();
-            if (Mathf.Abs(gp.y - aimHeight) > 0.012f) return -1f;
-            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
-        }
-
-        Vector3 FlatForward => new Vector3(transform.forward.x, 0, transform.forward.z).normalized;
-
         public override void ResetPose() { _twistL = _twistR = 0; }
 
         // the planted boots' headings while turning on the spot (deg, relative to the body)
@@ -326,8 +288,6 @@ namespace WorkshopWreckage
             float z = ThighSide * Mathf.Sin(h) + ShinL * Mathf.Sin(s), y = -(ThighSide * Mathf.Cos(h) + ShinL * Mathf.Cos(s));
             LegIK(z - dz, y - dy, out hip, out knee);
         }
-
-        static float Ease(float x) { x = Mathf.Clamp01(x); return x * x * (3 - 2 * x); }
 
         /// <summary>The arm pitch (deg) for holding, lifting and reaching down. Reaching down overrides
         /// holding (setting a carried part down lowers the arms; it must not raise them).</summary>
@@ -375,25 +335,19 @@ namespace WorkshopWreckage
             float hold = Mathf.Max(a.armHold, a.armReach);
             float empty = 1 - hold;
             float pitch = ArmPitch(a.armHold, a.armLift, a.armReach);
-            _armPitch = pitch;
+            famArmPitch = pitch;
             float inward = 10 * hold;
             armL.localRotation = Quaternion.Euler(pitch - armSwing * empty, 0, inward - Flare * empty);
             armR.localRotation = Quaternion.Euler(pitch + armSwing * empty, 0, -inward + Flare * empty);
             PoseElbows(a, 38);
         }
 
-        void SetArmPitch(float pitch, float inward)
-        {
-            armL.localRotation = Quaternion.Euler(pitch, 0, inward);
-            armR.localRotation = Quaternion.Euler(pitch, 0, -inward);
-        }
+        // the frame's inputs for the floor guard's trial poses (PoseForDepth)
+        RobotAnim _fa; float _fStride, _fLift, _fWalking;
+        protected override void PoseForDepth(float depth) => PoseBody(_fa, _fStride, _fLift, _fWalking, depth);
 
-        float _armPitch, _gripPitch = float.NaN, _gripWant, _gripInward;
-        Vector3 _aimKey = new(float.NaN, 0, 0); float _aimExtMax = -1, _aimExt;
-        /// <summary>Gripper finger travel (deg) fully open and fully closed from the modelled pose.</summary>
-        const float ClawOpenDeg = 22f, ClawCloseDeg = 8f;
-
-        float LowestClaw() => Mathf.Min(clawTipL.position.y, clawTipR.position.y);
+        /// <summary>Retrobot's head: looks into a coming turn, scans slowly while walking.</summary>
+        static readonly HeadAttention Attention = new() { aheadMax = 35f, scanDeg = 7f, scanRate = 0.57f, follow = 3.5f };
 
         /// <summary>Retrobot's walk: short, quick mechanical steps whose stride is matched to the ground
         /// speed; the swinging leg lifts its boot, the ankles keep both boots flat, and the body rides
@@ -431,110 +385,13 @@ namespace WorkshopWreckage
                 _twistR = Mathf.Clamp(_twistR, -30f, 30f);
             }
             PoseBody(a, stride, lift, walking, 1);
-            bool guard = clawTipL != null && clawTipR != null;
-            if ((a.bend > 0.01f || a.armReach > 0.01f) && guard)
-            {
-                // floor guard: the deepest pick-up pose whose claws stay at the part (never below the floor)
-                float target = transform.position.y + Mathf.Max(a.reachHeight, -0.08f) + 0.008f * transform.lossyScale.y / 0.283f;
-                if (a.bend > 0.9f && LowestClaw() > target + 0.004f)
-                {
-                    // the part lies lower than the full pose reaches (it stands on the debris layer): reach
-                    // further, up to twice as deep, only as far as the part
-                    float lo = 1, hi = 2f;
-                    PoseBody(a, stride, lift, walking, hi);
-                    if (LowestClaw() > target) lo = hi;
-                    else
-                        for (int it = 0; it < 6; it++)
-                        {
-                            float m = (lo + hi) * 0.5f;
-                            PoseBody(a, stride, lift, walking, m);
-                            if (LowestClaw() < target) hi = m; else lo = m;
-                        }
-                    PoseBody(a, stride, lift, walking, lo);
-                }
-                else if (LowestClaw() < target)
-                {
-                    float lo = 0, hi = 1;
-                    for (int it = 0; it < 7; it++)
-                    {
-                        float m = (lo + hi) * 0.5f;
-                        PoseBody(a, stride, lift, walking, m);
-                        if (LowestClaw() < target) hi = m; else lo = m;
-                    }
-                    PoseBody(a, stride, lift, walking, lo);
-                }
-            }
+            _fa = a; _fStride = stride; _fLift = lift; _fWalking = walking;
+            FloorGuard(a);
             PoseTelescopes(0);
-            if (a.aimWeight > 0.001f && guard)
-            {
-                // aim: raise the (straight) arms until the claws are at the destination's height; when they
-                // can't get that high, the telescopic forearms (reach upgrade) extend as far as needed
-                float hold = Mathf.Max(a.armHold, a.armReach);
-                float basePitch = ArmPitch(a.armHold, a.armLift, a.armReach), inward = 10 * hold;
-                float SolvePitch(float ext)
-                {
-                    PoseTelescopes(ext);
-                    float lo = -150f, hi = 0f;
-                    for (int it = 0; it < 8; it++)
-                    {
-                        float m = (lo + hi) * 0.5f;
-                        SetArmPitch(m, inward);
-                        if (GripPoint.Value.y < a.aim.y) hi = m; else lo = m;
-                    }
-                    float pm = (lo + hi) * 0.5f;
-                    SetArmPitch(pm, inward);
-                    return pm;
-                }
-                // the target in height and in front: the claws must get to its height and at least as far
-                // forward (more extension with a lower arm reaches further out at the same height)
-                float targetFwd = Vector3.Dot(a.aim - transform.position, FlatForward);
-                bool Reached() => Mathf.Abs(GripPoint.Value.y - a.aim.y) < 0.01f && Vector3.Dot(GripPoint.Value - transform.position, FlatForward) >= targetFwd - 0.01f;
-                float extMax = armExtendMax / Mathf.Max(1e-4f, transform.lossyScale.y);
-                if (_aimKey != a.aim || _aimExtMax != extMax)
-                {
-                    // the shortest extension that reaches (cached while the target stays the same)
-                    _aimKey = a.aim; _aimExtMax = extMax; _aimExt = 0;
-                    SolvePitch(0);
-                    if (!Reached() && extMax > 0)
-                    {
-                        float lo = 0, hi = extMax;
-                        for (int it = 0; it < 7; it++)
-                        {
-                            float m = (lo + hi) * 0.5f;
-                            SolvePitch(m);
-                            if (Reached()) hi = m; else lo = m;
-                        }
-                        _aimExt = hi;   // the full extension when nothing reaches (it gets as close as it can)
-                    }
-                }
-                float ew = _aimExt * Ease(a.aimWeight);
-                _armPitch = Mathf.Lerp(basePitch, SolvePitch(ew), Ease(a.aimWeight));
-                PoseTelescopes(ew);
-                SetArmPitch(_armPitch, inward);
-            }
-            if (guard && a.gripWidth > 0)
-            {
-                // the grip: the arms close in until the two grippers rest against the part's sides
-                float w = Ease(Mathf.Max(a.armHold, Mathf.Max(a.armReach, a.aimWeight)));
-                if (w > 0.001f)
-                {
-                    // solved once per arm pitch and part width (carrying keeps both constant): no per-frame search
-                    float want = a.gripWidth + 0.006f;
-                    if (Mathf.Abs(_gripPitch - _armPitch) > 0.05f || Mathf.Abs(_gripWant - want) > 1e-4f)
-                    {
-                        float lo = -10f, hi = 35f;
-                        for (int it = 0; it < 7; it++)
-                        {
-                            float m = (lo + hi) * 0.5f;
-                            SetArmPitch(_armPitch, m);
-                            if (Vector3.Distance(clawTipL.position, clawTipR.position) > want) lo = m; else hi = m;
-                        }
-                        _gripPitch = _armPitch; _gripWant = want; _gripInward = (lo + hi) * 0.5f;
-                    }
-                    SetArmPitch(_armPitch, Mathf.Lerp(10 * Mathf.Max(a.armHold, a.armReach), _gripInward, w));
-                }
-            }
-            PoseClaws(ClawOpenDeg * a.clawOpen - ClawCloseDeg * a.clawClose);
+            float hold = Mathf.Max(a.armHold, a.armReach);
+            FamilyAim(a, ArmPitch(a.armHold, a.armLift, a.armReach), 10 * hold);
+            FamilyGrip(a, 10 * Mathf.Max(a.armHold, a.armReach));
+            FamilyClaws(a);
             if (a.gesture > 0)
             {
                 // a cheerful wave with the right arm, head tilted
@@ -545,18 +402,7 @@ namespace WorkshopWreckage
                 head.localRotation *= Quaternion.Euler(0, 0, 12 * w);
                 return;
             }
-            if (a.lookWeight > 0 || a.dt <= 0) { LookHead(a); return; }
-            // walking: the head turns towards where he is about to go (so a turn is announced before the body
-            // follows) and, now and then, slowly scans the floor around him (+-7 deg, one sweep every ~11 s)
-            float yaw = 0;
-            if (a.lookAheadWeight > 0)
-            {
-                var to = a.lookAhead - transform.position; to.y = 0;
-                if (to.sqrMagnitude > 1e-4f) yaw = Mathf.Clamp(Vector3.SignedAngle(FlatForward, to, Vector3.up), -35f, 35f) * a.lookAheadWeight;
-            }
-            yaw += Mathf.Sin(a.time * 0.57f) * 7f * walking * (1 - Mathf.Clamp01(Mathf.Abs(yaw) / 20f));
-            var headWant = Quaternion.Euler(a.bend * 10 + Mathf.Sin(a.phase * 2) * 2.5f * a.gait, yaw, 0);
-            head.localRotation = Quaternion.Slerp(head.localRotation, headWant, a.dt * 3.5f);
+            FamilyLookHead(a, walking, Attention);
         }
     }
 }

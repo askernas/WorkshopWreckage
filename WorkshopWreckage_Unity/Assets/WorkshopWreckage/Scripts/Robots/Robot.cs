@@ -1753,7 +1753,7 @@ namespace WorkshopWreckage
                 dt = dt, speed01 = _speedNow / _walk, speed = _speedNow, gait = _gait, phase = _phase, turnRate = _turnRate, bend = _bend,
                 armReach = _armReach, armHold = _armHold, armLift = _armLift, altitude = _altitude, active = true, time = _time, reachHeight = _reachY,
                 aim = _aimPoint, aimWeight = _aimW, clawOpen = _clawOpen, clawClose = _clawClose, gripWidth = _gripW,
-                armExtend = _extend, lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
+                armExtend = _extend, focus = qaTarget, focusWeight = _clawsBusy ? 1 : 0, lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
                 lookAt = g.player.transform.position, lookWeight = idle ? 1 : 0,
                 gesture = _step == Step.Gesture ? Mathf.Clamp01(_gestureT / GestureTime) : 0,
             });
@@ -1823,7 +1823,7 @@ namespace WorkshopWreckage
         public void PoseQA(string name, float t = 0)
         {
             var a = new RobotAnim { dt = 1 };
-            bool part = false, onFloor = false;
+            bool part = false, onFloor = false, simulated = false;
             float S(float x) => Mathf.SmoothStep(0, 1, Mathf.Clamp01(x));
             switch (name)
             {
@@ -1849,6 +1849,36 @@ namespace WorkshopWreckage
                 case "bend": a.bend = 1; a.armReach = 1; a.reachHeight = 0.015f; break;
                 case "carry": a.armHold = 1; a.clawClose = 1; part = true; break;
                 case "carrywalk": a.armHold = 1; a.clawClose = 1; a.gait = 1; a.speed = _walk; a.speed01 = 1; a.phase = Mathf.PI / 2 + t * Mathf.PI * 2; part = true; break;
+                case "roll":
+                case "bank":
+                case "carryroll":
+                case "carrybank":
+                {
+                    // simulated over time (balance and wheel are dynamic): accelerate, cruise, brake to a stop
+                    // ("roll"), or roll round a curve ("bank"); with a load for the carry variants. The robot is
+                    // put back where it stood, the pose stays.
+                    _model.ResetPose();
+                    var p0 = transform.position; var r0 = transform.rotation;
+                    bool load = name.StartsWith("carry"), curve = name.EndsWith("bank");
+                    int frames = Mathf.RoundToInt(t * 150);
+                    float sdt = 1 / 60f, ph = 0;
+                    for (int f = 0; f <= frames; f++)
+                    {
+                        float tt = f / 150f;
+                        float v = curve ? _walk * Mathf.SmoothStep(0, 1, tt / 0.15f)
+                            : tt < 0.3f ? _walk * Mathf.SmoothStep(0, 1, tt / 0.3f) : tt < 0.6f ? _walk : tt < 0.8f ? _walk * (1 - Mathf.SmoothStep(0, 1, (tt - 0.6f) / 0.2f)) : 0;
+                        float turn = curve ? 150f * Mathf.SmoothStep(0, 1, (tt - 0.1f) / 0.2f) : 0;
+                        transform.position += transform.forward * (v * sdt);
+                        if (curve) transform.rotation *= Quaternion.Euler(0, turn * sdt, 0);
+                        ph += _model.StepRate(v / _walk, v) * sdt;
+                        _model.Animate(new RobotAnim { dt = sdt, speed = v, speed01 = v / _walk, gait = v > 0.02f ? 1 : 0, turnRate = turn, phase = ph, time = f * sdt,
+                            armHold = load ? 1 : 0, clawClose = load ? 1 : 0, gripWidth = load ? 0.05f : 0 });
+                    }
+                    transform.SetPositionAndRotation(p0, curve ? r0 * Quaternion.Euler(0, -25f, 0) : r0);   // a curve is shown from where it is most visible
+                    _armHold = load ? 1 : 0; _armReach = 0; _aimW = 0;
+                    simulated = true; part = load;
+                    break;
+                }
                 case "telescope":
                     // the reach upgrade at full rank: raising a part to a drawer t of the way from 0.30 to 0.58 m up
                     _model.armExtendMax = (0.62f - BaseReach) * 1.35f;
@@ -1885,8 +1915,11 @@ namespace WorkshopWreckage
                     break;
             }
             if (part || a.armHold > 0) a.gripWidth = 0.05f;
-            _armReach = a.armReach; _armLift = a.armLift; _armHold = a.armHold; _aimW = a.aimWeight; _aimPoint = a.aim; _extend = a.armExtend;
-            _model.Animate(a);
+            if (!simulated)
+            {
+                _armReach = a.armReach; _armLift = a.armLift; _armHold = a.armHold; _aimW = a.aimWeight; _aimPoint = a.aim; _extend = a.armExtend;
+                _model.Animate(a);
+            }
             if (part && _qaPart == null)
             {
                 var def = g.db.order.Select(d => g.db.Get(d)).First(d => !d.IsRobotPart && ItemDatabase.Extents(d)[0] < 0.07f && ItemDatabase.Extents(d)[0] > 0.035f);

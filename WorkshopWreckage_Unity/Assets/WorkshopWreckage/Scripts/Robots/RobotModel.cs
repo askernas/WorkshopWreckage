@@ -33,6 +33,8 @@ namespace WorkshopWreckage
         public Vector3 lookAhead;  // a point ahead on the robot's path (where it is about to go)
         public float armExtend;    // telescopic arms: how far the sleeves are out (world m; models without an aim solve)
         public float lookAheadWeight;
+        public Vector3 focus;      // the part or destination being worked on (pick-up, deposit, staging)
+        public float focusWeight;
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and
@@ -108,19 +110,19 @@ namespace WorkshopWreckage
         public virtual float StepRate(float moving01, float speed) => Mathf.Lerp(5f, 8.5f, Mathf.Clamp01(moving01));
 
         /// <summary>World point between the claws (where a part is gripped), or null.</summary>
-        public virtual Vector3? GripPoint => null;
+        public virtual Vector3? GripPoint => FamilyGripPoint;
 
         /// <summary>How far in front of the robot (world, flat) the claws come down when it bends to
         /// pick something up at the given height, or null (no such pose).</summary>
-        public virtual float? GripReach(float reachHeight) => null;
+        public virtual float? GripReach(float reachHeight) => FamilyGripReach(reachHeight);
 
         /// <summary>How far in front of the robot (world, flat) the claws are when raised to a height
         /// above its feet (aiming at a destination), or null (no aimed deposit).</summary>
-        public virtual float? AimReach(float aimHeight) => null;
+        public virtual float? AimReach(float aimHeight) => FamilyAimReach(aimHeight, 0);
 
         /// <summary>The same with the arms fully extended (telescopic forearms): the furthest the claws get
         /// in front of the robot at that height, or -1 / null. Equals AimReach without an extension.</summary>
-        public virtual float? AimReachMax(float aimHeight) => AimReach(aimHeight);
+        public virtual float? AimReachMax(float aimHeight) => FamilyAimReach(aimHeight, 2f);
 
         /// <summary>QA: clears any state the animation carries between frames.</summary>
         public virtual void ResetPose() { }

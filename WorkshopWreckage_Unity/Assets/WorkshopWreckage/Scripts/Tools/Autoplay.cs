@@ -431,6 +431,26 @@ namespace WorkshopWreckage
             yield return g.Capture(Path.Combine(outDir, "17_robots_lineup_close.png"), 3);
             foreach (var r in g.robots) { r.transform.SetPositionAndRotation(saved[r].Item1, saved[r].Item2); r.enabled = true; }
 
+            // a controlled arrangement for Caterpillarbot (capacity 3): three loose parts of one kind in a
+            // little cluster on open floor in front of it, and the player's focus command on that kind,
+            // so "collects several parts before a delivery run" no longer depends on what lies nearby
+            var catBot = g.robots.First(r => r.id == "caterpillarbot");
+            var catDef = g.db.order.Select(d => g.db.Get(d)).FirstOrDefault(d => !d.IsRobotPart && ItemDatabase.Extents(d)[0] < 0.1f
+                && g.world.IdsOf(d.id).Count(i => g.world.instances[i].state == ItemState.InWorld && g.world.instances[i].owner == "world") >= 3);
+            if (catDef != null)
+            {
+                var cf = Vector3.ProjectOnPlane(catBot.transform.forward, Vector3.up).normalized;
+                var cs = Vector3.Cross(Vector3.up, cf);
+                int ck = 0;
+                foreach (var id in g.world.IdsOf(catDef.id).Where(i => g.world.instances[i].state == ItemState.InWorld && g.world.instances[i].owner == "world").Take(3).ToList())
+                {
+                    var p = catBot.transform.position + cf * 0.55f + cs * ((ck++ - 1) * 0.14f);
+                    g.index.Remove(id);
+                    g.world.SetTransform(id, Matrix4x4.TRS(new Vector3(p.x, g.debris.At(p) + ItemDatabase.Extents(catDef)[2] * 0.5f + 0.01f, p.z), Quaternion.identity, Vector3.one * catDef.worldScale));
+                    g.index.Insert(id);
+                }
+                catBot.CommandFocus(catDef.id);
+            }
             var before = g.robots.ToDictionary(r => r.id, r => (r.delivered, r.staged));
             Time.timeScale = 4;
             bool[] shot = new bool[5];
@@ -471,6 +491,10 @@ namespace WorkshopWreckage
             Check("Unibot never stores directly: everything goes to staging zones (still unsorted)", uni.delivered == uniStored0 && uni.staged > before["unibot"].staged
                   && g.world.instances.Where(i => i.owner.StartsWith("stage:")).All(i => i.state == ItemState.InWorld), $"{uni.staged - before["unibot"].staged} staged, {uni.delivered - uniStored0} stored");
             Check("Caterpillarbot collects several parts before a delivery run", catMax >= 2, $"up to {catMax} on board");
+            Check("Unibot's grippers open at contact, close before the lift and open to let go", uni.pickCount >= 1 && uni.minOpenAtContact >= 0.95f && uni.minClosedAtAttach >= 0.99f && (uni.releases == 0 || uni.minOpenAtRelease >= 0.99f),
+                  $"{uni.pickCount} pick-ups, {uni.releases} releases; lowest opening at contact {uni.minOpenAtContact:0.00}, closure {uni.minClosedAtAttach:0.00}, opening at release {uni.minOpenAtRelease:0.00}");
+            Check("Unibot holds its load in the grippers while it rolls and turns", uni.carrySyncMax <= 0.01f, $"largest gap {uni.carrySyncMax * 100:0.0} cm");
+            Check("Unibot never draws a part in from afar: every grip within 5 cm, the rest deferred", uni.pickCount >= 1 && uni.maxGripGap <= 0.05f, $"largest grip gap {uni.maxGripGap * 100:0.0} cm, {uni.deferred} deferred");
             Check("Spiderbot collects only its one assigned definition", !spiderPicks.Contains(-99), $"definitions carried: {spiderPicks.Count}, now {spider.Describe()}");
             yield return RobotSpecChecks(hover, uni, spider);
             // battery: a robot running low finishes its load, goes home, charges and resumes
