@@ -86,9 +86,11 @@ namespace WorkshopWreckage
                 }
                 b.RoundedBox(new Vector3(side * (TrackX + TrackW / 2 + 0.008f), 0.18f, 0), new Vector3(0.016f, 0.13f, 0.62f), 0.006f, M("chassis", ToyYellow), 2);
                 b.RoundedBox(new Vector3(side * (TrackX + TrackW / 2 + 0.017f), 0.18f, 0), new Vector3(0.006f, 0.02f, 0.16f), 0.003f, M("chassis", Dark), 1);
+                foreach (var z in new[] { -0.19f, 0.19f })   // the skirt is three bolted plates
+                    SeamLine(b, "chassis", new Vector3(side * (TrackX + TrackW / 2 + 0.016f), 0.122f, z), new Vector3(side * (TrackX + TrackW / 2 + 0.016f), 0.238f, z), new Vector3(side, 0, 0));
                 foreach (var z in new[] { -0.28f, -0.1f, 0.1f, 0.28f })
                     foreach (var y in new[] { 0.13f, 0.225f })
-                        b.Rivet(new Vector3(side * (TrackX + TrackW / 2 + 0.016f), y, z), new Vector3(side, 0, 0), 0.007f, M("chassis", Gunmetal));
+                        Bolt(b, new Vector3(side * (TrackX + TrackW / 2 + 0.016f), y, z), new Vector3(side, 0, 0), 0.007f, M("chassis", Gunmetal));
                 Done(b, body);
                 // top-run cleats: their pivot slides to make the tread move
                 var c = new Batch();
@@ -104,7 +106,7 @@ namespace WorkshopWreckage
                     for (int k = 0; k < 6; k++)
                     {
                         float a = k * Mathf.PI / 3;
-                        s.Rivet(new Vector3(side * 0.025f, Mathf.Sin(a) * 0.065f, Mathf.Cos(a) * 0.065f), new Vector3(side, 0, 0), 0.008f, M(sprocket, Gunmetal));
+                        Bolt(s, new Vector3(side * 0.025f, Mathf.Sin(a) * 0.065f, Mathf.Cos(a) * 0.065f), new Vector3(side, 0, 0), 0.008f, M(sprocket, Gunmetal));
                     }
                     Done(s, spr);
                 }
@@ -119,10 +121,9 @@ namespace WorkshopWreckage
                 b.RoundedBox(new Vector3(0, 0.41f, -0.573f), new Vector3(0.24f, 0.07f, 0.014f), 0.006f, M("chassis", ToyYellowDeep), 2);
                 b.RoundedBox(new Vector3(0, 0.41f, -0.581f), new Vector3(0.12f, 0.018f, 0.006f), 0.003f, M("chassis", ToyRed), 1);
                 b.RoundedBox(new Vector3(0, 0.41f, -0.584f), new Vector3(0.1f, 0.008f, 0.004f), 0.002f, M("chassis", Dark), 1);
-                foreach (var x in new[] { -0.21f, -0.07f, 0.07f, 0.21f })
-                    foreach (var y in new[] { 0.35f, 0.47f })
-                        b.Rivet(new Vector3(x, y, -0.57f), new Vector3(0, 0, -1), 0.0075f, M("chassis", Gunmetal));
+                PanelFrame(b, "chassis", new Vector3(0, 0.41f, -0.39f), new Vector3(0.48f, 0.16f, 0.36f), new Vector3(0, 0, -1), 0.03f, 0.007f, 0.08f);
                 Grille(b, "chassis", new Vector3(0, 0.2f, -0.501f), 0.16f, 0.08f, 5, false, -1);
+                foreach (var n in new[] { Vector3.left, Vector3.right }) PanelFrame(b, "chassis", new Vector3(0, 0.41f, -0.39f), new Vector3(0.48f, 0.16f, 0.36f), n, 0.042f);
                 b.RoundedBox(new Vector3(0, 0.2f, 0.505f), new Vector3(0.16f, 0.1f, 0.02f), 0.008f, M("battery pack", Gunmetal), 2);
                 b.Lathe(new Vector3(-0.08f, 0.26f, 0.38f), Disc(0.045f, 0.16f, 0.008f), M("drive motor", Gunmetal), RightRot, 16);
                 b.Lathe(new Vector3(-0.27f, 0.43f, -0.55f), Disc(0.026f, 0.54f, 0.005f), M("chassis", Gunmetal), RightRot, 12);   // shoulder axle across the front
@@ -145,11 +146,15 @@ namespace WorkshopWreckage
                     b.RoundedBox(new Vector3(s * (w / 2 - t / 2), h + 0.006f, 0), new Vector3(t + 0.008f, 0.012f, d + 0.008f), 0.004f, M(P, Brass), 1);
                     b.RoundedBox(new Vector3(0, h + 0.006f, s * (d / 2 - t / 2)), new Vector3(w + 0.008f, 0.012f, t + 0.008f), 0.004f, M(P, Brass), 1);
                 }
+                foreach (var s in new[] { -1f, 1f })   // bolted plates on the walls
+                {
+                    PanelFrame(b, P, new Vector3(s * (w / 2 - t / 2), h / 2, 0), new Vector3(t, h, d), new Vector3(s, 0, 0), 0.024f, 0.006f, 0.07f);
+                    PanelFrame(b, P, new Vector3(0, h / 2, s * (d / 2 - t / 2)), new Vector3(w, h, t), new Vector3(0, 0, s), 0.024f, 0.006f, 0.09f);
+                }
                 foreach (var x in new[] { -1f, 1f })
                     foreach (var z in new[] { -1f, 1f })
                     {
                         b.RoundedBox(new Vector3(x * (w / 2 - 0.004f), h / 2, z * (d / 2 - 0.004f)), new Vector3(0.022f, h + 0.01f, 0.022f), 0.006f, M(P, Brass), 1);   // corner posts
-                        foreach (var y in new[] { 0.05f, h - 0.05f }) b.Rivet(new Vector3(x * (w / 2 + 0.001f), y, z * (d / 2 - 0.035f)), new Vector3(x, 0, 0), 0.006f, M(P, Gunmetal));
                     }
                 Done(b, _boxes[i]);
             }

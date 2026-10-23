@@ -59,6 +59,62 @@ namespace WorkshopWreckage
             return p.ToArray();
         }
 
+        // ------------------------------------------------------------ seams and bolts
+        static Material _seam;
+        /// <summary>The dark line of a panel seam (a thin, slightly proud strip reads as a groove).</summary>
+        protected static Material SeamMat => _seam ??= EnvMaterials.Plain(new Color(0.06f, 0.05f, 0.04f), 0.2f, 0.25f);
+
+        /// <summary>A panel seam on a surface from a to b (Godot-local), lying flat on the surface
+        /// with the given normal; `lift` keeps it above curved (faceted) surfaces.</summary>
+        protected void SeamLine(Batch b, string part, Vector3 a, Vector3 bb, Vector3 normal, float w = 0.0042f, float lift = 0.0006f)
+        {
+            var m = M(part, SeamMat);
+            var d = bb - a;
+            float len = d.magnitude;
+            if (m == null || len < 1e-4f) return;
+            var n = normal.normalized;
+            var rot = Quaternion.LookRotation(Batch.G(d / len), Batch.G(n));
+            b.Box((a + bb) / 2 + n * lift, new Vector3(w, 0.0024f, len + w), m, false, rot);
+        }
+
+        /// <summary>A hex bolt on a washer (the concept sheets' fastener), same call shape as
+        /// Batch.Rivet: Godot-local point on the surface, outward direction, size, material.</summary>
+        protected void Bolt(Batch b, Vector3 c, Vector3 outward, float r, Material m)
+        {
+            if (m == null) return;
+            var n = outward.normalized;
+            var rot = Quaternion.FromToRotation(Vector3.up, Batch.G(n));
+            b.Lathe(c - n * 0.001f, new[] { new Vector2(r * 1.45f, 0), new Vector2(r * 1.45f, r * 0.22f), new Vector2(0, r * 0.22f) }, m, rot, 10);
+            b.Lathe(c + n * (r * 0.2f), new[] { new Vector2(r, 0), new Vector2(r, r * 0.5f), new Vector2(r * 0.72f, r * 0.74f), new Vector2(0, r * 0.74f) }, m, rot, 6, true);
+        }
+
+        /// <summary>A bolted plate on one face of an axis-aligned box (Godot-local centre and size,
+        /// normal one of ±X, ±Y, ±Z): a seam rectangle inset from the edges (keep it past the
+        /// bevel) and hex bolts just inside it, at the corners and spaced along the sides.</summary>
+        protected void PanelFrame(Batch b, string part, Vector3 c, Vector3 size, Vector3 normal, float inset, float boltR = 0.0065f, float spacing = 0.075f)
+        {
+            var n = normal.normalized;
+            var an = new Vector3(Mathf.Abs(n.x), Mathf.Abs(n.y), Mathf.Abs(n.z));
+            var u = an.x > 0.5f ? Vector3.forward : Vector3.right;
+            var v = Vector3.Cross(an, u);
+            v = new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
+            float hu = Vector3.Dot(size, u) / 2 - inset, hv = Vector3.Dot(size, v) / 2 - inset;
+            if (hu < 0.012f || hv < 0.012f) return;
+            var fc = c + n * (Vector3.Dot(size, an) / 2);
+            float[] su = { -1, 1, 1, -1 }, sv = { -1, -1, 1, 1 };
+            Vector3 P(int k, float du, float dv) => fc + u * (su[k % 4] * du) + v * (sv[k % 4] * dv);
+            for (int k = 0; k < 4; k++) SeamLine(b, part, P(k, hu, hv), P(k + 1, hu, hv), n);
+            float bu = hu - 0.012f, bv = hv - 0.012f;
+            if (bu < 0.006f || bv < 0.006f) return;
+            var m = M(part, Gunmetal);
+            for (int k = 0; k < 4; k++)
+            {
+                Vector3 p0 = P(k, bu, bv), p1 = P(k + 1, bu, bv);
+                int cnt = Mathf.Max(1, Mathf.RoundToInt((p1 - p0).magnitude / spacing));
+                for (int i = 0; i < cnt; i++) Bolt(b, Vector3.Lerp(p0, p1, i / (float)cnt), n, boltR, m);
+            }
+        }
+
         // ------------------------------------------------------------ details
 
         /// <summary>A recessed slatted grille on a face (Godot-local centre on the
@@ -102,11 +158,11 @@ namespace WorkshopWreckage
             for (int k = 0; k < nTop; k++)
             {
                 float t = Mathf.Lerp(-W / 2 + inset + 0.02f, W / 2 - inset - 0.02f, k / (float)(nTop - 1));
-                b.Rivet(new Vector3(t, H - inset, front), new Vector3(0, 0, -1), 0.0075f, M(shell, Gunmetal));
-                b.Rivet(new Vector3(t, inset, front), new Vector3(0, 0, -1), 0.0075f, M(shell, Gunmetal));
+                Bolt(b, new Vector3(t, H - inset, front), new Vector3(0, 0, -1), 0.0075f, M(shell, Gunmetal));
+                Bolt(b, new Vector3(t, inset, front), new Vector3(0, 0, -1), 0.0075f, M(shell, Gunmetal));
             }
             foreach (var x in new[] { -W / 2 + inset, W / 2 - inset })
-                for (int k = 1; k < 4; k++) b.Rivet(new Vector3(x, inset + k * (H - 2 * inset) / 4, front), new Vector3(0, 0, -1), 0.0075f, M(shell, Gunmetal));
+                for (int k = 1; k < 4; k++) Bolt(b, new Vector3(x, inset + k * (H - 2 * inset) / 4, front), new Vector3(0, 0, -1), 0.0075f, M(shell, Gunmetal));
             // eyes
             float eyeY = mouth ? H * 0.56f : H * 0.52f;
             var eyeXs = eyeCount == 1 ? new[] { 0f } : new[] { -W * 0.236f, W * 0.236f };
@@ -146,6 +202,9 @@ namespace WorkshopWreckage
             // back vent and slot
             Grille(b, shell, new Vector3(0, H * 0.56f, -front + 0.001f), W * 0.53f, H * 0.34f, 7, false, 1);
             b.RoundedBox(new Vector3(0, H * 0.27f, -front + 0.004f), new Vector3(0.05f, 0.012f, 0.006f), 0.003f, M(shell, Dark), 1);
+            // bolted plates on the sides (framing the ears), the top and the back
+            var hc = new Vector3(0, H / 2, 0);
+            foreach (var n in new[] { Vector3.left, Vector3.right, Vector3.up, new Vector3(0, 0, 1) }) PanelFrame(b, shell, hc, size, n, bev + 0.012f);
             Done(b, pivot);
 
             foreach (var x in eyeXs)
@@ -173,7 +232,7 @@ namespace WorkshopWreckage
             // upper arm
             b.RoundedBox(V(0, -0.085f, 0), V(0.1f, 0.1f, 0.104f), 0.026f * k, P, 2);
             b.RoundedBox(V(0, -0.05f, 0), V(0.106f, 0.02f, 0.11f), 0.008f * k, PD, 2);
-            foreach (var x in new[] { -0.028f, 0.028f }) b.Rivet(V(x, -0.095f, -0.052f), new Vector3(0, 0, -1), 0.0065f * k, G);
+            foreach (var x in new[] { -0.028f, 0.028f }) Bolt(b, V(x, -0.095f, -0.052f), new Vector3(0, 0, -1), 0.0065f * k, G);
             // elbow: gunmetal axle with gear teeth, red joint discs and brass caps on both sides
             b.Lathe(V(-0.056f, -0.162f, 0), Disc(0.042f * k, 0.112f * k, 0.006f * k), G, RightRot, 18);
             for (int t = 0; t < 12; t++)
@@ -190,8 +249,8 @@ namespace WorkshopWreckage
             b.RoundedBox(V(0, -0.238f, 0), V(0.114f, 0.12f, 0.114f), 0.028f * k, P, 2);
             b.RoundedBox(V(0, -0.195f, 0), V(0.12f, 0.02f, 0.12f), 0.007f * k, PD, 2);
             b.RoundedBox(V(0, -0.288f, 0), V(0.12f, 0.016f, 0.12f), 0.006f * k, PD, 2);
-            foreach (var z in new[] { -0.03f, 0.03f }) b.Rivet(V(s * 0.058f, -0.24f, z), new Vector3(s, 0, 0), 0.007f * k, G);
-            foreach (var x in new[] { -0.032f, 0.032f }) b.Rivet(V(x, -0.24f, -0.058f), new Vector3(0, 0, -1), 0.0065f * k, G);
+            foreach (var z in new[] { -0.03f, 0.03f }) Bolt(b, V(s * 0.058f, -0.24f, z), new Vector3(s, 0, 0), 0.007f * k, G);
+            foreach (var x in new[] { -0.032f, 0.032f }) Bolt(b, V(x, -0.24f, -0.058f), new Vector3(0, 0, -1), 0.0065f * k, G);
             // wrist axle and palm block
             b.Lathe(V(-0.04f, -0.31f, 0), Disc(0.032f * k, 0.08f * k, 0.005f * k), CG, RightRot, 16);
             foreach (var side in new[] { -1f, 1f }) b.Lathe(V(side * 0.04f, -0.31f, 0), Dome(0.014f * k, 0.008f * k), CB, SideRot(side), 10);

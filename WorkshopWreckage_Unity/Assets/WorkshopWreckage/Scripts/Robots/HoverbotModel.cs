@@ -62,8 +62,23 @@ namespace WorkshopWreckage
             for (int k = 0; k < 24; k++)   // rivet rings on both shells
             {
                 float a = k * Mathf.PI / 12;
-                b.Rivet(new Vector3(Mathf.Sin(a) * 0.405f, 0.368f, Mathf.Cos(a) * 0.405f), new Vector3(Mathf.Sin(a), 1.4f, Mathf.Cos(a)), 0.0075f, M("upper saucer shell", Gunmetal));
-                b.Rivet(new Vector3(Mathf.Sin(a) * 0.4f, 0.217f, Mathf.Cos(a) * 0.4f), new Vector3(Mathf.Sin(a), -1.2f, Mathf.Cos(a)), 0.0075f, M("lower saucer shell", Gunmetal));
+                Bolt(b, new Vector3(Mathf.Sin(a) * 0.405f, 0.368f, Mathf.Cos(a) * 0.405f), new Vector3(Mathf.Sin(a), 1.4f, Mathf.Cos(a)), 0.0075f, M("upper saucer shell", Gunmetal));
+                Bolt(b, new Vector3(Mathf.Sin(a) * 0.4f, 0.217f, Mathf.Cos(a) * 0.4f), new Vector3(Mathf.Sin(a), -1.2f, Mathf.Cos(a)), 0.0075f, M("lower saucer shell", Gunmetal));
+            }
+            // radial panel seams on both shells (between the panels, clear of the front window)
+            var upperP = new[] { new Vector2(0.434f, 0.322f), new Vector2(0.43f, 0.34f), new Vector2(0.39f, 0.375f), new Vector2(0.33f, 0.405f), new Vector2(0.29f, 0.418f) };
+            var lowerP = new[] { new Vector2(0.335f, 0.173f), new Vector2(0.38f, 0.2f), new Vector2(0.42f, 0.235f), new Vector2(0.434f, 0.258f) };
+            for (int k = 0; k < 12; k++)
+            {
+                float a = (k + 0.5f) * Mathf.PI / 6;
+                var dir = new Vector3(Mathf.Sin(a), 0, Mathf.Cos(a));
+                foreach (var (prof, part) in new[] { (upperP, "upper saucer shell"), (lowerP, "lower saucer shell") })
+                    for (int i = 0; i < prof.Length - 1; i++)
+                    {
+                        var e = prof[i + 1] - prof[i];
+                        var nr = new Vector2(e.y, -e.x).normalized;
+                        SeamLine(b, part, dir * prof[i].x + Vector3.up * prof[i].y, dir * prof[i + 1].x + Vector3.up * prof[i + 1].y, dir * nr.x + Vector3.up * nr.y, 0.0042f, 0.0016f);
+                    }
             }
             // slot window in the front of the rim band, and the side ports the arms come out of
             Grille(b, "upper saucer shell", new Vector3(0, 0.29f, -RimR - 0.004f), 0.2f, 0.044f, 3, false, -1);
@@ -127,7 +142,7 @@ namespace WorkshopWreckage
                     r.RoundedBox(new Vector3(s * 0.26f, 0.005f, 0), new Vector3(0.3f, 0.014f, 0.1f), 0.007f, M(part, ToyRed), 2, twist);
                     r.Lathe(new Vector3(s * 0.41f, -0.002f, 0), Disc(0.05f, 0.014f, 0.004f), M(part, ToyRed), twist, 24);              // rounded tip
                     r.RoundedBox(new Vector3(s * 0.26f, 0.005f, 0), new Vector3(0.31f, 0.017f, 0.008f), 0.003f, M(part, Gunmetal), 1, twist);   // spine
-                    foreach (var t in new[] { 0.16f, 0.26f, 0.36f }) r.Rivet(new Vector3(s * t, 0.013f, 0.03f), Vector3.up, 0.005f, M(part, Gunmetal));
+                    foreach (var t in new[] { 0.16f, 0.26f, 0.36f }) Bolt(r, new Vector3(s * t, 0.013f, 0.03f), Vector3.up, 0.005f, M(part, Gunmetal));
                 }
                 Done(r, _rotor);
             }

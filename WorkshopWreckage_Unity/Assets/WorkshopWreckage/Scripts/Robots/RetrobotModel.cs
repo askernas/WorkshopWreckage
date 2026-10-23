@@ -82,10 +82,10 @@ namespace WorkshopWreckage
             b.RoundedBox(new Vector3(0, 0.468f, -0.12f), new Vector3(0.065f, 0.012f, 0.006f), 0.003f, M(P, Dark), 1);       // slot
             foreach (var x in new[] { -0.115f, 0.115f })
                 foreach (var y in new[] { 0.44f, 0.64f })
-                    b.Rivet(new Vector3(x, y, -0.11f), new Vector3(0, 0, -1), 0.008f, M(P, Gunmetal));
-            foreach (var x in new[] { -0.052f, 0.052f }) b.Rivet(new Vector3(x, 0.468f, -0.119f), new Vector3(0, 0, -1), 0.006f, M(P, Gunmetal));
-            foreach (var y in new[] { 0.45f, 0.54f, 0.63f })
-                foreach (var s in new[] { -1f, 1f }) b.Rivet(new Vector3(s * 0.135f, y, -0.05f), new Vector3(s, 0, 0), 0.007f, M(P, Gunmetal));
+                    Bolt(b, new Vector3(x, y, -0.11f), new Vector3(0, 0, -1), 0.008f, M(P, Gunmetal));
+            foreach (var x in new[] { -0.052f, 0.052f }) Bolt(b, new Vector3(x, 0.468f, -0.119f), new Vector3(0, 0, -1), 0.006f, M(P, Gunmetal));
+            foreach (var n in new[] { Vector3.left, Vector3.right, new Vector3(0, 0, 1) }) PanelFrame(b, P, new Vector3(0, 0.54f, 0), new Vector3(0.27f, 0.25f, 0.22f), n, 0.047f);
+            SeamLine(b, P, new Vector3(-0.1f, 0.625f, -0.111f), new Vector3(0.1f, 0.625f, -0.111f), new Vector3(0, 0, -1));   // the chest plate's top seam
             Grille(b, P, new Vector3(0, 0.56f, 0.112f), 0.15f, 0.08f, 6, false, 1);   // back vent
             // neck: stacked dark rings
             for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.672f + k * 0.012f, 0), Disc(0.05f - k * 0.004f, 0.012f, 0.003f), M(P, Gunmetal), null, 16);
@@ -101,7 +101,7 @@ namespace WorkshopWreckage
             // thigh: a chunky banded block
             b.RoundedBox(new Vector3(0, -0.082f, 0), new Vector3(0.13f, 0.09f, 0.125f), 0.026f, Y, 2);
             b.RoundedBox(new Vector3(0, -0.044f, 0), new Vector3(0.136f, 0.016f, 0.13f), 0.006f, YD, 2);
-            foreach (var z in new[] { -0.03f, 0.03f }) b.Rivet(new Vector3(s * 0.066f, -0.085f, z), new Vector3(s, 0, 0), 0.0065f, G);
+            foreach (var z in new[] { -0.03f, 0.03f }) Bolt(b, new Vector3(s * 0.066f, -0.085f, z), new Vector3(s, 0, 0), 0.0065f, G);
             // knee: dark axle, big red discs (front and outside) with brass caps
             b.Lathe(new Vector3(-0.056f, -0.14f, 0), Disc(0.046f, 0.112f, 0.008f), G, RightRot, 18);
             foreach (var side in new[] { -1f, 1f })
@@ -113,7 +113,7 @@ namespace WorkshopWreckage
             b.Lathe(new Vector3(0, -0.14f, -0.068f), Dome(0.013f, 0.008f), Br, FwdRot, 10);
             // shin: yellow front plate with rivets, pistons and springs behind
             b.RoundedBox(new Vector3(0, -0.218f, -0.018f), new Vector3(0.118f, 0.1f, 0.072f), 0.018f, Y, 2);
-            foreach (var x in new[] { -0.04f, 0.04f }) b.Rivet(new Vector3(x, -0.235f, -0.055f), new Vector3(0, 0, -1), 0.006f, G);
+            foreach (var x in new[] { -0.04f, 0.04f }) Bolt(b, new Vector3(x, -0.235f, -0.055f), new Vector3(0, 0, -1), 0.006f, G);
             foreach (var dx in new[] { -0.028f, 0.028f })
             {
                 b.Lathe(new Vector3(dx, -0.28f, 0.026f), Disc(0.013f, 0.13f, 0.002f), G, null, 10);
@@ -127,8 +127,8 @@ namespace WorkshopWreckage
             b.RoundedBox(new Vector3(0, -0.388f, -0.04f), new Vector3(0.168f, 0.026f, 0.28f), 0.008f, G, 2);
             b.RoundedBox(new Vector3(0, -0.399f, -0.04f), new Vector3(0.158f, 0.008f, 0.27f), 0.003f, M(P, Rubber), 1);
             b.RoundedBox(new Vector3(0, -0.345f, 0.088f), new Vector3(0.13f, 0.052f, 0.03f), 0.01f, R, 2);
-            foreach (var x in new[] { -0.058f, 0.058f }) b.Rivet(new Vector3(x, -0.31f, -0.168f), new Vector3(0, 0, -1), 0.006f, G);
-            foreach (var z in new[] { -0.13f, -0.04f, 0.05f }) b.Rivet(new Vector3(s * 0.076f, -0.336f, z), new Vector3(s, 0, 0), 0.006f, G);
+            foreach (var x in new[] { -0.058f, 0.058f }) Bolt(b, new Vector3(x, -0.31f, -0.168f), new Vector3(0, 0, -1), 0.006f, G);
+            foreach (var z in new[] { -0.13f, -0.04f, 0.05f }) Bolt(b, new Vector3(s * 0.076f, -0.336f, z), new Vector3(s, 0, 0), 0.006f, G);
             Done(b, leg);
         }
 

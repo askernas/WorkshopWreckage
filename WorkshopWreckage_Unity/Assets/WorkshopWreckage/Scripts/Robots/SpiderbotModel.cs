@@ -70,8 +70,16 @@ namespace WorkshopWreckage
                 }
                 foreach (var x in new[] { -0.155f, 0.155f })
                     foreach (var z in new[] { -0.15f, 0.15f })
-                        b.Rivet(new Vector3(x, 0.43f, z), Vector3.up, 0.008f, M(P, Gunmetal));
-                foreach (var x in new[] { -0.15f, -0.05f, 0.05f, 0.15f }) b.Rivet(new Vector3(x, 0.262f, -0.17f), new Vector3(0, 0, -1), 0.007f, M(P, Gunmetal));
+                        Bolt(b, new Vector3(x, 0.43f, z), Vector3.up, 0.008f, M(P, Gunmetal));
+                foreach (var x in new[] { -0.15f, -0.05f, 0.05f, 0.15f }) Bolt(b, new Vector3(x, 0.262f, -0.17f), new Vector3(0, 0, -1), 0.007f, M(P, Gunmetal));
+                // panel seams: a belt round the body and the back plate
+                foreach (var s in new[] { -1f, 1f })
+                {
+                    SeamLine(b, P, new Vector3(s * 0.181f, 0.385f, -0.13f), new Vector3(s * 0.181f, 0.385f, 0.13f), new Vector3(s, 0, 0));
+                    SeamLine(b, P, new Vector3(s * 0.181f, 0.27f, -0.13f), new Vector3(s * 0.181f, 0.27f, 0.13f), new Vector3(s, 0, 0));
+                }
+                PanelFrame(b, P, new Vector3(0, 0.33f, 0), new Vector3(0.36f, 0.2f, 0.34f), new Vector3(0, 0, -1), 0.047f);
+                PanelFrame(b, P, new Vector3(0, 0.33f, 0), new Vector3(0.36f, 0.2f, 0.34f), new Vector3(0, 0, 1), 0.052f);
                 // carry handle behind the head
                 foreach (var x in new[] { -0.07f, 0.07f }) b.Lathe(new Vector3(x, 0.435f, 0.12f), Disc(0.01f, 0.045f, 0.002f), M(P, Gunmetal), null, 8);
                 b.RoundedBox(new Vector3(0, 0.482f, 0.12f), new Vector3(0.16f, 0.016f, 0.02f), 0.006f, M(P, Gunmetal), 2);
@@ -95,7 +103,7 @@ namespace WorkshopWreckage
                 var tilt = Batch.R(Vector3.forward, x * 0.75f);
                 bh.RoundedBox(new Vector3(x * 0.075f, 0.07f, 0), new Vector3(0.18f, 0.066f, 0.076f), 0.02f, M(part, ToyGreen), 2, tilt);
                 bh.RoundedBox(new Vector3(x * 0.075f, 0.07f, 0), new Vector3(0.13f, 0.07f, 0.082f), 0.006f, M(part, ToyGreenDeep), 1, tilt);   // band
-                foreach (var t in new[] { 0.045f, 0.105f }) bh.Rivet(new Vector3(x * t, t * 0.93f, -0.04f), new Vector3(0, 0, -1), 0.0055f, M(part, Gunmetal));
+                foreach (var t in new[] { 0.045f, 0.105f }) Bolt(bh, new Vector3(x * t, t * 0.93f, -0.04f), new Vector3(0, 0, -1), 0.0055f, M(part, Gunmetal));
                 Done(bh, _hip[i]);
                 var bk = new Batch();   // big knee joint, olive upper shin, heavy red lower shin, puck foot
                 bk.Lathe(new Vector3(0, 0, -0.046f), Disc(0.052f, 0.092f, 0.01f), M(part, ToyRed), BackRot, 22);
@@ -103,7 +111,7 @@ namespace WorkshopWreckage
                 bk.Lathe(new Vector3(0, 0, 0.048f), Dome(0.024f, 0.014f), M(part, Brass), BackRot, 14);
                 var shin = Batch.R(Vector3.forward, -x * 0.16f);
                 bk.RoundedBox(new Vector3(x * 0.016f, -0.1f, 0), new Vector3(0.07f, 0.1f, 0.074f), 0.02f, M(part, ToyGreen), 2, shin);
-                bk.Rivet(new Vector3(x * 0.016f, -0.1f, -0.038f), new Vector3(0, 0, -1), 0.0055f, M(part, Gunmetal));
+                Bolt(bk, new Vector3(x * 0.016f, -0.1f, -0.038f), new Vector3(0, 0, -1), 0.0055f, M(part, Gunmetal));
                 bk.RoundedBox(new Vector3(x * 0.036f, -0.165f, 0), new Vector3(0.082f, 0.018f, 0.084f), 0.006f, M(part, Gunmetal), 1, shin);
                 bk.RoundedBox(new Vector3(x * 0.055f, -0.275f, 0), new Vector3(0.08f, 0.2f, 0.082f), 0.022f, M(part, ToyRed), 2, shin);
                 bk.Lathe(new Vector3(x * 0.072f, -0.39f, 0), Disc(0.024f, 0.022f, 0.004f), M(part, Gunmetal), null, 12);

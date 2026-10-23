@@ -103,7 +103,7 @@ namespace WorkshopWreckage
                 for (int k = 0; k < 6; k++)
                 {
                     float a = k * Mathf.PI / 3;
-                    b.Rivet(new Vector3(s * 0.078f, Mathf.Sin(a) * 0.095f, Mathf.Cos(a) * 0.095f), new Vector3(s, 0, 0), 0.009f, M(Hub, Gunmetal));
+                    Bolt(b, new Vector3(s * 0.078f, Mathf.Sin(a) * 0.095f, Mathf.Cos(a) * 0.095f), new Vector3(s, 0, 0), 0.009f, M(Hub, Gunmetal));
                 }
             }
             Done(b, _wheel);
@@ -128,11 +128,10 @@ namespace WorkshopWreckage
             // torso
             b.RoundedBox(new Vector3(0, TorsoY, 0), new Vector3(0.27f, 0.21f, 0.21f), 0.03f, M("torso", ToyGreen), 3);
             Grille(b, "torso", new Vector3(0, 0.6f, -0.106f), 0.14f, 0.075f, 6, false, -1);
-            b.RoundedBox(new Vector3(0, 0.515f, -0.108f), new Vector3(0.08f, 0.016f, 0.008f), 0.004f, M("torso", Dark), 1);
-            foreach (var x in new[] { -0.115f, 0.115f })
-                foreach (var y in new[] { 0.5f, 0.66f })
-                    b.Rivet(new Vector3(x, y, -0.105f), new Vector3(0, 0, -1), 0.008f, M("torso", Gunmetal));
+            b.RoundedBox(new Vector3(0, 0.533f, -0.108f), new Vector3(0.08f, 0.016f, 0.008f), 0.004f, M("torso", Dark), 1);
+            PanelFrame(b, "torso", new Vector3(0, TorsoY, 0), new Vector3(0.27f, 0.21f, 0.21f), new Vector3(0, 0, -1), 0.04f);
             Grille(b, "torso", new Vector3(0, 0.6f, 0.106f), 0.15f, 0.08f, 6, false, 1);
+            foreach (var n in new[] { Vector3.left, Vector3.right, new Vector3(0, 0, 1) }) PanelFrame(b, "torso", new Vector3(0, TorsoY, 0), new Vector3(0.27f, 0.21f, 0.21f), n, 0.042f);
             b.Lathe(new Vector3(-0.19f, ShoulderY, 0), Disc(0.024f, 0.38f, 0.005f), M("torso", Gunmetal), RightRot, 12);   // shoulder axle
             for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.685f + k * 0.009f, 0), Disc(0.05f - k * 0.004f, 0.009f, 0.003f), M("torso", Gunmetal), null, 16);
             Done(b, _leanGeo);
