@@ -58,6 +58,7 @@ namespace WorkshopWreckage
         float _speedNow, _turnRate, _phase, _gait, _repathT, _idleT, _altitude, _time, _stepT;
         Step _lastStep;
         float _bend, _armHold, _armReach, _armLift;
+        float _reachY;   // height above the feet of the part being picked up (the claws reach down to it)
         int _capacity, _types;
         public int Capacity => _capacity;
         float _walk, _turn, _reach, _maxPickH, _followDist, _radius, _pickTime, _depositTime, _height, _maxItem, _stepH, _gather, _cruise;
@@ -249,9 +250,6 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Model QA: one neutral animation frame, the standing rest pose.</summary>
-        /// <summary>QA: freezes the model in the given animation inputs (studio renders of poses).</summary>
-        public void PoseWith(RobotAnim a) => _model.Animate(a);
-
         public void PoseRest()
         {
             if (_model is SortingArmModel sam)
@@ -968,6 +966,8 @@ namespace WorkshopWreckage
         {
             var ip = g.world.instances[itemId].Position;
             if (!Flies && ip.y > _maxPickH) yield return ClimbTo(ip);   // Spiderbot climbs up to it
+            _reachY = Mathf.Clamp(ip.y - transform.position.y, 0, _maxPickH);
+            if (!Flies && !_climbing && _model.GripReach(_reachY) is float grip) yield return StepToGrip(ip, grip);
             float h = Mathf.Clamp01(1 - (ip.y - transform.position.y) / (_height * 3f));
             for (float t = 0; t < _pickTime * 0.45f; t += Time.deltaTime)
             {
@@ -999,11 +999,30 @@ namespace WorkshopWreckage
                 _armReach = 1 - u;
                 yield return null;
             }
-            _bend = 0; _armReach = 0;
+            _bend = 0; _armReach = 0; _reachY = 0;
             if (_climbing) yield return ClimbDown();
             _path = null;
             _step = Step.Choose;   // gather more (if allowed), else deliver
             _idleT = 0;
+        }
+
+        /// <summary>The last little shuffle before a pick-up (models with a grip pose): forward or back
+        /// along its heading until the part lies where the claws come down. Never off walkable floor,
+        /// never longer than a moment; the part's reachability is decided before, by the normal rules.</summary>
+        IEnumerator StepToGrip(Vector3 ip, float grip)
+        {
+            for (float t = 0; t < 0.9f; t += Time.deltaTime)
+            {
+                FaceTowards(ip, Time.deltaTime);
+                float d = Vector3.Dot(Flat(ip - transform.position), transform.forward) - grip;
+                if (Mathf.Abs(d) < 0.01f) break;
+                float v = Mathf.Clamp(d * 4f, -_walk * 0.3f, _walk * 0.3f);
+                var np = transform.position + transform.forward * (v * Time.deltaTime);
+                if (_nav != null && !_nav.Walkable(np)) break;
+                transform.position = np;
+                _speedNow = Mathf.Abs(v);
+                yield return null;
+            }
         }
 
         /// <summary>Plans a trip to the nearest destination of the carried parts.</summary>
@@ -1295,7 +1314,7 @@ namespace WorkshopWreckage
             _model.transform.localRotation = Quaternion.Euler(-_climbPitch, 0, 0);   // clinging to a vertical face
             float moving = Mathf.Max(_speedNow / _walk, Mathf.Clamp01(Mathf.Abs(_turnRate) / 120f) * 0.6f);
             _gait = Mathf.MoveTowards(_gait, moving > 0.05f ? Mathf.Max(0.45f, moving) : 0, dt * 3f);
-            _phase += dt * Mathf.Lerp(5f, 8.5f, Mathf.Clamp01(moving)) * (_gait > 0 ? 1 : 0);
+            _phase += dt * _model.StepRate(Mathf.Clamp01(moving), _speedNow) * (_gait > 0 ? 1 : 0);
             if (_gait == 0) _phase = Mathf.MoveTowards(_phase, Mathf.Round(_phase / Mathf.PI) * Mathf.PI, dt * 6);   // finish the step: legs come to rest together
             _armHold = Mathf.MoveTowards(_armHold, carried.Count > 0 ? 1 : 0, dt * 3f);
             Sounds(moving);
@@ -1303,18 +1322,74 @@ namespace WorkshopWreckage
             _model.Animate(new RobotAnim
             {
                 dt = dt, speed01 = _speedNow / _walk, speed = _speedNow, gait = _gait, phase = _phase, turnRate = _turnRate, bend = _bend,
-                armReach = _armReach, armHold = _armHold, armLift = _armLift, altitude = _altitude, active = true, time = _time,
+                armReach = _armReach, armHold = _armHold, armLift = _armLift, altitude = _altitude, active = true, time = _time, reachHeight = _reachY,
                 lookAt = g.player.transform.position, lookWeight = idle ? 1 : 0,
                 gesture = _step == Step.Gesture ? Mathf.Clamp01(_gestureT / GestureTime) : 0,
             });
+            PlaceCarried();
+        }
+
+        /// <summary>Puts the carried models in the carry slots. While the claws reach down (the moment of
+        /// a pick-up, setting a load down on the floor) the parts ride with the claws (the model's grip
+        /// point) instead, so a part never jumps between the floor and the chest.</summary>
+        void PlaceCarried()
+        {
             int k = 0;
+            var grip = _armReach > 0.001f ? _model.GripPoint : null;
             foreach (var itemId in carried)
-                if (_carryModels.TryGetValue(itemId, out var go))
-                {
-                    var (parent, local) = _model.CarrySlot(k++, carried.Count);
-                    if (go.transform.parent != parent) go.transform.SetParent(parent, false);
-                    go.transform.localPosition = local + new Vector3(0, 0.05f * _armLift, 0.06f * _armLift);
-                }
+                if (_carryModels.TryGetValue(itemId, out var go)) PlaceCarriedModel(go, k++, carried.Count, grip);
+        }
+
+        void PlaceCarriedModel(GameObject go, int k, int n, Vector3? grip)
+        {
+            var (parent, local) = _model.CarrySlot(k, n);
+            if (go.transform.parent != parent) go.transform.SetParent(parent, false);
+            go.transform.localPosition = local + new Vector3(0, 0.05f * _armLift, 0.06f * _armLift);
+            if (grip.HasValue) go.transform.position = Vector3.Lerp(go.transform.position, grip.Value, Mathf.SmoothStep(0, 1, _armReach));
+        }
+
+        GameObject _qaPart;
+        /// <summary>QA (--robotpose / --robotseq, studio renders): poses the real model through its own
+        /// Animate, with a part in its claws where the pose carries one. name: idle, walk (t = stride
+        /// cycle), turn, bend, carry, carrywalk, pickup and deposit (t = 0..1 through the sequence).</summary>
+        public void PoseQA(string name, float t = 0)
+        {
+            var a = new RobotAnim { dt = 1 };
+            bool part = false;
+            float S(float x) => Mathf.SmoothStep(0, 1, Mathf.Clamp01(x));
+            switch (name)
+            {
+                case "walk": a.gait = 1; a.speed = _walk; a.speed01 = 1; a.phase = t * Mathf.PI * 2; break;
+                case "turn": a.gait = 0.6f; a.turnRate = 150; a.phase = Mathf.PI / 2 + t * Mathf.PI * 2; break;
+                case "bend": a.bend = 1; a.armReach = 1; a.reachHeight = 0.015f; break;
+                case "carry": a.armHold = 1; part = true; break;
+                case "carrywalk": a.armHold = 1; a.gait = 1; a.speed = _walk; a.speed01 = 1; a.phase = Mathf.PI / 2 + t * Mathf.PI * 2; part = true; break;
+                case "pickup":
+                    // approach (a last short step), bend and reach down, grip, lift into the carry pose
+                    if (t < 0.25f) { a.gait = 0.5f; a.speed = 0.12f; a.speed01 = 0.2f; a.phase = t * 24; }
+                    else if (t < 0.55f) { float v = S((t - 0.25f) / 0.3f); a.bend = v; a.armReach = v; a.reachHeight = 0.015f; }
+                    else { float w = (t - 0.55f) / 0.45f; a.bend = 1 - S(w); a.armReach = 1 - w; a.armHold = Mathf.Clamp01(w * 2.5f); a.reachHeight = 0.015f; part = true; }
+                    break;
+                case "deposit":
+                    // a low destination: lift the part up and in, let go, arms back down
+                    a.armHold = 1; a.armLift = 0.7f * (t < 0.5f ? S(t / 0.5f) : 1 - S((t - 0.5f) / 0.5f)); part = t < 0.5f;
+                    break;
+            }
+            _armReach = a.armReach; _armLift = a.armLift; _armHold = a.armHold;
+            _model.Animate(a);
+            if (part && _qaPart == null)
+            {
+                var def = g.db.order.Select(d => g.db.Get(d)).First(d => !d.IsRobotPart && ItemDatabase.Extents(d)[0] < 0.07f && ItemDatabase.Extents(d)[0] > 0.035f);
+                _qaPart = HeldView.MakeModel(def);
+                PlaceCarriedModel(_qaPart, 0, 1, null);
+                _qaPart.transform.localScale = Vector3.one * def.worldScale / (_height / _model.ModelHeight);
+                foreach (var tr in _qaPart.GetComponentsInChildren<Transform>(true)) tr.gameObject.layer = gameObject.layer;
+            }
+            if (_qaPart != null)
+            {
+                _qaPart.SetActive(part);
+                if (part) PlaceCarriedModel(_qaPart, 0, 1, _armReach > 0.001f ? _model.GripPoint : null);
+            }
         }
 
         void Sounds(float moving)

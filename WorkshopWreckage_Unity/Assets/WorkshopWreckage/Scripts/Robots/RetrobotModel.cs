@@ -21,7 +21,7 @@ namespace WorkshopWreckage
     public class RetrobotModel : RobotModel
     {
         public const string Head = "head", Torso = "torso", ArmL = "left arm", ArmR = "right arm", Legs = "leg assembly";
-        public Transform upper, upperGeo, armL, armR, legL, legR, kneeL, kneeR, ankleL, ankleR;
+        public Transform upper, upperGeo, armL, armR, legL, legR, kneeL, kneeR, ankleL, ankleR, clawTipL, clawTipR;
         public override float ModelHeight => 1.06f;
         static Material Yellow => ToyYellow;
         static Material YellowDeep => ToyYellowDeep;
@@ -365,6 +365,9 @@ namespace WorkshopWreckage
 
             // ---- on the elbow pivot (coordinates relative to the elbow axle)
             var elbow = Elbow(arm, new Vector3(0, EY, 0), s);
+            // a marker between the finger tips (no geometry): grip point and floor guard for the claw
+            var tip = elbow.Find("ClawTip") ?? Pivot("ClawTip", elbow, Batch.G(new Vector3(0, -0.392f, 0)));
+            if (s < 0) clawTipL = tip; else clawTipR = tip;
             var f = new Batch();
             Gear(f, P, Vector3.zero, 0.03f, 0.062f, 12);   // the knuckle between the clevis plates
             // forearm: a narrow neck between the plates, the chamfered forearm, an access plate, a cuff
@@ -496,33 +499,111 @@ namespace WorkshopWreckage
             Done(ft, ankle);
         }
 
+        // ------------------------------------------------------------ animation (F5)
+
+        /// <summary>Largest stride swing at the hip (deg): short, deliberate steps.</summary>
+        const float MaxStride = 24f;
+        /// <summary>Stepping on the spot while turning (deg).</summary>
+        const float TurnStride = 9f;
+
+        /// <summary>Retrobot's cadence follows its speed so that the stride (at most MaxStride at the
+        /// hip, a pendulum of hip height) moves the planted boot exactly with the ground: quick
+        /// little steps, no sliding.</summary>
+        public override float StepRate(float moving01, float speed)
+        {
+            float lh = HipY * Mathf.Max(1e-4f, transform.lossyScale.y);
+            return Mathf.Max(6f, speed / (lh * MaxStride * Mathf.Deg2Rad));
+        }
+
+        public override Vector3? GripPoint => clawTipL != null && clawTipR != null ? (clawTipL.position + clawTipR.position) * 0.5f : null;
+
+        public override float? GripReach(float reachHeight)
+        {
+            if (clawTipL == null || clawTipR == null) return null;
+            SnapshotPose();
+            Animate(new RobotAnim { dt = 0, bend = 1, armReach = 1, reachHeight = reachHeight });
+            var gp = GripPoint.Value - transform.position;
+            RestorePose();
+            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), new Vector3(transform.forward.x, 0, transform.forward.z).normalized);
+        }
+
+        /// <summary>One leg: the hip pitch happens in the splayed plane; the knee undoes that pitch
+        /// and the splay, then applies the summed pitch (the shin is upright from the front); the
+        /// ankle keeps the boot flat.</summary>
+        void PoseLeg(Transform leg, Transform knee, Transform ankle, float side, float hip, float kneePitch)
+        {
+            leg.localRotation = Quaternion.Euler(0, 0, side * HipSplay) * Quaternion.Euler(hip, 0, 0);
+            knee.localRotation = Quaternion.Euler(-hip, 0, 0) * Quaternion.Euler(0, 0, -side * HipSplay) * Quaternion.Euler(hip + kneePitch, 0, 0);
+            ankle.localRotation = Quaternion.Euler(-(hip + kneePitch), 0, 0);
+        }
+
+        /// <summary>Vertical distance hip to ankle (model units) for a hip and knee pitch.</summary>
+        static float LegDrop(float hip, float knee) =>
+            ThighL * Mathf.Cos(hip * Mathf.Deg2Rad) * Mathf.Cos(HipSplay * Mathf.Deg2Rad) + ShinL * Mathf.Cos((hip + knee) * Mathf.Deg2Rad);
+
+        /// <summary>Legs, body, upper body and arms for one frame. `depth` scales the whole pick-up pose
+        /// (leg crouch, lean and reach down together, so the claws only ever move down as it grows); the
+        /// floor guard lowers it so the claws stop at the part instead of going through the floor.</summary>
+        void PoseBody(RobotAnim a, float stride, float walking, float depth)
+        {
+            float s = Mathf.Sin(a.phase), c = Mathf.Cos(a.phase);
+            float bend = a.bend * depth;
+            a.armReach *= depth;
+            // the left leg moves back (planted) while cos > 0 and swings forward (lifted) while cos < 0
+            float lift = Mathf.Clamp01(stride / (MaxStride * 0.6f));
+            float liftL = Mathf.Max(0, -c) * lift, liftR = Mathf.Max(0, c) * lift;
+            // a pick-up crouches the legs a little; the reach comes from leaning and the arms
+            float hipL = HipRest + stride * s - 18 * bend - 12 * liftL, hipR = HipRest - stride * s - 18 * bend - 12 * liftR;
+            float kL = KneeRest + 36 * bend + 28 * liftL, kR = KneeRest + 36 * bend + 28 * liftR;
+            PoseLeg(legL, kneeL, ankleL, -1, hipL, kL);
+            PoseLeg(legR, kneeR, ankleR, 1, hipR, kR);
+            // the body rides on whichever leg reaches lowest (the planted one): feet stay on the floor
+            float rest = ThighL * Mathf.Cos(HipRest * Mathf.Deg2Rad) + ShinL * Mathf.Cos((HipRest + KneeRest) * Mathf.Deg2Rad);
+            float idle = (1 - walking) * (1 - bend) * (1 - a.armLift);
+            float breathe = 0.0022f * Mathf.Sin(a.time * 2.3f) * idle;   // a faint idle hum
+            body.localPosition = new Vector3(0, Mathf.Max(LegDrop(hipL, kL), LegDrop(hipR, kR)) - rest + breathe, 0);
+            body.localRotation = Quaternion.Euler(0, 0, s * 1.5f * walking);
+            upper.localRotation = Quaternion.Euler(bend * 40 + 4 * a.gait - 3 * a.armHold * (1 - bend), 0, 0);   // leans back a touch under a load
+            float armSwing = s * stride * 0.9f;
+            float hold = Mathf.Max(a.armHold, a.armReach);
+            float empty = 1 - hold;
+            float pitch = -68 * a.armHold - 40 * a.armLift - 35 * a.armReach - 16 * (1 - hold);
+            float inward = 10 * hold;
+            armL.localRotation = Quaternion.Euler(pitch - armSwing * empty, 0, inward - Flare * empty);
+            armR.localRotation = Quaternion.Euler(pitch + armSwing * empty, 0, -inward + Flare * empty);
+            PoseElbows(a, 38);
+        }
+
+        float LowestClaw() => Mathf.Min(clawTipL.position.y, clawTipR.position.y);
+
+        /// <summary>Retrobot's walk: short, quick mechanical steps whose stride is matched to the ground
+        /// speed; the swinging leg lifts its boot (knee and hip flex), the ankles keep both boots flat,
+        /// and the body rides exactly on the planted leg (the bob comes from the legs, never through the
+        /// floor). The 8 deg thigh splay holds through the whole cycle. Bending to pick up crouches, leans
+        /// and reaches down together; the claws stop at the part's height and never go below the floor.</summary>
         public override void Animate(RobotAnim a)
         {
-            float s = Mathf.Sin(a.phase);
-            float swing = s * 28 * a.gait;
-            // bending down to pick something up: thigh forward, knee folds, ankle keeps the foot flat
-            float bend = a.bend;
-            // the hip pitch (stride, bend) happens in the splayed plane; the knee first undoes that
-            // pitch and the splay, then applies the summed pitch, so the shin is pitched exactly as
-            // without the splay but carries no roll (upright from the front, boot flat and forward)
-            foreach (var (leg, knee, ankle, side, hip) in new[] { (legL, kneeL, ankleL, -1f, HipRest + swing - 30 * bend), (legR, kneeR, ankleR, 1f, HipRest - swing - 30 * bend) })
+            float lh = HipY * Mathf.Max(1e-4f, transform.lossyScale.y);
+            float walking = Mathf.Clamp01(a.gait / 0.45f);
+            float stride = a.speed > 1e-3f ? Mathf.Min(MaxStride, a.speed / (lh * StepRate(a.speed01, a.speed)) * Mathf.Rad2Deg) : 0;
+            stride = Mathf.Max(stride, TurnStride * Mathf.Clamp01(Mathf.Abs(a.turnRate) / 120f)) * walking;
+            PoseBody(a, stride, walking, 1);
+            if ((a.bend > 0.01f || a.armReach > 0.01f) && clawTipL != null && clawTipR != null)
             {
-                float kneePitch = KneeRest + 60 * bend;
-                leg.localRotation = Quaternion.Euler(0, 0, side * HipSplay) * Quaternion.Euler(hip, 0, 0);
-                // the splay shortens the thigh's drop a little: sink the hip by that much (inside the pelvis) so the boots stay on the floor
-                leg.localPosition = new Vector3(side * LegX, HipY - ThighL * Mathf.Cos(hip * Mathf.Deg2Rad) * (1 - Mathf.Cos(HipSplay * Mathf.Deg2Rad)), 0);
-                knee.localRotation = Quaternion.Euler(-hip, 0, 0) * Quaternion.Euler(0, 0, -side * HipSplay) * Quaternion.Euler(hip + kneePitch, 0, 0);
-                ankle.localRotation = Quaternion.Euler(AnkleRest - 30 * bend, 0, 0);
+                // floor guard: the deepest pick-up pose whose claws stay at the part (never below the floor)
+                float target = transform.position.y + Mathf.Max(a.reachHeight, 0.004f) + 0.008f * transform.lossyScale.y / 0.283f;
+                if (LowestClaw() < target)
+                {
+                    float lo = 0, hi = 1;
+                    for (int it = 0; it < 7; it++)
+                    {
+                        float m = (lo + hi) * 0.5f;
+                        PoseBody(a, stride, walking, m);
+                        if (LowestClaw() < target) hi = m; else lo = m;
+                    }
+                    PoseBody(a, stride, walking, lo);
+                }
             }
-            body.localPosition = new Vector3(0, Mathf.Abs(Mathf.Cos(a.phase)) * 0.022f * a.gait - a.bend * 0.08f, 0);
-            body.localRotation = Quaternion.Euler(0, 0, s * 3 * a.gait);
-            upper.localRotation = Quaternion.Euler(a.bend * 40 + 5 * a.gait, 0, 0);
-            float empty = 1 - Mathf.Max(a.armHold, a.armReach);
-            float pitch = -68 * a.armHold - 40 * a.armLift - 35 * a.armReach - 16 * (1 - Mathf.Max(a.armHold, a.armReach));
-            float inward = 10 * Mathf.Max(a.armHold, a.armReach);
-            armL.localRotation = Quaternion.Euler(pitch - swing * 1.1f * empty, 0, inward - Flare * empty);
-            armR.localRotation = Quaternion.Euler(pitch + swing * 1.1f * empty, 0, -inward + Flare * empty);
-            PoseElbows(a, 38);
             if (a.gesture > 0)
             {
                 // a cheerful wave with the right arm, head tilted

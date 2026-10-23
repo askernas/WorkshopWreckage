@@ -24,6 +24,7 @@ namespace WorkshopWreckage
         public float lookWeight;
         public float time;
         public float gesture;      // 0..1 progress of a personality gesture (0 = none)
+        public float reachHeight;  // world height above the feet that the claws reach down to (pick-up target; 0 = the floor)
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and
@@ -93,6 +94,22 @@ namespace WorkshopWreckage
         protected abstract void CreatePivots();
         protected abstract void BuildGeometry();
         public abstract void Animate(RobotAnim a);
+
+        /// <summary>Stride phase rate (radians per second) at a given speed. Models whose legs
+        /// should not slide override it to match their stride to the ground speed.</summary>
+        public virtual float StepRate(float moving01, float speed) => Mathf.Lerp(5f, 8.5f, Mathf.Clamp01(moving01));
+
+        /// <summary>World point between the claws (where a part is gripped), or null.</summary>
+        public virtual Vector3? GripPoint => null;
+
+        /// <summary>How far in front of the robot (world, flat) the claws come down when it bends to
+        /// pick something up at the given height, or null (no such pose).</summary>
+        public virtual float? GripReach(float reachHeight) => null;
+
+        readonly List<(Transform t, Vector3 p, Quaternion r)> _snapshot = new();
+        /// <summary>Remembers every pivot's pose (to measure a trial pose without showing it).</summary>
+        protected void SnapshotPose() { _snapshot.Clear(); foreach (var t in pivots) _snapshot.Add((t, t.localPosition, t.localRotation)); }
+        protected void RestorePose() { foreach (var (t, p, r) in _snapshot) { t.localPosition = p; t.localRotation = r; } }
 
         /// <summary>Where carried part #i of n sits (parent transform + local position).</summary>
         public virtual (Transform parent, Vector3 local) CarrySlot(int i, int n)

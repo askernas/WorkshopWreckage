@@ -651,7 +651,10 @@ namespace WorkshopWreckage
             r.PoseRest();
             // QA (--robotpose=walk|bend): a representative articulated pose instead of the rest pose
             if (args.TryGetValue("robotpose", out var rp))
-                r.PoseWith(rp == "bend" ? new RobotAnim { dt = 1, bend = 1, armReach = 1 } : new RobotAnim { dt = 1, gait = 1, phase = Mathf.PI / 2, speed01 = 1 });
+            {
+                var parts = rp.Split(':');   // name or name:t (see Robot.PoseQA)
+                r.PoseQA(parts[0], parts.Length > 1 ? float.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture) : (parts[0] == "walk" ? 0.25f : 0));
+            }
             LogModelStats(r);
             if (args.TryGetValue("studiolight", out var sl) && sl == "workshop")
             {
@@ -1205,7 +1208,13 @@ namespace WorkshopWreckage
             builder.RefreshProbe();
             for (int i = 0; i < outs.Length; i++)
             {
-                if (_studio != null) StudioCamera(i);   // --robotview frames the robot itself
+                if (_studio != null && args.TryGetValue("robotseq", out var seq))
+                {
+                    // QA animation strip: --robotseq=name poses frame i of n (= the number of shots) from one camera (--seqcam)
+                    _studio.Value.robot.GetComponent<Robot>().PoseQA(seq, i / (float)outs.Length);
+                    StudioCamera(args.TryGetValue("seqcam", out var sc) ? int.Parse(sc) : 3);
+                }
+                else if (_studio != null) StudioCamera(i);   // --robotview frames the robot itself
                 else PlaceCamera(cams[Mathf.Min(i, cams.Length - 1)]);
                 yield return Capture(outs[i]);
                 Debug.Log("saved " + outs[i]);
