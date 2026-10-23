@@ -395,22 +395,26 @@ namespace WorkshopWreckage
             f.RoundedBox(E(0, -0.288f, 0), V(0.124f, 0.016f, 0.124f), 0.006f * k, PD, 2);
             foreach (var z in new[] { -0.03f, 0.03f }) Bolt(f, E(s * 0.06f, -0.24f, z), new Vector3(s, 0, 0), 0.007f * k, G);
             foreach (var x in new[] { -0.032f, 0.032f }) Bolt(f, E(x, -0.24f, -0.06f), new Vector3(0, 0, -1), 0.0065f * k, G);
+            // the hand (wrist, claw) on a telescopic forearm end (extended only with a reach upgrade)
+            var hg = TelescopeHand(elbow, E(0, -0.296f, 0), part, 0.036f * k, 0.027f * k, paint);
+            var hb = new Batch();
             // wrist axle
-            f.Lathe(E(-0.042f, -0.31f, 0), Disc(0.034f * k, 0.084f * k, 0.005f * k), CG, RightRot, 16);
-            foreach (var side in new[] { -1f, 1f }) f.Lathe(E(side * 0.042f, -0.31f, 0), Dome(0.015f * k, 0.008f * k), CB, SideRot(side), 10);
+            hb.Lathe(E(-0.042f, -0.31f, 0), Disc(0.034f * k, 0.084f * k, 0.005f * k), CG, RightRot, 16);
+            foreach (var side in new[] { -1f, 1f }) hb.Lathe(E(side * 0.042f, -0.31f, 0), Dome(0.015f * k, 0.008f * k), CB, SideRot(side), 10);
             // claw: palm block and two hooked fingers (base out, knuckle, tip curling in), dark teeth
-            f.RoundedBox(C(0, -0.334f, 0), CV(0.094f, 0.032f, 0.072f), 0.011f * kc, CG, 2, twU);
-            f.Lathe(C(0, -0.352f, -0.036f), Disc(0.012f * kc, 0.006f * kc, 0.002f * kc), CB, twU * BackRot, 10);
+            hb.RoundedBox(C(0, -0.334f, 0), CV(0.094f, 0.032f, 0.072f), 0.011f * kc, CG, 2, twU);
+            hb.Lathe(C(0, -0.352f, -0.036f), Disc(0.012f * kc, 0.006f * kc, 0.002f * kc), CB, twU * BackRot, 10);
             foreach (var fs in new[] { -1f, 1f })
             {
-                f.RoundedBox(C(fs * 0.036f, -0.375f, 0), CV(0.034f, 0.07f, 0.062f), 0.011f * kc, CR, 2, twU * Batch.R(Vector3.forward, fs * 0.42f));   // base, opening out
-                f.RoundedBox(C(fs * 0.056f, -0.425f, 0), CV(0.03f, 0.05f, 0.058f), 0.01f * kc, CR, 2, twU * Batch.R(Vector3.forward, fs * 0.05f));     // knuckle
-                f.RoundedBox(C(fs * 0.044f, -0.47f, 0), CV(0.026f, 0.05f, 0.054f), 0.009f * kc, CR, 2, twU * Batch.R(Vector3.forward, -fs * 0.6f));    // tip, curling in
+                hb.RoundedBox(C(fs * 0.036f, -0.375f, 0), CV(0.034f, 0.07f, 0.062f), 0.011f * kc, CR, 2, twU * Batch.R(Vector3.forward, fs * 0.42f));   // base, opening out
+                hb.RoundedBox(C(fs * 0.056f, -0.425f, 0), CV(0.03f, 0.05f, 0.058f), 0.01f * kc, CR, 2, twU * Batch.R(Vector3.forward, fs * 0.05f));     // knuckle
+                hb.RoundedBox(C(fs * 0.044f, -0.47f, 0), CV(0.026f, 0.05f, 0.054f), 0.009f * kc, CR, 2, twU * Batch.R(Vector3.forward, -fs * 0.6f));    // tip, curling in
                 for (int t = 0; t < 3; t++)   // teeth on the inner edge
-                    f.Box(C(fs * (0.034f - t * 0.002f), -0.415f - t * 0.022f, 0), CV(0.012f, 0.008f, 0.04f), CD, false, twU * Batch.R(Vector3.forward, fs * 0.2f));
-                f.Rivet(C(fs * 0.04f, -0.36f, -0.032f), tw * new Vector3(0, 0, -1), 0.0075f * kc, CB);
-                f.Rivet(C(fs * 0.056f, -0.425f, -0.03f), tw * new Vector3(0, 0, -1), 0.0065f * kc, CB);
+                    hb.Box(C(fs * (0.034f - t * 0.002f), -0.415f - t * 0.022f, 0), CV(0.012f, 0.008f, 0.04f), CD, false, twU * Batch.R(Vector3.forward, fs * 0.2f));
+                hb.Rivet(C(fs * 0.04f, -0.36f, -0.032f), tw * new Vector3(0, 0, -1), 0.0075f * kc, CB);
+                hb.Rivet(C(fs * 0.056f, -0.425f, -0.03f), tw * new Vector3(0, 0, -1), 0.0065f * kc, CB);
             }
+            Done(hb, hg);
             Done(f, elbow);
         }
     }

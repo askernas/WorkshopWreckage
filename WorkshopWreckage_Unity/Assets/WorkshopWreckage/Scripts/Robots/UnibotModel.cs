@@ -159,6 +159,7 @@ namespace WorkshopWreckage
             _armL.localRotation = Quaternion.Euler(pitch + flap, 0, 8 * a.armHold - 20 * empty);   // at rest the arms swing wide beside the wheel
             _armR.localRotation = Quaternion.Euler(pitch - flap, 0, -8 * a.armHold + 20 * empty);
             PoseElbows(a, 38);
+            PoseTelescopes(a.armExtend / Mathf.Max(1e-4f, transform.lossyScale.y));   // the reach upgrade's telescopic forearms
             LookHead(a);
         }
     }

@@ -555,10 +555,24 @@ namespace WorkshopWreckage
             // upgrades: better at their jobs, never past their permanent limits
             pr.skillPoints += 60;
             float reach0 = retro.ReachHeight;
+            foreach (var grp in g.db.boxes.Where(kv => Json.Num(kv.Value, "elevation_m") <= retro.ReachHeight).GroupBy(kv => Json.Str(kv.Value, "kind")))
+                Debug.Log($"[reachstat] before the upgrade, {grp.Key}: {grp.Count()} within the reach rule, {grp.Count(kv => retro.ReachableDest(kv.Key))} physically reachable");
             for (int k = 0; k < 3; k++) g.BuyRobotUpgrade("retro_reach");
             var highBox = g.db.boxes.Keys.FirstOrDefault(High);
             Check("Retrobot's Arm Reach raises its reach, but never to the high shelves", retro.ReachHeight > reach0 && retro.ReachHeight <= retro.LimitOf("reach_height") + 1e-3f && highBox != null && !retro.ReachableDest(highBox),
                   $"{reach0:0.00} -> {retro.ReachHeight:0.00} m (limit {retro.LimitOf("reach_height"):0.00})");
+            // the telescopic forearms make the promised reach physical: a drawer the upgrade brings within
+            // reach is one the arms can actually put a part into
+            var midDrawer = g.db.boxes.Where(kv => Json.Str(kv.Value, "kind") == "drawer" && Json.Num(kv.Value, "elevation_m") > reach0 + 0.02f && Json.Num(kv.Value, "elevation_m") <= retro.ReachHeight).Select(kv => kv.Key).FirstOrDefault();
+            Check("Retrobot's telescopic arms reach the drawers the Arm Reach upgrade brings within range", midDrawer != null && retro.ReachableDest(midDrawer), midDrawer == null ? "no such drawer" : $"{midDrawer} at {Json.Num(g.db.boxes[midDrawer], "elevation_m"):0.00} m");
+            foreach (var grp in g.db.boxes.Where(kv => Json.Num(kv.Value, "elevation_m") <= retro.ReachHeight).GroupBy(kv => Json.Str(kv.Value, "kind")))
+                Debug.Log($"[reachstat] {grp.Key}: {grp.Count()} within the upgraded reach rule, {grp.Count(kv => retro.ReachableDest(kv.Key))} physically reachable by the telescopic arms");
+            float uniReach0 = uni.ReachHeight;
+            for (int k = 0; k < 3; k++) g.BuyRobotUpgrade("uni_reach");
+            g.BuyRobotUpgrade("cat_reach"); g.BuyRobotUpgrade("cat_reach");
+            var catR = g.robots.First(r => r.id == "caterpillarbot");
+            Check("Unibot and Caterpillarbot get Arm Reach (telescopic arms) within their limits", uni.ReachHeight > uniReach0 && uni.ReachHeight <= uni.LimitOf("reach_height") + 1e-3f && catR.ReachHeight <= catR.LimitOf("reach_height") + 1e-3f && catR.ReachHeight > catR.BaseStat("reach_height"),
+                  $"Unibot {uniReach0:0.00} -> {uni.ReachHeight:0.00} m, Caterpillarbot {catR.BaseStat("reach_height"):0.00} -> {catR.ReachHeight:0.00} m");
             g.BuyRobotUpgrade("uni_capacity"); g.BuyRobotUpgrade("uni_capacity");
             Check("Unibot carries more after upgrades but still never stores", uni.Capacity == 3 && !uni.CanDirectStore && !uni.ReachableDest(g.db.boxes.Keys.First()), $"capacity {uni.Capacity}");
             g.BuyRobotUpgrade("retro_speed"); g.BuyRobotUpgrade("retro_speed"); g.BuyRobotUpgrade("retro_speed");

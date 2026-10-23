@@ -37,7 +37,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Bright steel of the kit (shafts, hub faces, grille slats, hinge pins).</summary>
-        protected virtual Material BrightSteel => Gunmetal;
+        protected virtual Material BrightSteel => RobotFinish.ShaftSteel;
         /// <summary>The grease and dirt stain of the kit's wear.</summary>
         protected virtual Material GreaseMat => RobotFinish.Grease;
 
@@ -213,6 +213,59 @@ namespace WorkshopWreckage
             }
         }
 
+        // ------------------------------------------------------------ the telescopic forearm (reach upgrade)
+
+        /// <summary>How far the telescopic forearms may extend (world m), from the robot's reach upgrade.</summary>
+        public float armExtendMax;
+        readonly List<(Transform hand, Vector3 home, Transform tubeA, Transform tubeB, Transform collar)> _teles = new();
+
+        /// <summary>The family's two-stage telescopic forearm: a "Hand" pivot at the forearm's end (mountG,
+        /// elbow space) that carries the wrist and the gripper (build them into the returned frame, which
+        /// keeps the elbow's coordinates), and two bright steel sleeves, the thicker first, with a painted
+        /// collar where the second comes out. Retracted (the normal state) the sleeves are hidden inside the
+        /// forearm and switched off, so a robot looks and costs the same until it extends (PoseTelescopes).</summary>
+        protected Transform TelescopeHand(Transform elbow, Vector3 mountG, string P, float rA, float rB, Material band)
+        {
+            var home = Batch.G(mountG);
+            var hand = elbow.Find("Hand");
+            if (hand == null)
+            {
+                hand = Pivot("Hand", elbow, home);
+                var ta = Pivot("TubeA", elbow, home);
+                var tb = Pivot("TubeB", elbow, home);
+                var co = Pivot("TeleCollar", elbow, home);
+                foreach (var t in new[] { ta, tb, co }) t.gameObject.SetActive(false);
+                _teles.Add((hand, home, ta, tb, co));
+            }
+            var frame = hand.Find("HandGeo") ?? Pivot("HandGeo", hand, -home);
+            var (_, _, tubeA, tubeB, collar) = _teles.Find(x => x.hand == hand);
+            // unit-length sleeves hanging along -Y (the pose scales them to the extension)
+            var a = new Batch(); a.Lathe(new Vector3(0, -1, 0), new[] { new Vector2(0, 0), new Vector2(rA, 0), new Vector2(rA, 1), new Vector2(0, 1) }, M(P, BrightSteel), null, 16); Done(a, tubeA);
+            var b = new Batch(); b.Lathe(new Vector3(0, -1, 0), new[] { new Vector2(0, 0), new Vector2(rB, 0), new Vector2(rB, 1), new Vector2(0, 1) }, M(P, BrightSteel), null, 14); Done(b, tubeB);
+            var c = new Batch();
+            c.Lathe(new Vector3(0, -0.012f, 0), Disc(rA * 1.18f, 0.012f, 0.003f), M(P, band), null, 18);
+            c.Lathe(new Vector3(0, -0.016f, 0), Disc(rB * 1.25f, 0.004f, 0.001f), M(P, Gunmetal), null, 16);
+            Done(c, collar);
+            return frame;
+        }
+
+        /// <summary>Extends every telescopic forearm by e (model units, along the forearm): the first sleeve
+        /// covers the first half, the second the rest, the hand moves out by e.</summary>
+        protected void PoseTelescopes(float e)
+        {
+            bool on = e > 1e-4f;
+            foreach (var (hand, home, ta, tb, co) in _teles)
+            {
+                if (ta.gameObject.activeSelf != on) { ta.gameObject.SetActive(on); tb.gameObject.SetActive(on); co.gameObject.SetActive(on); }
+                var down = new Vector3(0, -1, 0);
+                hand.localPosition = home + down * e;
+                if (!on) continue;
+                ta.localPosition = home; ta.localScale = new Vector3(1, e * 0.5f, 1);
+                co.localPosition = home + down * (e * 0.5f);
+                tb.localPosition = home + down * (e * 0.5f); tb.localScale = new Vector3(1, e * 0.5f, 1);
+            }
+        }
+
         // ------------------------------------------------------------ the family arm and gripper
 
         /// <summary>A family arm: its paints and the gripper's scale and twist round the forearm.
@@ -263,8 +316,6 @@ namespace WorkshopWreckage
 
             // ---- on the elbow pivot (coordinates relative to the elbow axle)
             var elbow = Elbow(arm, new Vector3(0, EY, 0), s);
-            var tip = elbow.Find("ClawTip") ?? Pivot("ClawTip", elbow, Batch.G(new Vector3(0, -0.392f, 0)));
-            if (s < 0) clawTipL = tip; else clawTipR = tip;
             var f = new Batch();
             Gear(f, P, Vector3.zero, 0.03f, 0.062f, 12);
             f.ChamferBox(new Vector3(0, -0.032f, 0), new Vector3(0.058f, 0.04f, 0.058f), 0.008f, M(P, Gunmetal));
@@ -275,16 +326,21 @@ namespace WorkshopWreckage
             f.ChamferBox(new Vector3(0, -0.15f, 0), new Vector3(0.104f, 0.016f, 0.104f), 0.004f, M(P, Gunmetal));
             GreaseRun(f, P, new Vector3(s * 0.05f, -0.045f, 0.025f), X(s), 0.06f);
             GreaseRun(f, P, new Vector3(0.015f, -0.045f, -0.05f), new Vector3(0, 0, -1), 0.045f);
+            // the hand (wrist, gripper) on the telescopic forearm's end; built in the elbow's coordinates
+            var hg = TelescopeHand(elbow, new Vector3(0, -0.158f, 0), P, 0.034f, 0.025f, spec.paint);
+            var tip = hg.Find("ClawTip") ?? Pivot("ClawTip", hg, Batch.G(new Vector3(0, -0.392f, 0)));
+            if (s < 0) clawTipL = tip; else clawTipR = tip;
+            var hb = new Batch();
             var wrist = new Vector3(0, -0.172f, 0);
-            f.Lathe(wrist - X(0.038f), Disc(0.028f, 0.076f, 0.004f), M(P, Gunmetal), RightRot, 18);
-            foreach (var px in new[] { -1f, 1f }) Hub(f, P, wrist + X(px * 0.038f), px, 0.02f, 0);
+            hb.Lathe(wrist - X(0.038f), Disc(0.028f, 0.076f, 0.004f), M(P, Gunmetal), RightRot, 18);
+            foreach (var px in new[] { -1f, 1f }) Hub(hb, P, wrist + X(px * 0.038f), px, 0.02f, 0);
             // the gripper, twisted round the forearm and scaled about the wrist
             float cs = spec.clawScale;
             var tw = Quaternion.AngleAxis(s * spec.twist, Vector3.up);       // Godot-space points
             var twU = Quaternion.AngleAxis(-s * spec.twist, Vector3.up);     // the same twist for Unity-space rotations
             Vector3 C(float x, float y, float z) => wrist + tw * (new Vector3(x, y, z) * cs);
             Vector3 side = tw * Vector3.right;
-            f.ChamferBox(C(0, -0.032f, 0), new Vector3(0.094f, 0.034f, 0.062f) * cs, 0.009f * cs, M(P, Gunmetal), twU);   // palm
+            hb.ChamferBox(C(0, -0.032f, 0), new Vector3(0.094f, 0.034f, 0.062f) * cs, 0.009f * cs, M(P, Gunmetal), twU);   // palm
             var path = new[] { new Vector2(0.034f, -0.044f), new Vector2(0.074f, -0.078f), new Vector2(0.094f, -0.128f), new Vector2(0.08f, -0.174f), new Vector2(0.04f, -0.2f) };
             float[] wd = { 0.044f, 0.04f, 0.035f, 0.028f, 0.019f }, dp = { 0.056f, 0.054f, 0.049f, 0.043f, 0.036f };
             void HingeHub(Batch hb, Vector3 p, float r, Vector3 o)
@@ -297,13 +353,13 @@ namespace WorkshopWreckage
             {
                 Vector3 V3(Vector2 p) => C(fs * p.x, p.y, 0);
                 var root = V3(path[0]);
-                HingeHub(f, root, 0.018f, Vector3.zero);   // the root hinge stays on the palm
+                HingeHub(hb, root, 0.018f, Vector3.zero);   // the root hinge stays on the palm
                 // the finger, on its own pivot at the root hinge (geometry relative to the hinge)
                 string fname = fs < 0 ? "FingerL" : "FingerR";
-                var fp = elbow.Find(fname);
+                var fp = hg.Find(fname);
                 if (fp == null)
                 {
-                    fp = Pivot(fname, elbow, Batch.G(root));
+                    fp = Pivot(fname, hg, Batch.G(root));
                     _fingers.Add((fp, fs, tw * Vector3.forward));
                 }
                 var fb = new Batch();
@@ -327,6 +383,7 @@ namespace WorkshopWreckage
                 HingeHub(fb, V3(path[1]), 0.019f, root);   // the knuckle hinge moves with the finger
                 Done(fb, fp);
             }
+            Done(hb, hg);
             Done(f, elbow);
         }
     }

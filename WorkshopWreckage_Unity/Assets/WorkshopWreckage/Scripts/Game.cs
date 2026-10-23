@@ -1311,7 +1311,9 @@ namespace WorkshopWreckage
                 if (_studio != null && args.TryGetValue("robotseq", out var seq))
                 {
                     // QA animation strip: --robotseq=name poses frame i of n (= the number of shots) from one camera (--seqcam)
-                    _studio.Value.robot.GetComponent<Robot>().PoseQA(seq, i / (float)outs.Length);
+                    var qr = _studio.Value.robot.GetComponent<Robot>();
+                    qr.PoseQA(seq, i / (float)outs.Length);
+                    _studio = (_studio.Value.robot, RendererBounds(qr, qr.transform.position));   // frame the pose as it is (raised arms, telescopes)
                     StudioCamera(args.TryGetValue("seqcam", out var sc) ? int.Parse(sc) : 3);
                 }
                 else if (_studio != null) StudioCamera(i);   // --robotview frames the robot itself

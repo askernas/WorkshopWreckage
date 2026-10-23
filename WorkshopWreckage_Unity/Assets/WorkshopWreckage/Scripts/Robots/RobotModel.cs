@@ -31,6 +31,7 @@ namespace WorkshopWreckage
         public float clawClose;    // 0..1 grippers closed on a part
         public float gripWidth;    // width of the part held between the grippers (world m; 0 = none)
         public Vector3 lookAhead;  // a point ahead on the robot's path (where it is about to go)
+        public float armExtend;    // telescopic arms: how far the sleeves are out (world m; models without an aim solve)
         public float lookAheadWeight;
     }
 
@@ -117,13 +118,17 @@ namespace WorkshopWreckage
         /// above its feet (aiming at a destination), or null (no aimed deposit).</summary>
         public virtual float? AimReach(float aimHeight) => null;
 
+        /// <summary>The same with the arms fully extended (telescopic forearms): the furthest the claws get
+        /// in front of the robot at that height, or -1 / null. Equals AimReach without an extension.</summary>
+        public virtual float? AimReachMax(float aimHeight) => AimReach(aimHeight);
+
         /// <summary>QA: clears any state the animation carries between frames.</summary>
         public virtual void ResetPose() { }
 
-        readonly List<(Transform t, Vector3 p, Quaternion r)> _snapshot = new();
+        readonly List<(Transform t, Vector3 p, Quaternion r, Vector3 sc, bool on)> _snapshot = new();
         /// <summary>Remembers every pivot's pose (to measure a trial pose without showing it).</summary>
-        protected void SnapshotPose() { _snapshot.Clear(); foreach (var t in pivots) _snapshot.Add((t, t.localPosition, t.localRotation)); }
-        protected void RestorePose() { foreach (var (t, p, r) in _snapshot) { t.localPosition = p; t.localRotation = r; } }
+        protected void SnapshotPose() { _snapshot.Clear(); foreach (var t in pivots) _snapshot.Add((t, t.localPosition, t.localRotation, t.localScale, t.gameObject.activeSelf)); }
+        protected void RestorePose() { foreach (var (t, p, r, sc, on) in _snapshot) { t.localPosition = p; t.localRotation = r; t.localScale = sc; if (t.gameObject.activeSelf != on) t.gameObject.SetActive(on); } }
 
         /// <summary>Where carried part #i of n sits (parent transform + local position).</summary>
         public virtual (Transform parent, Vector3 local) CarrySlot(int i, int n)

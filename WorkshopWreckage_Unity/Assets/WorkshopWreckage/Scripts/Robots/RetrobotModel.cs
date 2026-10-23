@@ -262,10 +262,23 @@ namespace WorkshopWreckage
         {
             if (clawTipL == null || clawTipR == null) return null;
             SnapshotPose();
-            Animate(new RobotAnim { dt = 0, armHold = 1, aimWeight = 1, aim = transform.position + FlatForward * 0.15f + Vector3.up * aimHeight });
+            // a target straight above the feet: the shortest extension that reaches the height (none if it can)
+            Animate(new RobotAnim { dt = 0, armHold = 1, aimWeight = 1, aim = transform.position + Vector3.up * aimHeight });
             var gp = GripPoint.Value - transform.position;
             RestorePose();
             if (Mathf.Abs(gp.y - aimHeight) > 0.012f) return -1f;   // the arms can't raise the claws to that height
+            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
+        }
+
+        public override float? AimReachMax(float aimHeight)
+        {
+            if (clawTipL == null || clawTipR == null) return null;
+            SnapshotPose();
+            // a target far ahead at that height: the arms extend fully, lowered to keep the height
+            Animate(new RobotAnim { dt = 0, armHold = 1, aimWeight = 1, aim = transform.position + FlatForward * 2f + Vector3.up * aimHeight });
+            var gp = GripPoint.Value - transform.position;
+            RestorePose();
+            if (Mathf.Abs(gp.y - aimHeight) > 0.012f) return -1f;
             return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
         }
 
@@ -376,6 +389,7 @@ namespace WorkshopWreckage
         }
 
         float _armPitch, _gripPitch = float.NaN, _gripWant, _gripInward;
+        Vector3 _aimKey = new(float.NaN, 0, 0); float _aimExtMax = -1, _aimExt;
         /// <summary>Gripper finger travel (deg) fully open and fully closed from the modelled pose.</summary>
         const float ClawOpenDeg = 22f, ClawCloseDeg = 8f;
 
@@ -450,19 +464,52 @@ namespace WorkshopWreckage
                     PoseBody(a, stride, lift, walking, lo);
                 }
             }
+            PoseTelescopes(0);
             if (a.aimWeight > 0.001f && guard)
             {
-                // aim: raise the (straight) arms until the claws are at the destination's height
+                // aim: raise the (straight) arms until the claws are at the destination's height; when they
+                // can't get that high, the telescopic forearms (reach upgrade) extend as far as needed
                 float hold = Mathf.Max(a.armHold, a.armReach);
                 float basePitch = ArmPitch(a.armHold, a.armLift, a.armReach), inward = 10 * hold;
-                float lo = -150f, hi = 0f;
-                for (int it = 0; it < 8; it++)
+                float SolvePitch(float ext)
                 {
-                    float m = (lo + hi) * 0.5f;
-                    SetArmPitch(m, inward);
-                    if (GripPoint.Value.y < a.aim.y) hi = m; else lo = m;
+                    PoseTelescopes(ext);
+                    float lo = -150f, hi = 0f;
+                    for (int it = 0; it < 8; it++)
+                    {
+                        float m = (lo + hi) * 0.5f;
+                        SetArmPitch(m, inward);
+                        if (GripPoint.Value.y < a.aim.y) hi = m; else lo = m;
+                    }
+                    float pm = (lo + hi) * 0.5f;
+                    SetArmPitch(pm, inward);
+                    return pm;
                 }
-                _armPitch = Mathf.Lerp(basePitch, (lo + hi) * 0.5f, Ease(a.aimWeight));
+                // the target in height and in front: the claws must get to its height and at least as far
+                // forward (more extension with a lower arm reaches further out at the same height)
+                float targetFwd = Vector3.Dot(a.aim - transform.position, FlatForward);
+                bool Reached() => Mathf.Abs(GripPoint.Value.y - a.aim.y) < 0.01f && Vector3.Dot(GripPoint.Value - transform.position, FlatForward) >= targetFwd - 0.01f;
+                float extMax = armExtendMax / Mathf.Max(1e-4f, transform.lossyScale.y);
+                if (_aimKey != a.aim || _aimExtMax != extMax)
+                {
+                    // the shortest extension that reaches (cached while the target stays the same)
+                    _aimKey = a.aim; _aimExtMax = extMax; _aimExt = 0;
+                    SolvePitch(0);
+                    if (!Reached() && extMax > 0)
+                    {
+                        float lo = 0, hi = extMax;
+                        for (int it = 0; it < 7; it++)
+                        {
+                            float m = (lo + hi) * 0.5f;
+                            SolvePitch(m);
+                            if (Reached()) hi = m; else lo = m;
+                        }
+                        _aimExt = hi;   // the full extension when nothing reaches (it gets as close as it can)
+                    }
+                }
+                float ew = _aimExt * Ease(a.aimWeight);
+                _armPitch = Mathf.Lerp(basePitch, SolvePitch(ew), Ease(a.aimWeight));
+                PoseTelescopes(ew);
                 SetArmPitch(_armPitch, inward);
             }
             if (guard && a.gripWidth > 0)
