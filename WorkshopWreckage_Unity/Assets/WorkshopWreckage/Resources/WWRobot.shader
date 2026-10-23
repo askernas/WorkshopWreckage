@@ -18,6 +18,9 @@ Shader "WorkshopWreckage/Robot"
         _NoiseScale ("Noise tiling (1/model unit)", Float) = 5
         _Edge ("Curvature range for edges (lo, hi)", Vector) = (14, 45, 0, 0)
         _Wear ("Edge wear", Range(0,1)) = 0
+        _Chips ("How much of a worn edge chips through", Range(0,1)) = 0.2
+        _FaceChips ("Small chips on flat panels", Range(0,1)) = 0
+        _Fade ("Paint fading on upward faces", Range(0,1)) = 0
         _ChipColor ("Chipped-through metal", Color) = (0.16,0.15,0.14,1)
         _ChipMetallic ("Chip metallic", Range(0,1)) = 0.8
         _ChipSmooth ("Chip smoothness", Range(0,1)) = 0.4
@@ -44,6 +47,9 @@ Shader "WorkshopWreckage/Robot"
         float _ColorVar;
         float _NoiseScale;
         float _Wear;
+        float _Chips;
+        float _FaceChips;
+        float _Fade;
         float _ChipMetallic;
         float _ChipSmooth;
         float _Scratch;
@@ -140,12 +146,18 @@ Shader "WorkshopWreckage/Robot"
                 // rubbed, scratched and chipped edges (paint), polished edges (bare metal)
                 float breakup = nz.r * 0.62 + nf.r * 0.38;
                 float worn = edge * _Wear;
-                float chip = worn * smoothstep(0.6, 0.65, breakup);   // edges only allow chips; the noise picks the few spots
+                float t = 0.64 - 0.2 * _Chips;
+                float chip = worn * smoothstep(t, t + 0.05, breakup);   // edges only allow chips; the noise picks the spots
+                // a few small chips on the flat panels too (knocks), sparse and fine-scaled
+                chip = max(chip, _FaceChips * smoothstep(0.76, 0.79, nf.r * 0.7 + nz.r * 0.45) * (1 - edge * 0.5));
                 float rub = worn * (1 - chip);
                 col = lerp(col, col * 1.1 + 0.015, rub * 0.45);
                 smooth += rub * 0.1;
                 float scratch = smoothstep(0.55, 0.85, nf.g) * _Scratch * saturate(0.2 + edge * 1.6 + under * 0.4);
-                col = lerp(col, _ScratchColor.rgb, scratch * 0.55);
+                col = lerp(col, _ScratchColor.rgb, scratch * 0.7);
+                // uneven fading where the light falls: paler, slightly greyer patches on upward faces
+                float fade = _Fade * saturate((nz.a - 0.42) * 2.2) * saturate(on.y * 0.6 + 0.5);
+                col = lerp(col, lerp(col, dot(col, float3(0.3, 0.59, 0.11)).xxx, 0.3) * 1.08 + 0.025, fade);
                 smooth += scratch * 0.08;
                 col = lerp(col, col * 1.35 + 0.03, edge * _EdgePolish * (0.6 + 0.4 * nf.b));
                 smooth += edge * _EdgePolish * 0.15;

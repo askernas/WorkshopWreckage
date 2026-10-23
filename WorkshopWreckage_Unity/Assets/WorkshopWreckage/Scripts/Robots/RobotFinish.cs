@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace WorkshopWreckage
@@ -86,14 +87,18 @@ namespace WorkshopWreckage
 
         /// <summary>Enamel on pressed steel: dielectric, semi-gloss with slight roughness and colour
         /// drift; edges rubbed and chipped through to dark steel; grime underneath.</summary>
-        public static Material Paint(Color c, float wear = 0.8f) => Make("paint" + ColorUtility.ToHtmlStringRGB(c) + wear.ToString("0.00"), c, 0f, 0.52f, m =>
+        public static Material Paint(Color c, float wear = 0.8f, float chips = 0.2f, float grime = 0.4f, float scratch = 0.55f, float faceChips = 0f, float fade = 0f, float colorVar = 0.06f) =>
+            Make("paint" + ColorUtility.ToHtmlStringRGB(c) + string.Join("_", new[] { wear, chips, grime, scratch, faceChips, fade, colorVar }.Select(x => x.ToString("0.00"))), c, 0f, 0.52f, m =>
         {
             m.SetFloat("_SmoothVar", 0.09f);
-            m.SetFloat("_ColorVar", 0.06f);
+            m.SetFloat("_ColorVar", colorVar);
             m.SetFloat("_Wear", wear);
-            m.SetFloat("_Scratch", 0.55f);
+            m.SetFloat("_Chips", chips);
+            m.SetFloat("_FaceChips", faceChips);
+            m.SetFloat("_Fade", fade);
+            m.SetFloat("_Scratch", scratch);
             m.SetColor("_ScratchColor", new Color(0.62f, 0.57f, 0.48f));
-            m.SetFloat("_Grime", 0.4f);
+            m.SetFloat("_Grime", grime);
             m.SetVector("_GrimeColor", new Vector4(0.62f, 0.55f, 0.45f, 1));
         });
 
@@ -101,8 +106,8 @@ namespace WorkshopWreckage
         public static Material JointSteel => Make("jointsteel", new Color(0.3f, 0.285f, 0.265f), 0.65f, 0.45f, m =>
         {
             m.SetFloat("_SmoothVar", 0.12f); m.SetFloat("_ColorVar", 0.08f);
-            m.SetFloat("_EdgePolish", 0.55f); m.SetFloat("_Grime", 0.45f);
-            m.SetVector("_GrimeColor", new Vector4(0.5f, 0.46f, 0.4f, 1));
+            m.SetFloat("_EdgePolish", 0.6f); m.SetFloat("_Grime", 0.65f);
+            m.SetVector("_GrimeColor", new Vector4(0.42f, 0.38f, 0.32f, 1));
         });
 
         /// <summary>Zinc-plated bolt heads: lighter and duller than the joint steel, so they read as separate fasteners.</summary>
@@ -142,6 +147,19 @@ namespace WorkshopWreckage
             m.SetFloat("_SmoothVar", 0.1f); m.SetFloat("_ColorVar", 0.08f);
             m.SetFloat("_Grime", 0.5f); m.SetVector("_GrimeColor", new Vector4(1.5f, 1.45f, 1.35f, 1));   // dust lightens black rubber
         });
+
+        /// <summary>Grease and dirt runs and bands (WWStain multiply): darker than OilStain, where
+        /// joints leak and feet scuff.</summary>
+        public static Material Grease
+        {
+            get
+            {
+                if (_cache.TryGetValue("grease", out var m)) return m;
+                m = new Material(Resources.Load<Shader>("WWStain")) { name = "grease" };
+                m.SetColor("_Color", new Color(0.72f, 0.67f, 0.6f));
+                return _cache["grease"] = m;
+            }
+        }
 
         /// <summary>Grime and oil runs (WWStain multiply): a soft grey-brown, not orange rust.</summary>
         public static Material OilStain

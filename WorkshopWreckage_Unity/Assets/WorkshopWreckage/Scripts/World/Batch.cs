@@ -110,8 +110,10 @@ namespace WorkshopWreckage
 
         /// <summary>Box with flat chamfered edges and corners (chamfer `ch`), centred at a
         /// Godot-local point, optional Godot-space rotation: machined and pressed-steel panels whose
-        /// crisp facets catch the light. 26 flat faces (6 sides, 12 edge chamfers, 8 corners).</summary>
-        public void ChamferBox(Vector3 centerG, Vector3 size, float ch, Material m, Quaternion? rotU = null)
+        /// crisp facets catch the light. 26 flat faces (6 sides, 12 edge chamfers, 8 corners).
+        /// `soft`: the chamfers blend the normals of the faces they join (each vertex takes its own
+        /// face's normal), so the edges shade like a tight rounding while the faces stay flat.</summary>
+        public void ChamferBox(Vector3 centerG, Vector3 size, float ch, Material m, Quaternion? rotU = null, bool soft = false)
         {
             if (m == null) return;   // a missing robot part: nothing is drawn
             var rot = rotU ?? Quaternion.identity;
@@ -128,11 +130,16 @@ namespace WorkshopWreckage
             }
             // the normal is known exactly (face axis, edge diagonal or corner diagonal): a cross product
             // of tiny chamfer edges would fall below Vector3.normalized's epsilon and come out zero
-            void Face(Vector3 fn, params Vector3[] q)
+            void Face(Vector3 fn, params (int axis, Vector3 sg)[] q)
             {
                 fn.Normalize();
                 int b = v.Count;
-                foreach (var p in q) { v.Add(c + rot * p); n.Add(rot * fn); uv.Add(Vector2.zero); }
+                foreach (var (axis, sg) in q)
+                {
+                    var vn = fn;
+                    if (soft) { vn = Vector3.zero; vn[axis] = sg[axis]; }
+                    v.Add(c + rot * P(axis, sg)); n.Add(rot * vn); uv.Add(Vector2.zero);
+                }
                 for (int i = 1; i < q.Length - 1; i++) Tri(t, v, b, b + i, b + i + 1, rot * fn);
             }
             Vector3 S(int axis, float sa, int a1, float s1, int a2, float s2) { var sg = Vector3.zero; sg[axis] = sa; sg[a1] = s1; sg[a2] = s2; return sg; }
@@ -140,15 +147,15 @@ namespace WorkshopWreckage
             {
                 int a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
                 for (int sa = -1; sa <= 1; sa += 2)   // the two faces across this axis
-                    Face(S(axis, sa, a1, 0, a2, 0), P(axis, S(axis, sa, a1, -1, a2, -1)), P(axis, S(axis, sa, a1, 1, a2, -1)), P(axis, S(axis, sa, a1, 1, a2, 1)), P(axis, S(axis, sa, a1, -1, a2, 1)));
+                    Face(S(axis, sa, a1, 0, a2, 0), (axis, S(axis, sa, a1, -1, a2, -1)), (axis, S(axis, sa, a1, 1, a2, -1)), (axis, S(axis, sa, a1, 1, a2, 1)), (axis, S(axis, sa, a1, -1, a2, 1)));
                 for (int s1 = -1; s1 <= 1; s1 += 2)   // the four edges running along this axis
                     for (int s2 = -1; s2 <= 1; s2 += 2)
-                        Face(S(axis, 0, a1, s1, a2, s2), P(a1, S(axis, -1, a1, s1, a2, s2)), P(a2, S(axis, -1, a1, s1, a2, s2)), P(a2, S(axis, 1, a1, s1, a2, s2)), P(a1, S(axis, 1, a1, s1, a2, s2)));
+                        Face(S(axis, 0, a1, s1, a2, s2), (a1, S(axis, -1, a1, s1, a2, s2)), (a2, S(axis, -1, a1, s1, a2, s2)), (a2, S(axis, 1, a1, s1, a2, s2)), (a1, S(axis, 1, a1, s1, a2, s2)));
             }
             for (int k = 0; k < 8; k++)   // corner triangles
             {
                 var sg = new Vector3((k & 1) == 0 ? -1 : 1, (k & 2) == 0 ? -1 : 1, (k & 4) == 0 ? -1 : 1);
-                Face(sg, P(0, sg), P(1, sg), P(2, sg));
+                Face(sg, (0, sg), (1, sg), (2, sg));
             }
         }
 

@@ -114,12 +114,13 @@ namespace WorkshopWreckage
 
         /// <summary>A rust streak running down a vertical surface from p (Godot-local): four
         /// overlapping stain strips from the same source, wide and short to narrow and long, so the
-        /// multiplied tint is darkest where it bleeds out of the bolt or seam and fades to its tail.</summary>
-        protected void RustStreak(Batch b, string part, Vector3 p, Vector3 normal, float length, float w = 0.016f)
+        /// multiplied tint is darkest where it bleeds out of the bolt or seam and fades to its tail.
+        /// `stain` replaces the rust tint (a robot's own grease or grime).</summary>
+        protected void RustStreak(Batch b, string part, Vector3 p, Vector3 normal, float length, float w = 0.016f, Material stain = null)
         {
             if (assembling) return;   // stains are not drawn on ghosts
             var n = normal.normalized;
-            var m = M(part, StainMat);
+            var m = M(part, stain ?? StainMat);
             if (m == null || length < 0.012f || Mathf.Abs(n.y) > 0.3f) return;
             var rot = Quaternion.LookRotation(Vector3.down, Batch.G(n));
             float[] wf = { 1.1f, 0.85f, 0.62f, 0.4f }, lf = { 0.22f, 0.5f, 0.78f, 1f };
