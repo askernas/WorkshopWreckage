@@ -89,6 +89,7 @@ namespace WorkshopWreckage
             // tests, screenshots and benchmarks run silently (--mute does it for normal runs too)
             if (args.ContainsKey("mute") || Automated) { AudioListener.volume = 0; Sfx.masterVolume = 0; }
 
+            RetrobotModel.LegacyLook = args.TryGetValue("retrolook", out var rlook) && rlook == "legacy";   // QA: the finish before the polish pass
             if (args.TryGetValue("preset", out var pr)) presetId = pr;
             bool valid = LoadPreset(presetId);
             Debug.Log($"[boot] preset {presetId} loaded, valid {valid} ({sw.ElapsedMilliseconds} ms)");
@@ -131,6 +132,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
             else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur)
+            else if (args.ContainsKey("robotbench") && _studio != null) { SetState("play"); StartCoroutine(RobotBench()); }
             else if (args.TryGetValue("bench", out var bp)) { SetState("play"); StartCoroutine(new Benchmark().Run(this, bp)); }
             else if (args.TryGetValue("autoplay", out var ap)) { SetState("play"); StartCoroutine(new Autoplay().Run(this, ap)); }
             else if (args.ContainsKey("play")) SetState("play");
@@ -144,7 +146,7 @@ namespace WorkshopWreckage
             builder.RefreshProbe();
         }
 
-        public bool Automated => args.ContainsKey("shot") || args.ContainsKey("bench") || args.ContainsKey("autoplay");
+        public bool Automated => args.ContainsKey("shot") || args.ContainsKey("bench") || args.ContainsKey("robotbench") || args.ContainsKey("autoplay");
 
         // ---------------------------------------------------------------- world lifecycle
 
@@ -516,17 +518,99 @@ namespace WorkshopWreckage
         (Transform robot, Bounds bounds)? _studio;
 
         /// <summary>Studio camera pose k (0 front, 1 side with the robot facing right, 2 back,
-        /// 3 three-quarter front left), framing the robot's bounds.</summary>
+        /// 3 three-quarter front left, 4 three-quarter rear, then close-ups three-quarter from
+        /// the front: 5 head, 6 right forearm and claw, 7 right leg and foot), framing the
+        /// robot's bounds (or the close-up's own; a robot without that pivot gets the full view).</summary>
         void StudioCamera(int k)
         {
             var (rt, bb) = _studio.Value;
-            float yaw = new[] { 0f, -90f, 180f, -35f }[k % 4];
+            k %= 8;
+            float yaw = new[] { 0f, -90f, 180f, -35f, 145f, -30f, -50f, -40f }[k];
             var dir = Quaternion.AngleAxis(yaw, Vector3.up) * rt.forward;   // from the robot towards the camera
-            float radius = Mathf.Max(bb.extents.y, Mathf.Max(bb.extents.x, bb.extents.z)) * 1.12f;
+            var close = k switch { 5 => "Head", 6 => "ArmR/Elbow", 7 => "LegR", _ => null };
+            var sub = close == null ? null : rt.GetComponentsInChildren<Transform>(true).FirstOrDefault(t => PathEndsWith(t, close));
+            var rs = sub != null ? sub.GetComponentsInChildren<Renderer>() : new Renderer[0];
+            if (rs.Length > 0)
+            {
+                bb = rs[0].bounds;
+                foreach (var r in rs) bb.Encapsulate(r.bounds);
+            }
+            float radius = Mathf.Max(bb.extents.y, Mathf.Max(bb.extents.x, bb.extents.z)) * (rs.Length > 0 ? 1.25f : 1.12f);
             float dist = radius / Mathf.Tan(player.cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
             var target = bb.center;
-            var camPos = target + dir * dist + Vector3.up * dist * 0.06f;
+            var camPos = target + dir * dist + Vector3.up * dist * (rs.Length > 0 ? 0.25f : 0.06f);
             player.cam.transform.SetPositionAndRotation(camPos, Quaternion.LookRotation(target - camPos));
+        }
+
+        /// <summary>Model QA (--robotview=id --robotbench): shading cost with the robot filling the
+        /// frame (three-quarter view), averaged over 5 s after a warm-up; logs and quits.</summary>
+        IEnumerator RobotBench()
+        {
+            QualitySettings.vSyncCount = 0;
+            Application.targetFrameRate = -1;
+            player.enabled = false;
+            hud.SetHudVisible(false);
+            yield return null;
+            builder.RefreshProbe();
+            StudioCamera(3);
+            var (rt, bb) = _studio.Value;
+            player.cam.transform.position = Vector3.Lerp(player.cam.transform.position, bb.center, 0.45f);   // closer: the robot fills the screen
+            var timings = new FrameTiming[1];
+            float warm = 0;
+            while (warm < 2f) { yield return null; warm += Time.unscaledDeltaTime; }
+            double gpu = 0, cpu = 0, frame = 0;
+            int n = 0, gpuN = 0;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            double last = 0;
+            while (sw.Elapsed.TotalSeconds < 5)
+            {
+                yield return null;
+                double now = sw.Elapsed.TotalMilliseconds;
+                frame += now - last; last = now; n++;
+                FrameTimingManager.CaptureFrameTimings();
+                if (FrameTimingManager.GetLatestTimings(1, timings) > 0 && timings[0].gpuFrameTime > 0) { gpu += timings[0].gpuFrameTime; cpu += timings[0].cpuMainThreadFrameTime; gpuN++; }
+            }
+            Debug.Log(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[robotbench] frame {0:0.000} ms, gpu {1:0.000} ms, cpu main {2:0.000} ms over {3} frames", frame / n, gpuN > 0 ? gpu / gpuN : -1, gpuN > 0 ? cpu / gpuN : -1, n));
+            Application.Quit();
+        }
+
+        static Bounds RendererBounds(Robot r, Vector3 pos)
+        {
+            var bounds = new Bounds(pos + Vector3.up * 0.3f, Vector3.zero);
+            bool any = false;
+            foreach (var rr in r.GetComponentsInChildren<Renderer>())
+            {
+                if (!any) { bounds = rr.bounds; any = true; }
+                else bounds.Encapsulate(rr.bounds);
+            }
+            return bounds;
+        }
+
+        /// <summary>Model QA: the robot's render cost (renderers, draw calls = submeshes,
+        /// distinct materials, triangles, vertices) as one log line.</summary>
+        static void LogModelStats(Robot r)
+        {
+            int renderers = 0, subs = 0, tris = 0, verts = 0;
+            var mats = new HashSet<Material>();
+            foreach (var mr in r.GetComponentsInChildren<MeshRenderer>())
+            {
+                var mf = mr.GetComponent<MeshFilter>();
+                if (mf == null || mf.sharedMesh == null) continue;
+                renderers++;
+                subs += mf.sharedMesh.subMeshCount;
+                tris += (int)(mf.sharedMesh.triangles.Length / 3);
+                verts += mf.sharedMesh.vertexCount;
+                foreach (var m in mr.sharedMaterials) mats.Add(m);
+            }
+            Debug.Log($"[robotstats] {r.id}: renderers {renderers}, draw calls {subs}, materials {mats.Count}, triangles {tris}, vertices {verts}");
+        }
+
+        static bool PathEndsWith(Transform t, string path)
+        {
+            var names = path.Split('/');
+            for (int i = names.Length - 1; i >= 0; i--, t = t.parent)
+                if (t == null || t.name != names[i]) return false;
+            return true;
         }
 
         /// <summary>Model QA (--robotview=retrobot): the robot fully assembled, frozen in its rest
@@ -545,6 +629,14 @@ namespace WorkshopWreckage
             var pos = Shared.Pos(layout.spawn.x, 0, layout.spawn.z - 1.2f);
             r.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(Vector3.back));   // faces south, towards the camera
             r.PoseRest();
+            LogModelStats(r);
+            if (args.TryGetValue("studiolight", out var sl) && sl == "workshop")
+            {
+                // the same framing, but in the workshop as the game draws and lights it
+                player.cam.fieldOfView = 30;
+                _studio = (r.transform, RendererBounds(r, pos));
+                return;
+            }
             foreach (var t in r.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = StudioLayer;
             // the studio: nothing else is drawn or lit
             player.cam.cullingMask = 1 << StudioLayer;
@@ -556,14 +648,7 @@ namespace WorkshopWreckage
             player.cam.clearFlags = CameraClearFlags.SolidColor;
             player.cam.backgroundColor = new Color(0.9f, 0.9f, 0.89f);
             player.cam.fieldOfView = 22;   // a long lens: little perspective distortion, like the sheets
-            var bounds = new Bounds(pos + Vector3.up * 0.3f, Vector3.zero);
-            bool any = false;
-            foreach (var rr in r.GetComponentsInChildren<Renderer>())
-            {
-                if (!any) { bounds = rr.bounds; any = true; }
-                else bounds.Encapsulate(rr.bounds);
-            }
-            _studio = (r.transform, bounds);
+            _studio = (r.transform, RendererBounds(r, pos));
             var key = new GameObject("StudioKey").AddComponent<Light>();
             key.type = LightType.Directional;
             key.color = new Color(1f, 0.96f, 0.9f);

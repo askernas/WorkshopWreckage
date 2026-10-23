@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace WorkshopWreckage
@@ -18,6 +19,35 @@ namespace WorkshopWreckage
         public override float ModelHeight => 1.06f;
         static Material Yellow => ToyYellow;
         static Material YellowDeep => ToyYellowDeep;
+
+        /// <summary>QA (--retrolook=legacy): the finish before the 2026-10-23 polish pass, for
+        /// side-by-side comparisons and as a fallback.</summary>
+        public static bool LegacyLook;
+        static Dictionary<Material, Material> _skin;
+
+        /// <summary>The polished finish (RobotFinish): enamel with construction-led wear, and the
+        /// bare metals told apart. Retrobot only; the other robots keep the shared kit materials.</summary>
+        protected override Material Skin(Material m)
+        {
+            if (LegacyLook || m == null) return m;
+            _skin ??= new Dictionary<Material, Material>
+            {
+                [ToyYellow] = RobotFinish.Paint(new Color(0.8f, 0.55f, 0.12f)),
+                [ToyYellowDeep] = RobotFinish.Paint(new Color(0.68f, 0.45f, 0.09f)),
+                [ToyRed] = RobotFinish.Paint(new Color(0.68f, 0.1f, 0.06f)),
+                [Gunmetal] = RobotFinish.JointSteel,
+                [Dark] = RobotFinish.Blackened,
+                [Brass] = RobotFinish.BearingBrass,
+                [Rubber] = RobotFinish.Rubber,
+                [StainMat] = RobotFinish.OilStain,
+            };
+            return _skin.TryGetValue(m, out var s) ? s : m;
+        }
+
+        protected override Material BoltSkin(Material m) => !LegacyLook && m == RobotFinish.JointSteel ? RobotFinish.BoltSteel : m;
+
+        /// <summary>Piston rods: bright shaft steel (gunmetal in the legacy look).</summary>
+        static Material Shaft => LegacyLook ? Gunmetal : RobotFinish.ShaftSteel;
         const float HipY = 0.40f, ShoulderY = 0.62f, NeckY = 0.68f, ShoulderX = 0.238f, LegX = 0.14f;
         const float Flare = 11f;   // rest pose: the arms hang slightly out from the body, as on the sheet
 
@@ -120,7 +150,7 @@ namespace WorkshopWreckage
             foreach (var x in new[] { -0.04f, 0.04f }) Bolt(b, new Vector3(x, -0.235f, -0.055f), new Vector3(0, 0, -1), 0.006f, G);
             foreach (var dx in new[] { -0.028f, 0.028f })
             {
-                b.Lathe(new Vector3(dx, -0.28f, 0.026f), Disc(0.013f, 0.13f, 0.002f), G, null, 10);
+                b.Lathe(new Vector3(dx, -0.28f, 0.026f), Disc(0.013f, 0.13f, 0.002f), M(P, Shaft), null, 10);
                 b.Lathe(new Vector3(dx, -0.205f, 0.026f), Disc(0.018f, 0.022f, 0.003f), Br, null, 10);
             }
             b.Lathe(new Vector3(-0.048f, -0.29f, 0), Disc(0.032f, 0.096f, 0.006f), G, RightRot, 14);   // ankle

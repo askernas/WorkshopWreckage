@@ -139,7 +139,15 @@ namespace WorkshopWreckage
         /// <summary>The material of a primitive belonging to `part`. A missing part is a
         /// faint ghost while the robot is on the workbench (so the player sees what is still
         /// to find), and is not drawn at all otherwise.</summary>
-        protected Material M(string part, Material m) => Has(part) ? m : assembling ? Ghost : null;
+        protected Material M(string part, Material m) => Has(part) ? Skin(m) : assembling ? Ghost : null;
+
+        /// <summary>A robot's own finish: maps a shared kit material (ToyYellow, Gunmetal, ...) to
+        /// the robot's version. Identity unless a model overrides it (Retrobot's polished finish).</summary>
+        protected virtual Material Skin(Material m) => m;
+
+        /// <summary>The material of a bolt head given its (already skinned) material; lets a
+        /// finish tell fasteners apart from the steel they sit on.</summary>
+        protected virtual Material BoltSkin(Material m) => m;
 
         static Material _ghost;
         protected static Material Ghost

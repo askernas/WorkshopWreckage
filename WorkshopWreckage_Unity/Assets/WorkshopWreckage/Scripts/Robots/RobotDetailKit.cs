@@ -82,6 +82,7 @@ namespace WorkshopWreckage
         protected void Bolt(Batch b, Vector3 c, Vector3 outward, float r, Material m)
         {
             if (m == null) return;
+            m = BoltSkin(m);
             var n = outward.normalized;
             var rot = Quaternion.FromToRotation(Vector3.up, Batch.G(n));
             b.Lathe(c - n * 0.001f, new[] { new Vector2(r * 1.45f, 0), new Vector2(r * 1.45f, r * 0.22f), new Vector2(0, r * 0.22f) }, m, rot, 10);
