@@ -249,6 +249,9 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Model QA: one neutral animation frame, the standing rest pose.</summary>
+        /// <summary>QA: freezes the model in the given animation inputs (studio renders of poses).</summary>
+        public void PoseWith(RobotAnim a) => _model.Animate(a);
+
         public void PoseRest()
         {
             if (_model is SortingArmModel sam)

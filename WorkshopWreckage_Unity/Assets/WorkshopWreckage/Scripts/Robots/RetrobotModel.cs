@@ -29,6 +29,9 @@ namespace WorkshopWreckage
         const float Flare = 11f;   // rest pose: the arms hang slightly out from the body, as on the sheet
         // the sheet's stance: thigh 10 deg forward, shin 29 deg back, foot flat (ankle 0.115 above the floor)
         const float ThighL = 0.133f, ShinL = 0.176f, HipRest = -10f, KneeRest = 39f, AnkleRest = -29f;
+        // F4: seen from the front the thighs splay out from the hips (an inverted V); the knee takes
+        // the splay back out, so the shins stand upright and the boots stay flat and facing forward
+        public static float HipSplay = 8f;   // QA: --retrosplay=<deg> overrides it for silhouette comparisons
         // proportions after the concept sheet: head 0.40 x 0.28 x 0.31, torso 0.31 x 0.27 x 0.25
         const float HeadW = 0.39f, HeadH = 0.28f, HeadD = 0.32f, TorsoW = 0.31f, TorsoD = 0.25f, TorsoBot = 0.43f, TorsoTop = 0.70f;
 
@@ -199,7 +202,7 @@ namespace WorkshopWreckage
             // pelvis: a wide, deep dark steel housing under the torso; the hips turn inside it on one
             // axle, so the legs come out from beneath the body instead of being bolted to its sides
             b.ChamferBox(new Vector3(0, 0.403f, 0.005f), new Vector3(0.27f, 0.08f, 0.2f), 0.018f, M(P, Gunmetal), null, true);
-            b.Lathe(new Vector3(-LegX - 0.03f, HipY, 0), Disc(0.022f, 2 * LegX + 0.06f, 0.004f), M(P, Shaft), RightRot, 14);   // hip axle
+            b.Lathe(new Vector3(-LegX + 0.05f, HipY, 0), Disc(0.022f, 2 * LegX - 0.1f, 0.004f), M(P, Shaft), RightRot, 14);   // hip axle (centre; the legs carry the stubs)
             b.Lathe(new Vector3(0, 0.4f, -0.095f), Disc(0.032f, 0.016f, 0.004f), M(P, Gunmetal), FwdRot, 20);
             Nut(b, new Vector3(0, 0.4f, -0.111f), FwdRot, 0.011f, 0.006f, M(P, Gunmetal));
             foreach (var x in new[] { -0.075f, 0.075f }) Bolt(b, new Vector3(x, 0.415f, -0.095f), new Vector3(0, 0, -1), 0.007f, M(P, Gunmetal));
@@ -436,6 +439,7 @@ namespace WorkshopWreckage
             var b = new Batch();
             // hip (all on the pivot axis, inside the pelvis): a thrust washer, the yellow hip drum that
             // the thigh grows out of (its top runs up under the torso), the bolted outer hub
+            b.Lathe(X(-s * 0.075f), Disc(0.022f, 0.1f, 0.004f), M(P, Shaft), SideRot(s), 14);   // axle stub, splayed with the leg
             b.Lathe(X(-s * 0.055f), Disc(0.05f, 0.012f, 0.003f), M(P, Gunmetal), SideRot(s), 22);
             b.Lathe(X(-s * 0.043f), Disc(0.047f, 0.068f, 0.012f), M(P, Yellow), SideRot(s), 28);
             Hub(b, P, X(s * 0.025f), s, 0.04f, 5);
@@ -498,10 +502,18 @@ namespace WorkshopWreckage
             float swing = s * 28 * a.gait;
             // bending down to pick something up: thigh forward, knee folds, ankle keeps the foot flat
             float bend = a.bend;
-            legL.localRotation = Quaternion.Euler(HipRest + swing - 30 * bend, 0, 0);
-            legR.localRotation = Quaternion.Euler(HipRest - swing - 30 * bend, 0, 0);
-            kneeL.localRotation = kneeR.localRotation = Quaternion.Euler(KneeRest + 60 * bend, 0, 0);
-            ankleL.localRotation = ankleR.localRotation = Quaternion.Euler(AnkleRest - 30 * bend, 0, 0);
+            // the hip pitch (stride, bend) happens in the splayed plane; the knee first undoes that
+            // pitch and the splay, then applies the summed pitch, so the shin is pitched exactly as
+            // without the splay but carries no roll (upright from the front, boot flat and forward)
+            foreach (var (leg, knee, ankle, side, hip) in new[] { (legL, kneeL, ankleL, -1f, HipRest + swing - 30 * bend), (legR, kneeR, ankleR, 1f, HipRest - swing - 30 * bend) })
+            {
+                float kneePitch = KneeRest + 60 * bend;
+                leg.localRotation = Quaternion.Euler(0, 0, side * HipSplay) * Quaternion.Euler(hip, 0, 0);
+                // the splay shortens the thigh's drop a little: sink the hip by that much (inside the pelvis) so the boots stay on the floor
+                leg.localPosition = new Vector3(side * LegX, HipY - ThighL * Mathf.Cos(hip * Mathf.Deg2Rad) * (1 - Mathf.Cos(HipSplay * Mathf.Deg2Rad)), 0);
+                knee.localRotation = Quaternion.Euler(-hip, 0, 0) * Quaternion.Euler(0, 0, -side * HipSplay) * Quaternion.Euler(hip + kneePitch, 0, 0);
+                ankle.localRotation = Quaternion.Euler(AnkleRest - 30 * bend, 0, 0);
+            }
             body.localPosition = new Vector3(0, Mathf.Abs(Mathf.Cos(a.phase)) * 0.022f * a.gait - a.bend * 0.08f, 0);
             body.localRotation = Quaternion.Euler(0, 0, s * 3 * a.gait);
             upper.localRotation = Quaternion.Euler(a.bend * 40 + 5 * a.gait, 0, 0);

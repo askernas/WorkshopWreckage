@@ -89,7 +89,8 @@ namespace WorkshopWreckage
             // tests, screenshots and benchmarks run silently (--mute does it for normal runs too)
             if (args.ContainsKey("mute") || Automated) { AudioListener.volume = 0; Sfx.masterVolume = 0; }
 
-            RetrobotModel.LegacyLook = args.TryGetValue("retrolook", out var rlook) && rlook == "legacy";   // QA: the finish before the polish pass
+            RetrobotModel.LegacyLook = args.TryGetValue("retrolook", out var rlook) && rlook == "legacy";
+            if (args.TryGetValue("retrosplay", out var rsp)) RetrobotModel.HipSplay = float.Parse(rsp, System.Globalization.CultureInfo.InvariantCulture);   // QA: thigh splay (deg)   // QA: the finish before the polish pass
             if (args.TryGetValue("preset", out var pr)) presetId = pr;
             bool valid = LoadPreset(presetId);
             Debug.Log($"[boot] preset {presetId} loaded, valid {valid} ({sw.ElapsedMilliseconds} ms)");
@@ -526,9 +527,14 @@ namespace WorkshopWreckage
         void StudioCamera(int k)
         {
             var (rt, bb) = _studio.Value;
-            k %= 12;
-            float yaw = new[] { 0f, 90f, 180f, -35f, 145f, -30f, 70f, -45f, -40f, -15f, -40f, 90f }[k];
+            k %= 13;
+            float yaw = new[] { 0f, 90f, 180f, -35f, 145f, -30f, 70f, -45f, -40f, -15f, -40f, 90f, 0f }[k];
             var dir = Quaternion.AngleAxis(yaw, Vector3.up) * rt.forward;   // from the robot towards the camera
+            if (k == 12)   // the lower body straight from the front: pelvis, thighs, knees, boots
+            {
+                bb.SetMinMax(bb.min, new Vector3(bb.max.x, bb.min.y + bb.size.y * 0.42f, bb.max.z));
+                bb.Expand(new Vector3(-bb.size.x * 0.4f, 0, 0));
+            }
             if (k == 9)
             {
                 bb.SetMinMax(new Vector3(bb.min.x, bb.min.y + bb.size.y * 0.2f, bb.min.z), new Vector3(bb.max.x, bb.min.y + bb.size.y * 0.47f, bb.max.z));
@@ -614,7 +620,9 @@ namespace WorkshopWreckage
                     if (float.IsNaN(nv.x + nv.y + nv.z) || nv.sqrMagnitude < 0.5f) { bad++; badIn.Add(mf.sharedMesh.name + "/" + mr.sharedMaterial.name); }
                 foreach (var m in mr.sharedMaterials) mats.Add(m);
             }
-            Debug.Log($"[robotstats] {r.id}: renderers {renderers}, draw calls {subs}, materials {mats.Count}, triangles {tris}, vertices {verts}, bad normals {bad}{(bad > 0 ? " in " + string.Join(", ", badIn) : "")}");
+            float lowest = float.MaxValue;
+            foreach (var rr in r.GetComponentsInChildren<Renderer>()) lowest = Mathf.Min(lowest, rr.bounds.min.y);
+            Debug.Log($"[robotstats] {r.id}: renderers {renderers}, draw calls {subs}, materials {mats.Count}, triangles {tris}, vertices {verts}, bad normals {bad}{(bad > 0 ? " in " + string.Join(", ", badIn) : "")}, lowest point {(lowest - r.transform.position.y) * 1000:0.0} mm from the floor");
         }
 
         static bool PathEndsWith(Transform t, string path)
@@ -641,6 +649,9 @@ namespace WorkshopWreckage
             var pos = Shared.Pos(layout.spawn.x, 0, layout.spawn.z - 1.2f);
             r.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(Vector3.back));   // faces south, towards the camera
             r.PoseRest();
+            // QA (--robotpose=walk|bend): a representative articulated pose instead of the rest pose
+            if (args.TryGetValue("robotpose", out var rp))
+                r.PoseWith(rp == "bend" ? new RobotAnim { dt = 1, bend = 1, armReach = 1 } : new RobotAnim { dt = 1, gait = 1, phase = Mathf.PI / 2, speed01 = 1 });
             LogModelStats(r);
             if (args.TryGetValue("studiolight", out var sl) && sl == "workshop")
             {
