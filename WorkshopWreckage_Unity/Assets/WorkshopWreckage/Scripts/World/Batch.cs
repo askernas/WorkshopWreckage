@@ -56,13 +56,14 @@ namespace WorkshopWreckage
 
         /// <summary>A lofted prism from a to b (Godot-local) whose chamfered-rectangle cross-section
         /// (size.x across X, size.y across the other side) changes linearly from sizeA to sizeB:
-        /// tapered limbs and plinths. Flat-shaded sides, capped ends.</summary>
-        public void Loft(Vector3 aG, Vector3 bG, Vector2 sizeA, Vector2 sizeB, float chamferA, float chamferB, Material m)
+        /// tapered limbs and plinths. Flat-shaded sides, capped ends. `sideG` (Godot space) sets
+        /// the direction of size.x (projected across the axis); default +X.</summary>
+        public void Loft(Vector3 aG, Vector3 bG, Vector2 sizeA, Vector2 sizeB, float chamferA, float chamferB, Material m, Vector3? sideG = null)
         {
             if (m == null) return;   // a missing robot part: nothing is drawn
             var (v, n, uv, t) = Part(m);
             var ax = (bG - aG).normalized;
-            var u = Vector3.ProjectOnPlane(Vector3.right, ax);
+            var u = Vector3.ProjectOnPlane(sideG ?? Vector3.right, ax);
             if (u.sqrMagnitude < 1e-4f) u = Vector3.ProjectOnPlane(Vector3.forward, ax);
             u.Normalize();
             var w = Vector3.Cross(ax, u).normalized;
@@ -105,6 +106,50 @@ namespace WorkshopWreckage
             var cr = Vector3.Cross(v[b] - v[a], v[c] - v[a]);
             if (cr.sqrMagnitude < 1e-16f) return;
             if (Vector3.Dot(cr, normalHint) >= 0) t.AddRange(new[] { a, b, c }); else t.AddRange(new[] { a, c, b });
+        }
+
+        /// <summary>Box with flat chamfered edges and corners (chamfer `ch`), centred at a
+        /// Godot-local point, optional Godot-space rotation: machined and pressed-steel panels whose
+        /// crisp facets catch the light. 26 flat faces (6 sides, 12 edge chamfers, 8 corners).</summary>
+        public void ChamferBox(Vector3 centerG, Vector3 size, float ch, Material m, Quaternion? rotU = null)
+        {
+            if (m == null) return;   // a missing robot part: nothing is drawn
+            var rot = rotU ?? Quaternion.identity;
+            var c = G(centerG);
+            var (v, n, uv, t) = Part(m);
+            var h = size * 0.5f;
+            ch = Mathf.Min(ch, Mathf.Min(h.x, Mathf.Min(h.y, h.z)) * 0.95f);
+            // the corner point of corner `sg` that lies on the face of `axis`
+            Vector3 P(int axis, Vector3 sg)
+            {
+                var p = new Vector3(sg.x * (h.x - ch), sg.y * (h.y - ch), sg.z * (h.z - ch));
+                p[axis] = sg[axis] * h[axis];
+                return p;
+            }
+            // the normal is known exactly (face axis, edge diagonal or corner diagonal): a cross product
+            // of tiny chamfer edges would fall below Vector3.normalized's epsilon and come out zero
+            void Face(Vector3 fn, params Vector3[] q)
+            {
+                fn.Normalize();
+                int b = v.Count;
+                foreach (var p in q) { v.Add(c + rot * p); n.Add(rot * fn); uv.Add(Vector2.zero); }
+                for (int i = 1; i < q.Length - 1; i++) Tri(t, v, b, b + i, b + i + 1, rot * fn);
+            }
+            Vector3 S(int axis, float sa, int a1, float s1, int a2, float s2) { var sg = Vector3.zero; sg[axis] = sa; sg[a1] = s1; sg[a2] = s2; return sg; }
+            for (int axis = 0; axis < 3; axis++)
+            {
+                int a1 = (axis + 1) % 3, a2 = (axis + 2) % 3;
+                for (int sa = -1; sa <= 1; sa += 2)   // the two faces across this axis
+                    Face(S(axis, sa, a1, 0, a2, 0), P(axis, S(axis, sa, a1, -1, a2, -1)), P(axis, S(axis, sa, a1, 1, a2, -1)), P(axis, S(axis, sa, a1, 1, a2, 1)), P(axis, S(axis, sa, a1, -1, a2, 1)));
+                for (int s1 = -1; s1 <= 1; s1 += 2)   // the four edges running along this axis
+                    for (int s2 = -1; s2 <= 1; s2 += 2)
+                        Face(S(axis, 0, a1, s1, a2, s2), P(a1, S(axis, -1, a1, s1, a2, s2)), P(a2, S(axis, -1, a1, s1, a2, s2)), P(a2, S(axis, 1, a1, s1, a2, s2)), P(a1, S(axis, 1, a1, s1, a2, s2)));
+            }
+            for (int k = 0; k < 8; k++)   // corner triangles
+            {
+                var sg = new Vector3((k & 1) == 0 ? -1 : 1, (k & 2) == 0 ? -1 : 1, (k & 4) == 0 ? -1 : 1);
+                Face(sg, P(0, sg), P(1, sg), P(2, sg));
+            }
         }
 
         /// <summary>Box with rounded edges and corners (radius r, `segs` steps per

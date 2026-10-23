@@ -519,21 +519,24 @@ namespace WorkshopWreckage
 
         /// <summary>Studio camera pose k (0 front, 1 side with the robot facing right, 2 back,
         /// 3 three-quarter front left, 4 three-quarter rear, then close-ups three-quarter from
-        /// the front: 5 head, 6 right forearm and claw, 7 right leg and foot), framing the
-        /// robot's bounds (or the close-up's own; a robot without that pivot gets the full view).</summary>
+        /// the front: 5 head, 6 right shoulder, elbow and forearm, 7 right wrist and claw (the
+        /// lower part of the forearm pivot), 8 right hip, knee and foot), framing the robot's
+        /// bounds (or the close-up's own; a robot without that pivot gets the full view).</summary>
         void StudioCamera(int k)
         {
             var (rt, bb) = _studio.Value;
-            k %= 8;
-            float yaw = new[] { 0f, -90f, 180f, -35f, 145f, -30f, -50f, -40f }[k];
+            k %= 9;
+            float yaw = new[] { 0f, 90f, 180f, -35f, 145f, -30f, 70f, -45f, -40f }[k];
             var dir = Quaternion.AngleAxis(yaw, Vector3.up) * rt.forward;   // from the robot towards the camera
-            var close = k switch { 5 => "Head", 6 => "ArmR/Elbow", 7 => "LegR", _ => null };
+            var close = k switch { 5 => "Head", 6 => "ArmR", 7 => "ArmR/Elbow", 8 => "LegR", _ => null };
             var sub = close == null ? null : rt.GetComponentsInChildren<Transform>(true).FirstOrDefault(t => PathEndsWith(t, close));
             var rs = sub != null ? sub.GetComponentsInChildren<Renderer>() : new Renderer[0];
             if (rs.Length > 0)
             {
                 bb = rs[0].bounds;
                 foreach (var r in rs) bb.Encapsulate(r.bounds);
+                if (k == 7) bb.SetMinMax(bb.min, new Vector3(bb.max.x, bb.min.y + bb.size.y * 0.55f, bb.max.z));   // the claw end
+                if (k == 6) bb.SetMinMax(new Vector3(bb.min.x, bb.max.y - bb.size.y * 0.55f, bb.min.z), bb.max);    // shoulder to forearm
             }
             float radius = Mathf.Max(bb.extents.y, Mathf.Max(bb.extents.x, bb.extents.z)) * (rs.Length > 0 ? 1.25f : 1.12f);
             float dist = radius / Mathf.Tan(player.cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
@@ -590,8 +593,9 @@ namespace WorkshopWreckage
         /// distinct materials, triangles, vertices) as one log line.</summary>
         static void LogModelStats(Robot r)
         {
-            int renderers = 0, subs = 0, tris = 0, verts = 0;
+            int renderers = 0, subs = 0, tris = 0, verts = 0, bad = 0;
             var mats = new HashSet<Material>();
+            var badIn = new HashSet<string>();
             foreach (var mr in r.GetComponentsInChildren<MeshRenderer>())
             {
                 var mf = mr.GetComponent<MeshFilter>();
@@ -600,9 +604,11 @@ namespace WorkshopWreckage
                 subs += mf.sharedMesh.subMeshCount;
                 tris += (int)(mf.sharedMesh.triangles.Length / 3);
                 verts += mf.sharedMesh.vertexCount;
+                foreach (var nv in mf.sharedMesh.normals)
+                    if (float.IsNaN(nv.x + nv.y + nv.z) || nv.sqrMagnitude < 0.5f) { bad++; badIn.Add(mf.sharedMesh.name + "/" + mr.sharedMaterial.name); }
                 foreach (var m in mr.sharedMaterials) mats.Add(m);
             }
-            Debug.Log($"[robotstats] {r.id}: renderers {renderers}, draw calls {subs}, materials {mats.Count}, triangles {tris}, vertices {verts}");
+            Debug.Log($"[robotstats] {r.id}: renderers {renderers}, draw calls {subs}, materials {mats.Count}, triangles {tris}, vertices {verts}, bad normals {bad}{(bad > 0 ? " in " + string.Join(", ", badIn) : "")}");
         }
 
         static bool PathEndsWith(Transform t, string path)

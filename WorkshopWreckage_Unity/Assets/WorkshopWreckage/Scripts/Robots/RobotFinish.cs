@@ -98,7 +98,7 @@ namespace WorkshopWreckage
         });
 
         /// <summary>Darkened steel of joints, axles and housings: metallic, satin, oily grime, polished rims.</summary>
-        public static Material JointSteel => Make("jointsteel", new Color(0.2f, 0.19f, 0.18f), 0.9f, 0.5f, m =>
+        public static Material JointSteel => Make("jointsteel", new Color(0.3f, 0.285f, 0.265f), 0.65f, 0.45f, m =>
         {
             m.SetFloat("_SmoothVar", 0.12f); m.SetFloat("_ColorVar", 0.08f);
             m.SetFloat("_EdgePolish", 0.55f); m.SetFloat("_Grime", 0.45f);
@@ -106,7 +106,7 @@ namespace WorkshopWreckage
         });
 
         /// <summary>Zinc-plated bolt heads: lighter and duller than the joint steel, so they read as separate fasteners.</summary>
-        public static Material BoltSteel => Make("boltsteel", new Color(0.27f, 0.26f, 0.245f), 1f, 0.42f, m =>
+        public static Material BoltSteel => Make("boltsteel", new Color(0.36f, 0.35f, 0.33f), 0.65f, 0.42f, m =>
         {
             m.SetFloat("_SmoothVar", 0.08f); m.SetFloat("_ColorVar", 0.1f);
             m.SetFloat("_EdgePolish", 0.4f); m.SetFloat("_Grime", 0.5f);
@@ -114,7 +114,7 @@ namespace WorkshopWreckage
         });
 
         /// <summary>Bright steel of shafts and piston rods: light, smooth, little grime.</summary>
-        public static Material ShaftSteel => Make("shaftsteel", new Color(0.56f, 0.55f, 0.53f), 1f, 0.72f, m =>
+        public static Material ShaftSteel => Make("shaftsteel", new Color(0.66f, 0.65f, 0.62f), 0.6f, 0.55f, m =>
         {
             m.SetFloat("_SmoothVar", 0.06f); m.SetFloat("_ColorVar", 0.04f);
             m.SetFloat("_EdgePolish", 0.2f); m.SetFloat("_Grime", 0.25f);
