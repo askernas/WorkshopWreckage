@@ -32,8 +32,8 @@ namespace WorkshopWreckage
                 _hip[i] = Pivot("Hip" + i, _shell, new Vector3(x * 0.19f, HipY, -z));   // Unity z = -Godot z
                 _knee[i] = Pivot("Knee" + i, _hip[i], new Vector3(x * 0.15f, 0.14f, 0));   // high knees, as on the sheet
             }
-            _jawL = Pivot("JawL", _shell, new Vector3(-0.05f, 0.23f, 0.19f));
-            _jawR = Pivot("JawR", _shell, new Vector3(0.05f, 0.23f, 0.19f));
+            _jawL = Pivot("JawL", _shell, new Vector3(-0.14f, 0.31f, 0.2f));
+            _jawR = Pivot("JawR", _shell, new Vector3(0.14f, 0.31f, 0.2f));
             head = Pivot("Head", _shell, new Vector3(0, 0.435f, 0.03f));
             carry = Pivot("Carry", _shell, new Vector3(0, 0.46f, -0.15f));   // on its back, behind the head
             for (int i = 0; i < 6; i++) Mount(_hip[i], Legs[i].part, new Vector3(Legs[i].x, 0, 0), 0.035f);
@@ -132,16 +132,9 @@ namespace WorkshopWreckage
                 bk.Lathe(new Vector3(x * 0.072f, -0.4f, 0), Disc(0.046f, 0.007f, 0.002f), M(part, Brass), null, 20);
                 Done(bk, _knee[i]);
             }
-            foreach (var (jaw, s) in new[] { (_jawL, -1f), (_jawR, 1f) })
-            {
-                var b = new Batch();
-                const float J = 1.6f;   // the sheet's mandibles are big
-                b.RoundedBox(new Vector3(0, -0.03f, -0.03f) * J, new Vector3(0.026f, 0.06f, 0.06f) * J, 0.008f * J, M("gripping jaws", ToyRed), 2, Batch.R(Vector3.right, 0.4f));
-                b.RoundedBox(new Vector3(-s * 0.012f, -0.07f, -0.055f) * J, new Vector3(0.024f, 0.032f, 0.032f) * J, 0.008f * J, M("gripping jaws", ToyRed), 2);
-                b.Box(new Vector3(-s * 0.02f, -0.06f, -0.05f) * J, new Vector3(0.006f, 0.02f, 0.03f) * J, M("gripping jaws", Dark));
-                b.Rivet(new Vector3(s * 0.013f, -0.03f, -0.03f) * J, new Vector3(s, 0, 0), 0.006f * J, M("gripping jaws", Brass));
-                Done(b, jaw);
-            }
+            // the gripping jaws are two short pincer arms at the front corners (the family arm kit)
+            foreach (var (jaw, sd) in new[] { (_jawL, -1f), (_jawR, 1f) })
+                DetailedArm(jaw, sd, "gripping jaws", "gripping jaws", ToyGreen, ToyGreenDeep, ToyRed, 0.72f, 2.1f);
             DetailedHead(head, ToyGreen, new Vector3(0.34f, 0.27f, 0.28f), 2, 0.048f,
                 "head", "eye pair", null, "antenna pair", "antenna pair", "head", "head", "head", false, true, 0.95f);
         }
@@ -168,8 +161,10 @@ namespace WorkshopWreckage
             _shell.localPosition = new Vector3(0, Mathf.Abs(Mathf.Sin(a.phase)) * 0.012f * a.gait - a.bend * 0.06f, 0);
             _shell.localRotation = Quaternion.Euler(a.bend * 12, 0, Mathf.Sin(a.phase) * 1.5f * a.gait);
             float jaw = 25 * Mathf.Max(a.armReach, a.armLift) + 6 * Mathf.Sin(a.time * 1.7f) * (1 - a.gait);
-            _jawL.localRotation = Quaternion.Euler(0, jaw, 0);
-            _jawR.localRotation = Quaternion.Euler(0, -jaw, 0);
+            float reach = -55 - 25 * Mathf.Max(a.armReach, a.armLift);   // held forward and down, ready to grab
+            _jawL.localRotation = Quaternion.Euler(reach, jaw, 0);
+            _jawR.localRotation = Quaternion.Euler(reach, -jaw, 0);
+            PoseElbows(a, 40);
             LookHead(a, 45);
         }
     }

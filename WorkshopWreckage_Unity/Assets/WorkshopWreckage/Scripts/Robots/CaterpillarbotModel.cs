@@ -35,8 +35,8 @@ namespace WorkshopWreckage
             _sprocketRR = Pivot("SprRR", body, new Vector3(TrackX + TrackW / 2, EndY, -EndZ));
             head = Pivot("Head", _chassis, new Vector3(0, 0.49f, 0.38f));
             // arms are mounted at the front corners and reach forward, as in the reference
-            _armL = Pivot("ArmL", _chassis, new Vector3(-0.27f, 0.43f, 0.55f));
-            _armR = Pivot("ArmR", _chassis, new Vector3(0.27f, 0.43f, 0.55f));
+            _armL = Pivot("ArmL", _chassis, new Vector3(-0.3f, 0.43f, 0.55f));
+            _armR = Pivot("ArmR", _chassis, new Vector3(0.3f, 0.43f, 0.55f));
             _armL.localRotation = _armR.localRotation = Quaternion.Euler(ArmRest, 0, 0);
             for (int i = 0; i < 3; i++) _boxes[i] = Pivot("Cargo" + i, _chassis, new Vector3(0, 0.335f, -BoxZ[i]));
             carry = _boxes[0];
@@ -131,7 +131,7 @@ namespace WorkshopWreckage
                 }
                 b.RoundedBox(new Vector3(0, 0.2f, 0.505f), new Vector3(0.16f, 0.1f, 0.02f), 0.008f, M("battery pack", Gunmetal), 2);
                 b.Lathe(new Vector3(-0.08f, 0.26f, 0.38f), Disc(0.045f, 0.16f, 0.008f), M("drive motor", Gunmetal), RightRot, 16);
-                b.Lathe(new Vector3(-0.27f, 0.43f, -0.55f), Disc(0.026f, 0.54f, 0.005f), M("chassis", Gunmetal), RightRot, 12);   // shoulder axle across the front
+                b.Lathe(new Vector3(-0.3f, 0.43f, -0.55f), Disc(0.03f, 0.6f, 0.005f), M("chassis", Gunmetal), RightRot, 12);   // shoulder axle across the front
                 for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.488f + k * 0.006f, -0.38f), Disc(0.07f - k * 0.006f, 0.006f, 0.002f), M("chassis", Gunmetal), null, 16);
                 Done(b, _chassis);
             }
@@ -165,7 +165,7 @@ namespace WorkshopWreckage
             }
             foreach (var (arm, s, part, claw) in new[] { (_armL, -1f, "left arm", "left claw"), (_armR, 1f, "right arm", "right claw") })
             {
-                DetailedArm(arm, s, part, claw, ToyYellow, ToyYellowDeep, ToyRed, 1.1f, 1.35f);
+                DetailedArm(arm, s, part, claw, ToyYellow, ToyYellowDeep, ToyRed, 1.32f, 1.6f);
             }
             DetailedHead(head, ToyYellow, new Vector3(0.42f, 0.28f, 0.34f), 1, 0.075f,
                 "head", "optical eye", null, "antenna pair", "antenna pair", "head", "head", "siren light", false, true);

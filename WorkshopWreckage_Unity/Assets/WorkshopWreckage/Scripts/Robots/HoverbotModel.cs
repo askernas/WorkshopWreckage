@@ -26,8 +26,8 @@ namespace WorkshopWreckage
             _saucer = Pivot("Saucer", body, Vector3.zero);
             head = Pivot("Head", _saucer, new Vector3(0, HeadY, 0));
             _rotor = Pivot("Rotor", _saucer, new Vector3(0, RotorY, 0));
-            _armL = Pivot("ArmL", _saucer, new Vector3(-RimR - 0.045f, 0.29f, 0));
-            _armR = Pivot("ArmR", _saucer, new Vector3(RimR + 0.045f, 0.29f, 0));
+            _armL = Pivot("ArmL", _saucer, new Vector3(-RimR - 0.06f, 0.3f, 0));
+            _armR = Pivot("ArmR", _saucer, new Vector3(RimR + 0.06f, 0.3f, 0));
             carry = Pivot("Carry", _saucer, new Vector3(0, 0.05f, 0.05f));   // held under the saucer
             Mount(head, "head", Vector3.up, 0.05f);
             Mount(_rotor, "rotor hub", Vector3.up, 0.035f);
@@ -152,7 +152,7 @@ namespace WorkshopWreckage
             }
             foreach (var (arm, s, part, claw) in new[] { (_armL, -1f, "left arm", "left claw"), (_armR, 1f, "right arm", "right claw") })
             {
-                DetailedArm(arm, s, part, claw, ToyRed, ToyRedDeep, ToyRed, 0.55f, 2.1f);   // a short arm, a big claw (the sheet)
+                DetailedArm(arm, s, part, claw, ToyRed, ToyRedDeep, ToyRed, 0.72f, 2.4f);   // a short arm, a big claw (the sheet)
             }
             DetailedHead(head, ToyRed, new Vector3(0.44f, 0.31f, 0.32f), 2, 0.06f,
                 "head", "left eye lens", "right eye lens", "left antenna", "right antenna", "left ear cap", "right ear cap", null, true, true);
