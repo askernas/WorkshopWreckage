@@ -79,6 +79,41 @@ namespace WorkshopWreckage
         /// <summary>QA: a robot starts an interaction ("pick", "store", "stage").</summary>
         public static System.Action<Robot, string> QAMoment;
         const float DrawerSlide = 0.1f;   // a drawer opened by a small robot comes out only this far
+        // grippers (models with articulated claws): open, closed on a part, and the part's width
+        float _clawOpen, _clawClose, _gripW;
+        bool _clawsBusy;   // a pick-up, deposit or staging drives the grippers
+        /// <summary>A part the claws can't get within this distance of (in a pile, out of the arms' range)
+        /// is not taken: it is deferred and another one chosen (F7: no drawing parts in from afar).</summary>
+        const float ContactMax = 0.05f;
+        /// <summary>QA: gripper state at the moments that matter, the carried part's distance from the
+        /// grippers while carrying, deferred pick-ups.</summary>
+        public float minOpenAtContact = 1, minClosedAtAttach = 1, minOpenAtRelease = 1, carrySyncMax;
+        public int deferred, releases;
+        public Vector3 qaTarget;
+        public float SpeedQA => _speedNow;
+        public float TurnRateQA => _turnRate;
+        bool Grips => _model != null && _model.GripPoint.HasValue;
+        readonly Dictionary<int, (float until, int tries)> _deferredUntil = new();
+        /// <summary>A part the grippers couldn't get to waits before it is tried again, longer each time
+        /// (not cleared with the general unreachable list, so a robot never cycles on one part).</summary>
+        void Defer(int itemId)
+        {
+            int n = _deferredUntil.TryGetValue(itemId, out var e) ? e.tries + 1 : 1;
+            _deferredUntil[itemId] = (_time + 90f * n, n);
+        }
+        float? _gripReachCache;
+        /// <summary>Gripper models: can the claws get to a part from the standing spot the path would end at?
+        /// A part lying inside a pile (the nearest free spot is further than the claws reach) is skipped
+        /// when choosing, instead of walking there and deferring it.</summary>
+        bool InGripRange(ItemInstance inst, Vector3 goal)
+        {
+            if (!Grips) return true;
+            _gripReachCache ??= _model.GripReach(0.015f);
+            float reach = (_gripReachCache ?? 0.1f) + ContactMax + 0.03f;
+            if (Flat(inst.Position - goal).magnitude <= reach) return true;
+            Defer(inst.id);
+            return false;
+        }
         const float RaisePickHeight = 0.08f;   // parts above this (over the feet) are reached by raising the arms
         bool _planAhead;        // robots.json plan_ahead: choose the next part while walking to deliver
         float _decidePause;     // robots.json decide_pause: standing still after a delivery before setting off
@@ -838,6 +873,7 @@ namespace WorkshopWreckage
                 {
                     bool high = inst.Position.y > _maxPickH;
                     var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : g.InTray(inst.Position) ? 0.65f : _reach);
+                    if (goal.HasValue && !InGripRange(inst, goal.Value)) continue;
                     var path = goal.HasValue ? _nav.Path(me, goal.Value) : null;
                     if (path == null) { _unreachable.Add(inst.id); continue; }
                     _path = path;
@@ -898,7 +934,7 @@ namespace WorkshopWreckage
                 yield return null;   // one path per frame
                 bool high = inst.Position.y > _maxPickH;
                 var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : g.InTray(inst.Position) ? 0.65f : _reach);
-                if (goal.HasValue && _nav.Path(from, goal.Value) != null) { _plannedId = id; break; }
+                if (goal.HasValue && InGripRange(inst, goal.Value) && _nav.Path(from, goal.Value) != null) { _plannedId = id; break; }
             }
             _planList.Clear();
             _planReady = true;
@@ -996,6 +1032,7 @@ namespace WorkshopWreckage
         bool Pickable(ItemInstance i)
         {
             if (i.state != ItemState.InWorld || i.Position.y > ReachHeight || _unreachable.Contains(i.id) || g.robotReserved.Contains(i.id)) return false;
+            if (_deferredUntil.Count > 0 && _deferredUntil.TryGetValue(i.id, out var deferredUntil) && _time < deferredUntil.until) return false;
             if (zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
             var def = g.db.Get(i.defId);
             if (def.IsRobotPart || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;
@@ -1012,7 +1049,32 @@ namespace WorkshopWreckage
 
         /// <summary>Can it put a part into this destination itself? Never for a courier
         /// (Unibot); otherwise if the destination is within reach (climbing for a climber).</summary>
-        public bool ReachableDest(string box) => _canStore && g.db.boxes.TryGetValue(box, out var d) && Json.Num(d, "elevation_m") <= ReachHeight;
+        public bool ReachableDest(string box) => _canStore && g.db.boxes.TryGetValue(box, out var d) && Json.Num(d, "elevation_m") <= ReachHeight && PhysicallyStorable(box);
+
+        readonly Dictionary<string, bool> _physical = new();
+        /// <summary>Models with an aim pose (Retrobot): can the claws actually put a part there from the
+        /// floor in front of the unit? The point the claws must reach (DepositAim, uncapped) against the
+        /// arms' reach at that height, from where the body can stand. A container deeper in a shelf, or
+        /// with its rim above the claws, is not storable: the part is staged below it instead (F7). Cached
+        /// per destination (the furniture doesn't move). Other robots: the gameplay rule alone.</summary>
+        bool PhysicallyStorable(string box)
+        {
+            if (_model == null || Flies || _canClimb) return true;
+            if (_physical.TryGetValue(box, out var v)) return v;
+            if (!g.db.boxes.TryGetValue(box, out var d) || !g.units.TryGetValue(Json.Str(d, "unit"), out var unit) || !StagingSpot(box).HasValue) return true;
+            var aim = AimPointFor(box, unit, 0, false);
+            var reach = _model.AimReach(aim.y);
+            if (reach == null) return true;   // no aim pose (or not built yet): not cached, asked again
+            var front = UnitFront(unit);
+            int slot = unit.type == "drawer_cabinet" ? unit.SlotOf(box) : -1;
+            float depth = (float)Json.Num(g.db.Unit(Json.Str(d, "unit")), "depth", 0.6);
+            var face = slot >= 0 ? (Vector3)unit.FrontWorld(slot).GetColumn(3) : unit.transform.position + front * (depth * 0.5f);
+            float need = _radius * 0.85f + 0.012f + Vector3.Dot(Flat(face - aim), front);   // stand clear of the face, reach to the aim
+            v = reach.Value >= 0 && reach.Value + 0.02f >= need;
+            _physical[box] = v;
+            return v;
+        }
+
 
         readonly Dictionary<string, (float t, bool v)> _blocked = new();
         bool Blocked(string box)
@@ -1084,18 +1146,24 @@ namespace WorkshopWreckage
         {
             var ip = g.world.instances[itemId].Position;
             if (!Flies && ip.y > _maxPickH) yield return ClimbTo(ip);   // Spiderbot climbs up to it
-            QAMoment?.Invoke(this, "pick");
+            qaTarget = ip;
+            QAMoment?.Invoke(this, g.index.QuerySphere(ip, 0.15f).Count > 4 ? "pickpile" : "pick");
+            bool claws = Grips;
+            if (claws) { _clawsBusy = true; _gripW = PartWidth(itemId); }
             _reachY = Mathf.Clamp(ip.y - transform.position.y, -0.08f, _maxPickH);
             // a part higher than the hanging claws (on a pile's edge, a low shelf): the arms rise to it
             // instead of the robot bending down
-            bool raise = !Flies && !_climbing && _reachY > RaisePickHeight && _model.AimReach(_reachY).HasValue;
+            bool raise = !Flies && !_climbing && _reachY > RaisePickHeight && _model.AimReach(_reachY) is float rr && rr >= 0;
             if (raise) yield return StepToGrip(ip, _model.AimReach(_reachY).Value);
             else if (!Flies && !_climbing && _model.GripReach(_reachY) is float grip) yield return StepToGrip(ip, grip);
             float h = Mathf.Clamp01(1 - (ip.y - transform.position.y) / (_height * 3f));
-            for (float t = 0; t < _pickTime * 0.45f; t += Time.deltaTime)
+            // reach (grippers opening on the way), then close on the part, then lift: the same total time
+            float reachT = _pickTime * (claws ? 0.4f : 0.45f), closeT = claws ? _pickTime * 0.15f : 0, liftT = _pickTime * (claws ? 0.45f : 0.55f);
+            for (float t = 0; t < reachT; t += Time.deltaTime)
             {
                 FaceTowards(ip, Time.deltaTime * 2);
-                float u = t / (_pickTime * 0.45f);
+                float u = t / reachT;
+                if (claws) _clawOpen = Mathf.SmoothStep(0, 1, Mathf.Clamp01(u * 1.6f));
                 _reachY = Mathf.Clamp(ip.y - transform.position.y, -0.08f, _maxPickH);   // the feet may settle (stepping off debris)
                 if (raise) { _aimPoint = ip; _aimW = Mathf.SmoothStep(0, 1, u); }
                 else
@@ -1108,6 +1176,40 @@ namespace WorkshopWreckage
             }
             if (raise) _aimW = 1;
             var inst = g.world.instances[itemId];
+            if (claws && inst.state == ItemState.InWorld && _model.GripPoint is Vector3 cp && (cp - inst.Position).magnitude > ContactMax)
+            {
+                // the claws can't get to it (in a pile, past the arms' range): leave it for later, choose another
+                LogHands("pick deferred", (cp - inst.Position).magnitude, inst.Position);
+                deferred++;
+                Defer(itemId);
+                g.robotReserved.Remove(itemId);
+                targetId = -1;
+                float db0 = _bend, dr0 = _armReach, dw0 = _aimW, do0 = _clawOpen;
+                for (float t = 0; t < liftT; t += Time.deltaTime)
+                {
+                    float u = Mathf.SmoothStep(0, 1, t / liftT);
+                    _bend = Mathf.Lerp(db0, 0, u); _armReach = dr0 * (1 - u); _aimW = dw0 * (1 - u); _clawOpen = do0 * (1 - u);
+                    yield return null;
+                }
+                _bend = 0; _armReach = 0; _aimW = 0; _clawOpen = 0; _reachY = 0;
+                _clawsBusy = false;
+                _path = null;
+                _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
+                _idleT = 0;
+                yield break;
+            }
+            if (claws)
+            {
+                minOpenAtContact = Mathf.Min(minOpenAtContact, _clawOpen);
+                for (float t = 0; t < closeT; t += Time.deltaTime)   // the grippers close on the part where it lies
+                {
+                    float u = Mathf.SmoothStep(0, 1, t / closeT);
+                    _clawClose = u; _clawOpen = 1 - u;
+                    yield return null;
+                }
+                _clawClose = 1; _clawOpen = 0;
+                minClosedAtAttach = Mathf.Min(minClosedAtAttach, _clawClose);
+            }
             g.robotReserved.Remove(itemId);
             targetId = -1;
             if (inst.state == ItemState.InWorld)
@@ -1115,7 +1217,7 @@ namespace WorkshopWreckage
                 var from = inst.transform;
                 // how far the claws are from the part at the grip (QA)
                 _gripGlide = 0.35f;
-                if (_model.GripPoint is Vector3 gp) { float gap = (gp - inst.Position).magnitude; maxGripGap = Mathf.Max(maxGripGap, gap); pickCount++; LogHands("pick", gap, inst.Position); _gripGlide = Mathf.Lerp(0.35f, 0.9f, Mathf.InverseLerp(0.04f, 0.25f, gap)); }
+                if (_model.GripPoint is Vector3 gp) { float gap = (gp - inst.Position).magnitude; maxGripGap = Mathf.Max(maxGripGap, gap); pickCount++; LogHands("pick", gap, inst.Position); _gripGlide = Mathf.Lerp(0.2f, 0.35f, Mathf.InverseLerp(0.01f, ContactMax, gap)); }
                 // the carried model takes over exactly where the part lies, then glides into the claws
                 _gripItem = itemId;
                 _gripFromPos = inst.Position;
@@ -1131,9 +1233,9 @@ namespace WorkshopWreckage
             }
             float b0 = _bend;
             float w0 = _aimW, r0 = _armReach;
-            for (float t = 0; t < _pickTime * 0.55f; t += Time.deltaTime)
+            for (float t = 0; t < liftT; t += Time.deltaTime)
             {
-                float u = t / (_pickTime * 0.55f);
+                float u = t / liftT;
                 _gripBlend = Mathf.Clamp01(u / _gripGlide);
                 _bend = Mathf.Lerp(b0, 0, Mathf.SmoothStep(0, 1, u));
                 _armReach = r0 * (1 - u);
@@ -1143,6 +1245,7 @@ namespace WorkshopWreckage
             _aimW = 0;
             _gripItem = -1; _gripBlend = 1;
             _bend = 0; _armReach = 0; _reachY = 0;
+            _clawsBusy = false;
             if (_climbing) yield return ClimbDown();
             _path = null;
             _step = Step.Choose;   // gather more (if allowed), else deliver
@@ -1233,13 +1336,16 @@ namespace WorkshopWreckage
             // stray parts lying in the destination block it: leave the load in its staging zone
             if (!_destReachable || g.StraysIn(_destBox).Count > 0) { yield return StageBelow(here); yield break; }
             if (!Flies && _destPoint.y > _maxPickH) yield return ClimbTo(_destPoint);   // climbs up to store it
-            QAMoment?.Invoke(this, "store");
             // aimed deposit (models with an aim pose): the claws go to the actual drawer or opening
             var aim = DepositAim();
             float? aimReach = !Flies && !_climbing ? _model.AimReach(aim.y - transform.position.y) : null;
-            bool aimed = aimReach.HasValue;
-            if (aimed) yield return StepToGrip(aim, aimReach.Value);
+            bool aimed = aimReach is float ar && ar >= 0;
+            bool claws = aimed && Grips;
             int slot = _destUnit.type == "drawer_cabinet" ? _destUnit.SlotOf(_destBox) : -1;
+            qaTarget = aim;
+            QAMoment?.Invoke(this, aimed && slot >= 0 ? "drawer" : "store");
+            if (claws) _clawsBusy = true;
+            if (aimed) yield return StepToGrip(aim, aimReach.Value);
             bool drawer = aimed && slot >= 0;
             if (drawer) _destUnit.OpenDrawer(slot, DrawerContents(_destBox), 1.8f, DrawerSlide);   // it pulls the drawer open
             float high = Mathf.Clamp01((_destPoint.y - transform.position.y) / (_height * 2f));
@@ -1253,6 +1359,17 @@ namespace WorkshopWreckage
                 yield return null;
             }
             if (aimed) { _aimW = 1; if (_model.GripPoint is Vector3 gp) { float gap = (gp - aim).magnitude; maxStoreGap = Mathf.Max(maxStoreGap, gap); storeCount++; string kind = Json.Str(g.db.boxes[_destBox], "kind"); float up = (_destPoint.y - transform.position.y) * 100, ahead = Vector3.Dot(Flat(_destPoint - transform.position), transform.forward) * 100; if (drawer) { drawerStoreCount++; maxDrawerGap = Mathf.Max(maxDrawerGap, gap); } LogHands($"store into {_destBox} ({kind}, dest point {up:0} cm up, {ahead:0} cm ahead)", gap, aim); } }
+            if (claws)
+            {
+                for (float t = 0, ot = _depositTime * 0.12f; t < ot; t += Time.deltaTime)   // let go: the grippers open
+                {
+                    float u = Mathf.SmoothStep(0, 1, t / ot);
+                    _clawClose = 1 - u; _clawOpen = u;
+                    yield return null;
+                }
+                _clawClose = 0; _clawOpen = 1;
+                minOpenAtRelease = Mathf.Min(minOpenAtRelease, _clawOpen); releases++;
+            }
             foreach (var itemId in here)
             {
                 if (g.storage.Deposit(_destBox, itemId, Owner) != StorageSystem.Result.Ok) continue;
@@ -1264,15 +1381,17 @@ namespace WorkshopWreckage
             }
             _destUnit.RefreshLabels();
             if (drawer) _destUnit.OpenDrawer(slot, DrawerContents(_destBox), 0.8f, DrawerSlide);   // the part now lies in the tray; it closes after a moment
-            float l0 = _armLift, a0 = _aimW;
-            for (float t = 0; t < _depositTime * 0.5f; t += Time.deltaTime)
+            float l0 = _armLift, a0 = _aimW, retractT = _depositTime * (claws ? 0.38f : 0.5f);
+            for (float t = 0; t < retractT; t += Time.deltaTime)
             {
-                float u = t / (_depositTime * 0.5f);
+                float u = t / retractT;
                 _armLift = Mathf.Lerp(l0, 0, u);
                 _aimW = Mathf.Lerp(a0, 0, Mathf.SmoothStep(0, 1, u));
+                if (claws) _clawOpen = 1 - Mathf.SmoothStep(0, 1, u);
                 yield return null;
             }
             _armLift = 0; _aimW = 0;
+            if (claws) { _clawOpen = 0; _clawsBusy = false; }
             if (_climbing) yield return ClimbDown();
             _path = null;
             if (carried.Any(c => g.world.DefOf(c).storageBox == _destBox)) DropCarried($"{displayName}: that destination is full");
@@ -1284,24 +1403,25 @@ namespace WorkshopWreckage
         /// <summary>Where the claws put a part into its destination: over the open tray of a drawer
         /// (just in front of the drawer face), else just inside the front rim of a bin, box or crate, or
         /// just above a shelf or pallet surface near its front edge. Never above what the robot reaches.</summary>
-        Vector3 DepositAim()
+        Vector3 DepositAim() => AimPointFor(_destBox, _destUnit, transform.position.y, true);
+
+        Vector3 AimPointFor(string box, StorageUnit unit, float feet, bool cap)
         {
-            var d = g.db.boxes[_destBox];
-            var front = UnitFront(_destUnit);
-            float feet = transform.position.y;
-            int slot = _destUnit.type == "drawer_cabinet" ? _destUnit.SlotOf(_destBox) : -1;
+            var d = g.db.boxes[box];
+            var front = UnitFront(unit);
+            int slot = unit.type == "drawer_cabinet" ? unit.SlotOf(box) : -1;
             Vector3 p;
             if (slot >= 0)
-                p = (Vector3)_destUnit.FrontWorld(slot).GetColumn(3) + front * (DrawerSlide * 0.6f);
+                p = (Vector3)unit.FrontWorld(slot).GetColumn(3) + front * (DrawerSlide * 0.6f);
             else
             {
                 var inner = StorageUnit.Inner(d);
                 string kind = Json.Str(d, "kind");
                 bool surface = kind == "shelf_section" || kind == "floor_pallet";
                 float rise = surface ? 0.05f : Mathf.Min(inner.y, 0.25f) + 0.03f;
-                p = _destPoint + front * Mathf.Max(0, inner.z * 0.5f - (surface ? 0.07f : 0.05f)) + Vector3.up * rise;
+                p = unit.DestPoint(d) + front * Mathf.Max(0, inner.z * 0.5f - (surface ? 0.07f : 0.05f)) + Vector3.up * rise;
             }
-            p.y = Mathf.Min(p.y, feet + ReachHeight * 0.95f);
+            if (cap) p.y = Mathf.Min(p.y, feet + ReachHeight * 0.95f);
             return p;
         }
 
@@ -1396,7 +1516,8 @@ namespace WorkshopWreckage
         IEnumerator StageBelow(List<int> ids)
         {
             var spot = StagingSpot(_destBox).Value;
-            QAMoment?.Invoke(this, "stage");
+            bool claws = Grips;
+            if (claws) _clawsBusy = true;
             // where each part will lie (the same pile rules as before), worked out first so that the
             // claws can carry the first one down to its place before letting go
             var places = new List<(Vector3 at, Quaternion rot)>();
@@ -1415,8 +1536,10 @@ namespace WorkshopWreckage
                 places.Add((spot + jitter + Vector3.up * y, Quaternion.Euler(Random.Range(-12f, 12f), Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 + Random.Range(-10f, 10f) : Random.Range(-12f, 12f))));
             }
             var first = places.Count > 0 ? places[0].at : spot;
+            qaTarget = first;
+            QAMoment?.Invoke(this, "stage");
             _reachY = Mathf.Clamp(first.y - transform.position.y, -0.08f, _maxPickH);
-            bool raise = !Flies && !_climbing && _reachY > RaisePickHeight && _model.AimReach(_reachY).HasValue;   // onto a tall pile
+            bool raise = !Flies && !_climbing && _reachY > RaisePickHeight && _model.AimReach(_reachY) is float sr && sr >= 0;   // onto a tall pile
             if (raise) yield return StepToGrip(first, _model.AimReach(_reachY).Value);
             else if (!Flies && !_climbing && _model.GripReach(_reachY) is float grip) yield return StepToGrip(first, grip);
             for (float t = 0; t < _depositTime * 0.5f; t += Time.deltaTime)
@@ -1429,7 +1552,32 @@ namespace WorkshopWreckage
                 yield return null;
             }
             if (raise) _aimW = 1; else { _bend = 1; _armReach = 1; }
+            if (claws && places.Count > 0 && _model.GripPoint is Vector3 cgp && (cgp - first).magnitude > 0.015f)
+            {
+                // the claws came down a little off the planned spot (pile height, settling feet): the part is
+                // set down where they are, as long as that is still in the staging zone
+                var def0 = g.world.DefOf(ids[0]);
+                var e0 = ItemDatabase.Extents(def0);
+                var sp = g.SafeDropPoint(new Vector3(cgp.x, 0, cgp.z), spot + UnitFront(_destUnit) * 0.4f);
+                if (Flat(sp - spot).magnitude <= 0.35f)
+                {
+                    int near0 = g.index.QuerySphere(sp, 0.16f).Count;
+                    places[0] = (new Vector3(sp.x, sp.y + e0[2] * 0.5f + Mathf.Min(near0, 5) * e0[2] * 0.45f, sp.z), places[0].rot);
+                    first = places[0].at;
+                }
+            }
             if (_model.GripPoint is Vector3 sgp) { float gap = (sgp - first).magnitude; maxStageGap = Mathf.Max(maxStageGap, gap); stageCount++; LogHands("stage", gap, first); }
+            if (claws)
+            {
+                for (float t = 0, ot = _depositTime * 0.12f; t < ot; t += Time.deltaTime)   // let go on the spot: the grippers open
+                {
+                    float u = Mathf.SmoothStep(0, 1, t / ot);
+                    _clawClose = 1 - u; _clawOpen = u;
+                    yield return null;
+                }
+                _clawClose = 0; _clawOpen = 1;
+                minOpenAtRelease = Mathf.Min(minOpenAtRelease, _clawOpen); releases++;
+            }
             for (int k = 0; k < ids.Count; k++)
             {
                 int itemId = ids[k];
@@ -1444,16 +1592,18 @@ namespace WorkshopWreckage
                 lastStagedId = itemId;
                 Sfx.Play("drop_floor", spot, -6);
             }
-            float sb0 = _bend, sr0 = _armReach, sw0 = _aimW;
-            for (float t = 0; t < _depositTime * 0.5f; t += Time.deltaTime)
+            float sb0 = _bend, sr0 = _armReach, sw0 = _aimW, recoverT = _depositTime * (claws ? 0.38f : 0.5f);
+            for (float t = 0; t < recoverT; t += Time.deltaTime)
             {
-                float u = t / (_depositTime * 0.5f);
+                float u = t / recoverT;
                 _bend = Mathf.Lerp(sb0, 0, Mathf.SmoothStep(0, 1, u));
                 _armReach = sr0 * (1 - u);
                 _aimW = sw0 * (1 - Mathf.SmoothStep(0, 1, u));
+                if (claws) _clawOpen = 1 - Mathf.SmoothStep(0, 1, u);
                 yield return null;
             }
             _bend = 0; _armReach = 0; _aimW = 0; _reachY = 0;
+            if (claws) { _clawOpen = 0; _clawsBusy = false; }
             _path = null;
             _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
             _idleT = carried.Count > 0 ? 0.15f : _decidePause;
@@ -1566,18 +1716,48 @@ namespace WorkshopWreckage
             _phase += dt * _model.StepRate(Mathf.Clamp01(moving), _speedNow) * (_gait > 0 ? 1 : 0);
             if (_gait == 0) _phase = Mathf.MoveTowards(_phase, Mathf.Round(_phase / Mathf.PI) * Mathf.PI, dt * 6);   // finish the step: legs come to rest together
             _armHold = Mathf.MoveTowards(_armHold, carried.Count > 0 ? 1 : 0, dt * 3f);
+            if (!_clawsBusy)
+            {
+                // holding a load: grippers closed on it; otherwise they ease back to their rest
+                bool hold = carried.Count > 0;
+                _clawClose = Mathf.MoveTowards(_clawClose, hold ? 1 : 0, dt * 4f);
+                _clawOpen = Mathf.MoveTowards(_clawOpen, 0, dt * 4f);
+                _gripW = hold ? PartWidth(carried[0]) : 0;
+            }
             Sounds(moving);
             bool idle = _gait < 0.05f && _armReach == 0 && _armLift == 0 && _aimW == 0;
             _model.Animate(new RobotAnim
             {
                 dt = dt, speed01 = _speedNow / _walk, speed = _speedNow, gait = _gait, phase = _phase, turnRate = _turnRate, bend = _bend,
                 armReach = _armReach, armHold = _armHold, armLift = _armLift, altitude = _altitude, active = true, time = _time, reachHeight = _reachY,
-                aim = _aimPoint, aimWeight = _aimW,
+                aim = _aimPoint, aimWeight = _aimW, clawOpen = _clawOpen, clawClose = _clawClose, gripWidth = _gripW,
+                lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
                 lookAt = g.player.transform.position, lookWeight = idle ? 1 : 0,
                 gesture = _step == Step.Gesture ? Mathf.Clamp01(_gestureT / GestureTime) : 0,
             });
             PlaceCarried();
+            if (carried.Count > 0 && _armHold > 0.99f && _gripBlend >= 1 && _model.GripPoint is Vector3 gp && _carryModels.TryGetValue(carried[0], out var cm))
+                carrySyncMax = Mathf.Max(carrySyncMax, (cm.transform.position - gp).magnitude);   // QA: the load stays in the grippers
         }
+
+        /// <summary>The point `dist` metres further along the current path (no allocations), or null.</summary>
+        Vector3? PathAhead(float dist)
+        {
+            if (_path == null || _pathIdx >= _path.Count) return null;
+            var p = transform.position;
+            for (int i = _pathIdx; i < _path.Count; i++)
+            {
+                var q = _path[i];
+                float d = Flat(q - p).magnitude;
+                if (d >= dist) return p + Flat(q - p) * (dist / Mathf.Max(d, 1e-4f));
+                dist -= d;
+                p = q;
+            }
+            return _path[_path.Count - 1];
+        }
+
+        /// <summary>Width of a part across the grippers (world m): its middle extent, within the grippers' span.</summary>
+        float PartWidth(int itemId) => Mathf.Clamp(ItemDatabase.Extents(g.world.DefOf(itemId))[1], 0.015f, 0.14f);
 
         /// <summary>Puts the carried models in the carry slots. While the claws reach down (the moment of
         /// a pick-up, setting a load down on the floor) the parts ride with the claws (the model's grip
@@ -1585,7 +1765,7 @@ namespace WorkshopWreckage
         void PlaceCarried()
         {
             int k = 0;
-            var grip = _armReach > 0.001f || _aimW > 0.001f ? _model.GripPoint : null;
+            var grip = _model.GripPoint;
             foreach (var itemId in carried)
                 if (_carryModels.TryGetValue(itemId, out var go)) PlaceCarriedModel(go, k++, carried.Count, grip, itemId);
         }
@@ -1599,8 +1779,13 @@ namespace WorkshopWreckage
             if (go.transform.parent != parent) go.transform.SetParent(parent, false);
             go.transform.localPosition = local + new Vector3(0, 0.05f * _armLift, 0.06f * _armLift);
             go.transform.localRotation = itemId >= 0 && g.world.DefOf(itemId).restMode == RestMode.Long ? Quaternion.Euler(0, 0, 90) : Quaternion.identity;
-            float w = Mathf.Max(Mathf.SmoothStep(0, 1, _armReach), Mathf.SmoothStep(0, 1, _aimW));
-            if (grip.HasValue) go.transform.position = Vector3.Lerp(go.transform.position, grip.Value, w);
+            // models with grippers hold the load between them all the time (it moves with the hands)
+            float w = Mathf.Max(Mathf.SmoothStep(0, 1, _armReach), Mathf.Max(Mathf.SmoothStep(0, 1, _aimW), _armHold));
+            if (grip.HasValue && w > 0)
+            {
+                var (_, l0) = _model.CarrySlot(0, n);
+                go.transform.position = Vector3.Lerp(go.transform.position, grip.Value + parent.TransformVector(local - l0), w);
+            }
             if (itemId >= 0 && itemId == _gripItem && _gripBlend < 1)
             {
                 float b = Mathf.SmoothStep(0, 1, _gripBlend);
@@ -1616,7 +1801,7 @@ namespace WorkshopWreckage
         public void PoseQA(string name, float t = 0)
         {
             var a = new RobotAnim { dt = 1 };
-            bool part = false;
+            bool part = false, onFloor = false;
             float S(float x) => Mathf.SmoothStep(0, 1, Mathf.Clamp01(x));
             switch (name)
             {
@@ -1640,26 +1825,34 @@ namespace WorkshopWreckage
                     return;
                 }
                 case "bend": a.bend = 1; a.armReach = 1; a.reachHeight = 0.015f; break;
-                case "carry": a.armHold = 1; part = true; break;
-                case "carrywalk": a.armHold = 1; a.gait = 1; a.speed = _walk; a.speed01 = 1; a.phase = Mathf.PI / 2 + t * Mathf.PI * 2; part = true; break;
+                case "carry": a.armHold = 1; a.clawClose = 1; part = true; break;
+                case "carrywalk": a.armHold = 1; a.clawClose = 1; a.gait = 1; a.speed = _walk; a.speed01 = 1; a.phase = Mathf.PI / 2 + t * Mathf.PI * 2; part = true; break;
+                case "clawsopen": a.clawOpen = 1; break;
+                case "clawsclosed": a.clawClose = 1; break;
                 case "pickup":
-                    // approach (a last short step), bend and reach down, grip, lift into the carry pose
-                    if (t < 0.25f) { a.gait = 0.5f; a.speed = 0.12f; a.speed01 = 0.2f; a.phase = t * 24; }
-                    else if (t < 0.55f) { float v = S((t - 0.25f) / 0.3f); a.bend = v; a.armReach = v; a.reachHeight = 0.015f; }
-                    else { float w = (t - 0.55f) / 0.45f; a.bend = 1 - S(w); a.armReach = 1 - w; a.armHold = Mathf.Clamp01(w * 2.5f); a.reachHeight = 0.015f; part = true; }
+                    // approach (a last short step), crouch and reach with the grippers opening, close on the
+                    // part where it lies, lift into the carry pose
+                    part = true; onFloor = t < 0.62f;
+                    if (t < 0.2f) { a.gait = 0.5f; a.speed = 0.12f; a.speed01 = 0.2f; a.phase = t * 24; }
+                    else if (t < 0.5f) { float v = S((t - 0.2f) / 0.3f); a.bend = v; a.armReach = v; a.reachHeight = 0.015f; a.clawOpen = S((t - 0.2f) / 0.16f); }
+                    else if (t < 0.62f) { float u = S((t - 0.5f) / 0.12f); a.bend = 1; a.armReach = 1; a.reachHeight = 0.015f; a.clawOpen = 1 - u; a.clawClose = u; }
+                    else { float w = (t - 0.62f) / 0.38f; a.bend = 1 - S(w); a.armReach = 1 - w; a.armHold = Mathf.Clamp01(w * 2.5f); a.reachHeight = 0.015f; a.clawClose = 1; }
                     break;
                 case "deposit":
-                    // a low drawer in front (0.18 m up): raise the part to it, let go, arms back down
+                    // a low drawer in front (0.18 m up): raise the part to it, open the grippers, arms back down
                     a.armHold = 1; a.aim = transform.position + transform.forward * 0.2f + Vector3.up * 0.18f;
                     a.aimWeight = t < 0.5f ? S(t / 0.4f) : 1 - S((t - 0.5f) / 0.5f); part = t < 0.5f;
+                    a.clawClose = t < 0.4f ? 1 : 1 - S((t - 0.4f) / 0.1f); a.clawOpen = t < 0.4f ? 0 : t < 0.5f ? S((t - 0.4f) / 0.1f) : 1 - S((t - 0.5f) / 0.5f);
                     break;
                 case "stage":
-                    // setting a part down on the floor in front, letting go, standing up
+                    // setting a part down on the floor in front, opening the grippers, standing up
                     a.armHold = 1; a.reachHeight = 0.015f;
-                    if (t < 0.55f) { a.bend = S(t / 0.5f); a.armReach = a.bend; part = true; }
-                    else { a.bend = 1 - S((t - 0.55f) / 0.45f); a.armReach = a.bend; a.armHold = 0; }
+                    if (t < 0.45f) { a.bend = S(t / 0.45f); a.armReach = a.bend; a.clawClose = 1; part = true; }
+                    else if (t < 0.55f) { float u = S((t - 0.45f) / 0.1f); a.bend = 1; a.armReach = 1; a.clawClose = 1 - u; a.clawOpen = u; part = true; onFloor = true; }
+                    else { a.bend = 1 - S((t - 0.55f) / 0.45f); a.armReach = a.bend; a.armHold = 0; a.clawOpen = 1 - S((t - 0.55f) / 0.45f); part = true; onFloor = true; }
                     break;
             }
+            if (part || a.armHold > 0) a.gripWidth = 0.05f;
             _armReach = a.armReach; _armLift = a.armLift; _armHold = a.armHold; _aimW = a.aimWeight; _aimPoint = a.aim;
             _model.Animate(a);
             if (part && _qaPart == null)
@@ -1673,7 +1866,13 @@ namespace WorkshopWreckage
             if (_qaPart != null)
             {
                 _qaPart.SetActive(part);
-                if (part) PlaceCarriedModel(_qaPart, 0, 1, _armReach > 0.001f ? _model.GripPoint : null);
+                if (part) PlaceCarriedModel(_qaPart, 0, 1, _model.GripPoint);
+                if (part && onFloor)
+                {
+                    // the part lies on the floor where the claws come down (it is only lifted once gripped)
+                    var fwd = Flat(transform.forward).normalized;
+                    _qaPart.transform.SetPositionAndRotation(transform.position + fwd * (_model.GripReach(0.015f) ?? 0.1f) + Vector3.up * 0.015f, Quaternion.identity);
+                }
             }
         }
 

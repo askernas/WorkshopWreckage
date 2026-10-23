@@ -15,13 +15,13 @@ namespace WorkshopWreckage
     /// two-segment fingers on hinge hubs with flush dark grip pads; a dark pelvis with geared hips;
     /// thighs, a knee axle with side hubs and the red front knee disc; shins with exposed pistons
     /// and springs behind; ankle hubs and long boots with a sloped toe and toe grille, red heel cap,
-    /// side plates and a steel-and-rubber sole. Retrobot builds its own head and arms; the shared
-    /// family kit (DetailedHead / DetailedArm) is left to the other robots.
+    /// side plates and a steel-and-rubber sole. Retrobot is the reference model of the family component
+    /// catalogue (RobotFamilyKit: FamilyHead, FamilyArm with the articulated gripper, hardware, finish).
     /// Parts: head, torso, left arm, right arm, leg assembly.</summary>
     public class RetrobotModel : RobotModel
     {
         public const string Head = "head", Torso = "torso", ArmL = "left arm", ArmR = "right arm", Legs = "leg assembly";
-        public Transform upper, upperGeo, armL, armR, legL, legR, kneeL, kneeR, ankleL, ankleR, clawTipL, clawTipR;
+        public Transform upper, upperGeo, armL, armR, legL, legR, kneeL, kneeR, ankleL, ankleR;
         public override float ModelHeight => 1.06f;
         static Material Yellow => ToyYellow;
         static Material YellowDeep => ToyYellowDeep;
@@ -38,54 +38,19 @@ namespace WorkshopWreckage
         /// <summary>QA (--retrolook=legacy): the finish before the 2026-10-23 polish pass, for
         /// side-by-side comparisons and as a fallback.</summary>
         public static bool LegacyLook;
-        static Dictionary<Material, Material> _skin;
 
-        /// <summary>The polished finish (RobotFinish): enamel with construction-led wear, and the
-        /// bare metals told apart. Retrobot only; the other robots keep the shared kit materials.</summary>
-        protected override Material Skin(Material m)
-        {
-            if (LegacyLook || m == null) return m;
-            _skin ??= new Dictionary<Material, Material>
-            {
-                [ToyYellow] = RobotFinish.Paint(YellowC, 1f, 0.55f, 0.55f, 0.85f, 0.18f, 0.45f, 0.1f),
-                [ToyYellowDeep] = RobotFinish.Paint(YellowDeepC, 1f, 0.55f, 0.55f, 0.85f, 0.25f, 0.35f, 0.1f),
-                [ToyRed] = RobotFinish.Paint(RedC, 1f, 0.5f, 0.5f, 0.8f, 0.2f, 0.2f, 0.08f),
-                [Gunmetal] = RobotFinish.JointSteel,
-                [Dark] = RobotFinish.Blackened,
-                [Brass] = RobotFinish.BearingBrass,
-                [Rubber] = RobotFinish.Rubber,
-                [StainMat] = RobotFinish.OilStain,
-            };
-            return _skin.TryGetValue(m, out var s) ? s : m;
-        }
+        /// <summary>The family finish (RobotFamilyKit.FamilySkin); the legacy look keeps the kit materials.</summary>
+        protected override Material Skin(Material m) => LegacyLook ? m : FamilySkin(m);
 
         protected override Material BoltSkin(Material m) => !LegacyLook && m == RobotFinish.JointSteel ? RobotFinish.BoltSteel : m;
 
-        static readonly Color YellowC = new(0.8f, 0.55f, 0.12f), YellowDeepC = new(0.68f, 0.45f, 0.09f), RedC = new(0.68f, 0.1f, 0.06f);
+        static Color YellowC => FamilyYellow;
+        static Color RedC => FamilyRed;
         /// <summary>The boots and heel caps: the most worn paint on the robot (scuffed, chipped, dirty).</summary>
         static Material FootPaint => LegacyLook ? Yellow : RobotFinish.Paint(YellowC, 1f, 0.85f, 0.75f, 1f, 0.45f, 0.45f, 0.1f);
         static Material HeelPaint => LegacyLook ? ToyRed : RobotFinish.Paint(RedC, 1f, 0.8f, 0.7f, 1f, 0.7f, 0.2f, 0.08f);
-        static Material Grease => LegacyLook ? StainMat : RobotFinish.Grease;
-
-        /// <summary>A grease run leaking down a vertical face from a joint or fastener.</summary>
-        void GreaseRun(Batch b, string P, Vector3 p, Vector3 n, float len, float w = 0.013f) => RustStreak(b, P, p, n, len, w, Grease);
-
-        /// <summary>A band of dirt along the bottom of a face (normal n, running along u from its
-        /// centre p at the bottom edge): three stacked multiply strips, darkest at the bottom.</summary>
-        void GrimeBand(Batch b, string P, Vector3 p, Vector3 n, Vector3 u, float length, float height)
-        {
-            if (assembling) return;   // no dirt on ghosts
-            var m = M(P, Grease);
-            if (m == null) return;
-            var rot = Quaternion.LookRotation(Batch.G(u.normalized), Batch.G(n.normalized));
-            var up = Vector3.Cross(u.normalized, n.normalized);
-            if (up.y < 0) up = -up;
-            for (int i = 0; i < 3; i++)
-            {
-                float h = height * (1 - i * 0.32f);
-                b.Box(p + up * (h / 2) + n.normalized * 0.0006f, new Vector3(h, 0.001f, length * (1 - i * 0.08f)), m, false, rot);
-            }
-        }
+        protected override Material GreaseMat => LegacyLook ? StainMat : RobotFinish.Grease;
+        protected override Material BrightSteel => Shaft;
 
         /// <summary>Bright steel: shafts, piston rods, hub faces, grille slats (gunmetal in the legacy look).</summary>
         static Material Shaft => LegacyLook ? Gunmetal : RobotFinish.ShaftSteel;
@@ -130,66 +95,9 @@ namespace WorkshopWreckage
         {
             BuildTorso();
             foreach (var (leg, knee, ankle, s) in new[] { (legL, kneeL, ankleL, -1f), (legR, kneeR, ankleR, 1f) }) BuildLeg(leg, knee, ankle, s);
-            foreach (var (arm, s, part) in new[] { (armL, -1f, ArmL), (armR, 1f, ArmR) }) BuildArm(arm, s, part);
-            BuildHead();
-        }
-
-        // ------------------------------------------------------------ mechanical building blocks
-
-        static Vector2[] Hex(float r, float h) => new[] { new Vector2(r, 0), new Vector2(r, h), new Vector2(0, h) };
-        static Vector3 X(float s) => new Vector3(s, 0, 0);
-
-        /// <summary>A hex nut (axis given by the rotation) standing on a surface at c.</summary>
-        static void Nut(Batch b, Vector3 c, Quaternion rot, float r, float h, Material m) => b.Lathe(c, Hex(r, h), m, rot, 6, true);
-
-        /// <summary>A bearing hub on a face pointing along X (side s): a bright steel face plate, a
-        /// ring of bolts, a centre nut with a brass cap.</summary>
-        void Hub(Batch b, string P, Vector3 c, float s, float r, int bolts, float boltR = 0.0055f)
-        {
-            float h = r * 0.26f;
-            b.Lathe(c, Disc(r, h, r * 0.1f), M(P, Shaft), SideRot(s), 24);
-            var face = c + X(s * h);
-            for (int i = 0; i < bolts; i++)
-            {
-                float a = (i + 0.5f) * Mathf.PI * 2 / bolts;
-                Bolt(b, face + new Vector3(0, Mathf.Cos(a), Mathf.Sin(a)) * (r * 0.7f), X(s), boltR, M(P, Gunmetal));
-            }
-            Nut(b, face, SideRot(s), r * 0.32f, r * 0.18f, M(P, Gunmetal));
-            b.Lathe(face + X(s * r * 0.18f), Dome(r * 0.17f, r * 0.12f), M(P, Brass), SideRot(s), 10);
-        }
-
-        /// <summary>A spur gear on an axis along X: a dark steel disc ringed by chamfered teeth.</summary>
-        void Gear(Batch b, string P, Vector3 c, float r, float w, int teeth)
-        {
-            var m = M(P, Gunmetal);
-            b.Lathe(c - X(w / 2), Disc(r * 0.88f, w, r * 0.06f), m, RightRot, 24);
-            for (int t = 0; t < teeth; t++)
-            {
-                float a = t * Mathf.PI * 2 / teeth;
-                b.ChamferBox(c + new Vector3(0, Mathf.Sin(a), Mathf.Cos(a)) * (r * 0.9f), new Vector3(w * 0.9f, r * 0.2f, r * 0.24f), r * 0.04f, m, Batch.R(Vector3.right, a));
-            }
-        }
-
-        /// <summary>A framed, recessed grille on a front (zSign -1) or back (+1) face: dark recess, a
-        /// gunmetal frame and bright steel slats (horizontal, or vertical for the mouth).</summary>
-        void FramedGrille(Batch b, string P, Vector3 c, float w, float h, int slats, bool vertical, float zSign)
-        {
-            var o = new Vector3(0, 0, zSign);
-            float f = Mathf.Min(w, h) * 0.14f;
-            b.ChamferBox(c + o * 0.002f, new Vector3(w - f, h - f, 0.006f), 0.001f, M(P, Dark));
-            foreach (var sy in new[] { -1f, 1f })
-            {
-                b.ChamferBox(c + new Vector3(0, sy * (h / 2 - f / 2), 0) + o * 0.005f, new Vector3(w, f, 0.01f), f * 0.3f, M(P, Gunmetal));
-                b.ChamferBox(c + new Vector3(sy * (w / 2 - f / 2), 0, 0) + o * 0.005f, new Vector3(f, h, 0.01f), f * 0.3f, M(P, Gunmetal));
-            }
-            float iw = w - 2 * f, ih = h - 2 * f;
-            for (int k = 0; k < slats; k++)
-            {
-                float t = (k + 0.5f) / slats - 0.5f;
-                var p = c + (vertical ? new Vector3(t * iw, 0, 0) : new Vector3(0, t * ih, 0)) + o * 0.004f;
-                var size = vertical ? new Vector3(iw / slats * 0.42f, ih * 0.92f, 0.006f) : new Vector3(iw * 0.96f, ih / slats * 0.42f, 0.006f);
-                b.ChamferBox(p, size, 0.0015f, M(P, Shaft));
-            }
+            foreach (var (arm, s, part) in new[] { (armL, -1f, ArmL), (armR, 1f, ArmR) })
+                FamilyArm(arm, s, part, new ArmSpec { paint = Yellow, paintDeep = YellowDeep, red = ToyRed, clawScale = 1.08f, twist = 20f });
+            FamilyHead(head, Head, new HeadSpec { w = HeadW, h = HeadH, d = HeadD, eyeX = 0.097f, eyeY = 0.46f, earY = 0.47f, paint = Yellow, beacon = true, antennas = true, mouth = true });
         }
 
         // ------------------------------------------------------------ torso
@@ -248,183 +156,6 @@ namespace WorkshopWreckage
             b.Lathe(new Vector3(0, TorsoTop + 0.008f, 0), Disc(0.048f, 0.008f, 0.002f), M(P, Gunmetal), null, 20);
             b.Lathe(new Vector3(0, TorsoTop + 0.016f, 0), Disc(0.036f, 0.01f, 0.002f), M(P, Shaft), null, 20);
             Done(b, upperGeo);
-        }
-
-        // ------------------------------------------------------------ head
-
-        /// <summary>The beacon lamp: a red cylinder with a rounded top (lathe profile, bottom open).</summary>
-        static Vector2[] BeaconLamp(float r, float h, float round)
-        {
-            var p = new List<Vector2> { new(r, 0), new(r, h - round) };
-            for (int i = 1; i <= 5; i++)
-            {
-                float a = i / 5f * Mathf.PI / 2;
-                p.Add(new Vector2(r - round + Mathf.Cos(a) * round, h - round + Mathf.Sin(a) * round));
-            }
-            p.Add(new Vector2(0, h));
-            return p.ToArray();
-        }
-
-        /// <summary>The head-side housing (the "ear"): a tapered red frustum from a wide base on the
-        /// head to a smaller outer face with a raised rim (lathe profile, axis outwards).</summary>
-        static Vector2[] EarFrustum(float rBase, float rOuter, float depth) => new[]
-        {
-            new Vector2(rBase, 0), new Vector2(rBase, 0.004f), new Vector2(rOuter + 0.004f, depth - 0.008f), new Vector2(rOuter, depth - 0.003f),
-            new Vector2(rOuter - 0.004f, depth), new Vector2(rOuter - 0.01f, depth), new Vector2(rOuter - 0.012f, depth - 0.004f), new Vector2(0, depth - 0.004f),
-        };
-
-        void BuildHead()
-        {
-            var b = new Batch();
-            string P = Head;
-            float W = HeadW, H = HeadH, D = HeadD, front = -D / 2;
-            float z0 = front - 0.01f;   // the face plate's front surface
-            // shell: a rounded pressed-steel box (softer corners, as on the sheet) with a raised face plate
-            b.RoundedBox(new Vector3(0, H / 2, 0), new Vector3(W, H, D), 0.042f, M(P, Yellow), 3);
-            b.RoundedBox(new Vector3(0, H / 2, front - 0.004f), new Vector3(W - 0.042f, H - 0.042f, 0.012f), 0.012f, M(P, Yellow), 2);
-            // face fasteners: a row along the top and one in each lower corner, clear of the mouth
-            for (int k = 0; k < 6; k++) Bolt(b, new Vector3(-0.145f + k * 0.058f, H - 0.034f, z0), new Vector3(0, 0, -1), 0.0062f, M(P, Gunmetal));
-            foreach (var x in new[] { -W / 2 + 0.036f, W / 2 - 0.036f }) Bolt(b, new Vector3(x, 0.036f, z0), new Vector3(0, 0, -1), 0.0062f, M(P, Gunmetal));
-            // eyes: a thick dark steel housing, a warm brass bezel, a polished reflector cone narrowing into
-            // the head and a small lamp set deep inside it
-            float eyeY = H * 0.46f, eyeX = 0.097f;
-            foreach (var x in new[] { -eyeX, eyeX })
-            {
-                b.Lathe(new Vector3(x, eyeY, z0 + 0.01f), Ring(0.07f, 0.05f, 0.044f), M(P, Gunmetal), FwdRot, 32);
-                b.Lathe(new Vector3(x, eyeY, z0 - 0.008f), Ring(0.053f, 0.042f, 0.014f), M(P, Brass), FwdRot, 32);
-                b.Lathe(new Vector3(x, eyeY, z0 - 0.001f), new[] { new Vector2(0.026f, 0), new Vector2(0.043f, 0.02f), new Vector2(0.043f, 0.022f) }, M(P, Brass), FwdRot, 28, true);   // reflector
-                b.Lathe(new Vector3(x, eyeY, z0 + 0.001f), Disc(0.03f, 0.003f, 0.001f), M(P, Dark), FwdRot, 20);   // lamp socket
-            }
-            // mouth: a framed grille with vertical slats, low and centred
-            FramedGrille(b, P, new Vector3(0, 0.04f, z0), 0.104f, 0.04f, 7, true, -1);
-            // head-side housings: steel flange, red frustum, raised rim, bolted steel bearing plate;
-            // the antenna rises from a collar on top of each housing
-            float earY = H * 0.47f;
-            foreach (var s in new[] { -1f, 1f })
-            {
-                float x0 = s * (W / 2 - 0.004f);
-                b.Lathe(new Vector3(x0, earY, 0), Disc(0.086f, 0.01f, 0.003f), M(P, Gunmetal), SideRot(s), 28);
-                b.Lathe(new Vector3(x0 + s * 0.01f, earY, 0), EarFrustum(0.075f, 0.058f, 0.056f), M(P, ToyRed), SideRot(s), 28, true);
-                Hub(b, P, new Vector3(x0 + s * 0.062f, earY, 0), s, 0.036f, 6, 0.005f);
-                var collar = new Vector3(s * (W / 2 + 0.036f), earY + 0.064f, 0);
-                b.Lathe(collar - new Vector3(0, 0.006f, 0), Disc(0.016f, 0.02f, 0.003f), M(P, Gunmetal), null, 14);
-                b.Lathe(collar + new Vector3(0, 0.014f, 0), Disc(0.012f, 0.008f, 0.002f), M(P, Shaft), null, 12);
-                float top = H + 0.07f;
-                b.Lathe(collar + new Vector3(0, 0.022f, 0), Disc(0.0065f, top - collar.y - 0.022f - 0.02f, 0.001f), M(P, Gunmetal), null, 10);
-                b.Lathe(new Vector3(collar.x, top - 0.029f, 0), Ball(0.029f), M(P, ToyRed), null, 18);
-            }
-            foreach (var s in new[] { -1f, 1f })
-                foreach (var z in new[] { -0.03f, 0.025f })
-                    GreaseRun(b, P, new Vector3(s * W / 2, earY - 0.08f, z), X(s), 0.05f, 0.012f);
-            // beacon: a dark mounting base and a steel collar; the red lamp itself is separate (it lights up)
-            b.Lathe(new Vector3(0, H - 0.004f, 0), Disc(0.064f, 0.026f, 0.005f), M(P, Gunmetal), null, 28);
-            b.Lathe(new Vector3(0, H + 0.022f, 0), Disc(0.055f, 0.008f, 0.002f), M(P, Shaft), null, 28);
-            // back vent and the bolted plates on the top, sides and back
-            FramedGrille(b, P, new Vector3(0, H * 0.56f, -front + 0.001f), 0.2f, 0.095f, 7, false, 1);
-            var hc = new Vector3(0, H / 2, 0);
-            foreach (var n in new[] { Vector3.left, Vector3.right, Vector3.up, new Vector3(0, 0, 1) }) PanelFrame(b, P, hc, new Vector3(W, H, D), n, 0.054f);
-            Done(b, head);
-
-            if (Has(Head))
-            {
-                foreach (var x in new[] { -eyeX, eyeX })
-                    eyes.Add(Separate(head, "G_eye", lb => lb.Lathe(new Vector3(x, eyeY, z0 - 0.002f), Dome(0.027f, 0.012f, 8), EyeOffMat, FwdRot, 24)));
-                beacons.Add(Separate(head, "G_beacon", lb => lb.Lathe(new Vector3(0, H + 0.03f, 0), BeaconLamp(0.05f, 0.07f, 0.02f), BeaconOffMat, null, 28)));
-            }
-        }
-
-        // ------------------------------------------------------------ arms
-
-        /// <summary>One arm from its shoulder pivot (side s). On the arm pivot: the shoulder drum
-        /// (bearing ring, yellow drum, red cap, bolted hub) turning on the torso's collar, the upper
-        /// arm and the elbow clevis with its pin. On the elbow pivot: the geared knuckle, the forearm,
-        /// the wrist housing and the claw (twisted round the forearm so it opens towards the front and
-        /// the side): two faceted red fingers on hinge hubs, with flush dark grip pads.</summary>
-        void BuildArm(Transform arm, float s, string P)
-        {
-            var b = new Batch();
-            // shoulder drum, centred on the pivot axis (X), so pitching the arm never moves it
-            b.Lathe(X(-s * 0.05f), Disc(0.045f, 0.012f, 0.003f), M(P, Gunmetal), SideRot(s), 24);
-            b.Lathe(X(-s * 0.038f), Disc(0.066f, 0.06f, 0.012f), M(P, Yellow), SideRot(s), 32);
-            b.Lathe(X(s * 0.022f), Disc(0.064f, 0.02f, 0.01f), M(P, ToyRed), SideRot(s), 32);
-            Hub(b, P, X(s * 0.042f), s, 0.04f, 6);
-            // upper arm: a chamfered block under the drum, with a darker band
-            b.ChamferBox(new Vector3(0, -0.103f, 0), new Vector3(0.09f, 0.08f, 0.092f), 0.014f, M(P, Yellow), null, true);
-            b.ChamferBox(new Vector3(0, -0.074f, 0), new Vector3(0.096f, 0.014f, 0.098f), 0.004f, M(P, YellowDeep), null, true);
-            Bolt(b, new Vector3(0, -0.11f, -0.046f), new Vector3(0, 0, -1), 0.006f, M(P, Gunmetal));
-            // elbow clevis: two steel plates with rounded lugs either side of the knuckle, the pin through
-            const float EY = -0.18f;
-            foreach (var px in new[] { -0.04f, 0.04f })
-            {
-                b.ChamferBox(new Vector3(px, -0.155f, 0), new Vector3(0.012f, 0.05f, 0.056f), 0.004f, M(P, Gunmetal));
-                b.Lathe(new Vector3(px - 0.006f, EY, 0), Disc(0.028f, 0.012f, 0.003f), M(P, Gunmetal), RightRot, 20);
-            }
-            b.Lathe(new Vector3(-0.058f, EY, 0), Disc(0.009f, 0.116f, 0.002f), M(P, Shaft), RightRot, 12);   // the pin
-            foreach (var px in new[] { -1f, 1f }) Hub(b, P, new Vector3(px * 0.046f, EY, 0), px, 0.022f, 0);
-            Done(b, arm);
-
-            // ---- on the elbow pivot (coordinates relative to the elbow axle)
-            var elbow = Elbow(arm, new Vector3(0, EY, 0), s);
-            // a marker between the finger tips (no geometry): grip point and floor guard for the claw
-            var tip = elbow.Find("ClawTip") ?? Pivot("ClawTip", elbow, Batch.G(new Vector3(0, -0.392f, 0)));
-            if (s < 0) clawTipL = tip; else clawTipR = tip;
-            var f = new Batch();
-            Gear(f, P, Vector3.zero, 0.03f, 0.062f, 12);   // the knuckle between the clevis plates
-            // forearm: a narrow neck between the plates, the chamfered forearm, an access plate, a cuff
-            f.ChamferBox(new Vector3(0, -0.032f, 0), new Vector3(0.058f, 0.04f, 0.058f), 0.008f, M(P, Gunmetal));
-            f.ChamferBox(new Vector3(0, -0.094f, 0), new Vector3(0.1f, 0.104f, 0.1f), 0.016f, M(P, Yellow), null, true);
-            f.ChamferBox(new Vector3(s * 0.052f, -0.092f, 0), new Vector3(0.006f, 0.064f, 0.068f), 0.003f, M(P, YellowDeep), null, true);
-            foreach (var z in new[] { -0.022f, 0.022f }) Bolt(f, new Vector3(s * 0.055f, -0.092f, z), X(s), 0.0055f, M(P, Gunmetal));
-            foreach (var x in new[] { -0.024f, 0.024f }) Bolt(f, new Vector3(x, -0.072f, -0.05f), new Vector3(0, 0, -1), 0.0055f, M(P, Gunmetal));
-            f.ChamferBox(new Vector3(0, -0.15f, 0), new Vector3(0.104f, 0.016f, 0.104f), 0.004f, M(P, Gunmetal));
-            GreaseRun(f, P, new Vector3(s * 0.05f, -0.045f, 0.025f), X(s), 0.06f);
-            GreaseRun(f, P, new Vector3(0.015f, -0.045f, -0.05f), new Vector3(0, 0, -1), 0.045f);
-            // wrist housing with steel hubs
-            var wrist = new Vector3(0, -0.172f, 0);
-            f.Lathe(wrist - X(0.038f), Disc(0.028f, 0.076f, 0.004f), M(P, Gunmetal), RightRot, 18);
-            foreach (var px in new[] { -1f, 1f }) Hub(f, P, wrist + X(px * 0.038f), px, 0.02f, 0);
-            // claw, twisted round the forearm and scaled about the wrist
-            const float cs = 1.08f;
-            var tw = Quaternion.AngleAxis(s * 20f, Vector3.up);       // Godot-space points
-            var twU = Quaternion.AngleAxis(-s * 20f, Vector3.up);     // the same twist for Unity-space rotations
-            Vector3 C(float x, float y, float z) => wrist + tw * (new Vector3(x, y, z) * cs);
-            Vector3 side = tw * Vector3.right;
-            f.ChamferBox(C(0, -0.032f, 0), new Vector3(0.094f, 0.034f, 0.062f) * cs, 0.009f * cs, M(P, Gunmetal), twU);   // palm
-            foreach (var fs in new[] { -1f, 1f })
-            {
-                // the finger's spine: a short thick proximal segment out to the knuckle, then a long distal
-                // segment that curves down and hooks in (C-shaped grip), tapering towards the tip
-                var path = new[] { new Vector2(0.034f, -0.044f), new Vector2(0.074f, -0.078f), new Vector2(0.094f, -0.128f), new Vector2(0.08f, -0.174f), new Vector2(0.04f, -0.2f) };
-                float[] wd = { 0.044f, 0.04f, 0.035f, 0.028f, 0.019f }, dp = { 0.056f, 0.054f, 0.049f, 0.043f, 0.036f };
-                Vector3 V3(Vector2 p) => C(fs * p.x, p.y, 0);
-                for (int i = 0; i < path.Length - 1; i++)
-                {
-                    // the distal pieces overlap a little at the bends, so the finger reads as one curved hook
-                    var d = (path[i + 1] - path[i]).normalized;
-                    var a0 = i >= 2 ? path[i] - d * (wd[i] * 0.35f) : path[i];
-                    var a1 = i >= 1 && i < path.Length - 2 ? path[i + 1] + d * (wd[i + 1] * 0.35f) : path[i + 1];
-                    f.Loft(V3(a0), V3(a1), new Vector2(wd[i], dp[i]) * cs, new Vector2(wd[i + 1], dp[i + 1]) * cs, 0.011f * cs, (i == path.Length - 2 ? 0.006f : 0.01f) * cs, M(P, ToyRed), side);
-                }
-                // a continuous, flush matte grip strip along the inside of the distal segment
-                for (int i = 1; i < path.Length - 1; i++)
-                {
-                    var a = new Vector2(fs * path[i].x, path[i].y); var c = new Vector2(fs * path[i + 1].x, path[i + 1].y);
-                    var dir = (c - a).normalized;
-                    var inward = new Vector2(dir.y, -dir.x);
-                    if (Vector2.Dot(inward, new Vector2(-fs, -0.3f)) < 0) inward = -inward;
-                    var a2 = a + inward * (wd[i] / 2 + 0.0008f) + (i == 1 ? dir * 0.01f : Vector2.zero);
-                    var c2 = c + inward * (wd[i + 1] / 2 + 0.0008f) - (i == path.Length - 2 ? dir * 0.008f : Vector2.zero);
-                    f.Loft(C(a2.x, a2.y, 0), C(c2.x, c2.y, 0), new Vector2(0.0035f, dp[i] * 0.62f) * cs, new Vector2(0.0035f, dp[i + 1] * 0.62f) * cs, 0.0008f, 0.0008f, M(P, Rubber), side);
-                }
-                // hinge hubs at the root and the knuckle (axis across the claw)
-                foreach (var (p, r) in new[] { (path[0], 0.018f), (path[1], 0.019f) })
-                {
-                    f.Lathe(V3(p) + tw * new Vector3(0, 0, -0.033f * cs), Disc(r * cs, 0.066f * cs, 0.003f), M(P, Shaft), twU * BackRot, 18);
-                    foreach (var zs in new[] { -1f, 1f })
-                        f.Lathe(V3(p) + tw * new Vector3(0, 0, zs * 0.033f * cs), Dome(r * 0.45f * cs, 0.006f * cs), M(P, Brass), twU * (zs < 0 ? FwdRot : BackRot), 10);
-                }
-            }
-            Done(f, elbow);
         }
 
         // ------------------------------------------------------------ legs
@@ -534,6 +265,7 @@ namespace WorkshopWreckage
             Animate(new RobotAnim { dt = 0, armHold = 1, aimWeight = 1, aim = transform.position + FlatForward * 0.15f + Vector3.up * aimHeight });
             var gp = GripPoint.Value - transform.position;
             RestorePose();
+            if (Mathf.Abs(gp.y - aimHeight) > 0.012f) return -1f;   // the arms can't raise the claws to that height
             return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
         }
 
@@ -630,6 +362,7 @@ namespace WorkshopWreckage
             float hold = Mathf.Max(a.armHold, a.armReach);
             float empty = 1 - hold;
             float pitch = ArmPitch(a.armHold, a.armLift, a.armReach);
+            _armPitch = pitch;
             float inward = 10 * hold;
             armL.localRotation = Quaternion.Euler(pitch - armSwing * empty, 0, inward - Flare * empty);
             armR.localRotation = Quaternion.Euler(pitch + armSwing * empty, 0, -inward + Flare * empty);
@@ -641,6 +374,10 @@ namespace WorkshopWreckage
             armL.localRotation = Quaternion.Euler(pitch, 0, inward);
             armR.localRotation = Quaternion.Euler(pitch, 0, -inward);
         }
+
+        float _armPitch, _gripPitch = float.NaN, _gripWant, _gripInward;
+        /// <summary>Gripper finger travel (deg) fully open and fully closed from the modelled pose.</summary>
+        const float ClawOpenDeg = 22f, ClawCloseDeg = 8f;
 
         float LowestClaw() => Mathf.Min(clawTipL.position.y, clawTipR.position.y);
 
@@ -725,8 +462,32 @@ namespace WorkshopWreckage
                     SetArmPitch(m, inward);
                     if (GripPoint.Value.y < a.aim.y) hi = m; else lo = m;
                 }
-                SetArmPitch(Mathf.Lerp(basePitch, (lo + hi) * 0.5f, Ease(a.aimWeight)), inward);
+                _armPitch = Mathf.Lerp(basePitch, (lo + hi) * 0.5f, Ease(a.aimWeight));
+                SetArmPitch(_armPitch, inward);
             }
+            if (guard && a.gripWidth > 0)
+            {
+                // the grip: the arms close in until the two grippers rest against the part's sides
+                float w = Ease(Mathf.Max(a.armHold, Mathf.Max(a.armReach, a.aimWeight)));
+                if (w > 0.001f)
+                {
+                    // solved once per arm pitch and part width (carrying keeps both constant): no per-frame search
+                    float want = a.gripWidth + 0.006f;
+                    if (Mathf.Abs(_gripPitch - _armPitch) > 0.05f || Mathf.Abs(_gripWant - want) > 1e-4f)
+                    {
+                        float lo = -10f, hi = 35f;
+                        for (int it = 0; it < 7; it++)
+                        {
+                            float m = (lo + hi) * 0.5f;
+                            SetArmPitch(_armPitch, m);
+                            if (Vector3.Distance(clawTipL.position, clawTipR.position) > want) lo = m; else hi = m;
+                        }
+                        _gripPitch = _armPitch; _gripWant = want; _gripInward = (lo + hi) * 0.5f;
+                    }
+                    SetArmPitch(_armPitch, Mathf.Lerp(10 * Mathf.Max(a.armHold, a.armReach), _gripInward, w));
+                }
+            }
+            PoseClaws(ClawOpenDeg * a.clawOpen - ClawCloseDeg * a.clawClose);
             if (a.gesture > 0)
             {
                 // a cheerful wave with the right arm, head tilted
@@ -737,7 +498,18 @@ namespace WorkshopWreckage
                 head.localRotation *= Quaternion.Euler(0, 0, 12 * w);
                 return;
             }
-            LookHead(a);
+            if (a.lookWeight > 0 || a.dt <= 0) { LookHead(a); return; }
+            // walking: the head turns towards where he is about to go (so a turn is announced before the body
+            // follows) and, now and then, slowly scans the floor around him (+-7 deg, one sweep every ~11 s)
+            float yaw = 0;
+            if (a.lookAheadWeight > 0)
+            {
+                var to = a.lookAhead - transform.position; to.y = 0;
+                if (to.sqrMagnitude > 1e-4f) yaw = Mathf.Clamp(Vector3.SignedAngle(FlatForward, to, Vector3.up), -35f, 35f) * a.lookAheadWeight;
+            }
+            yaw += Mathf.Sin(a.time * 0.57f) * 7f * walking * (1 - Mathf.Clamp01(Mathf.Abs(yaw) / 20f));
+            var headWant = Quaternion.Euler(a.bend * 10 + Mathf.Sin(a.phase * 2) * 2.5f * a.gait, yaw, 0);
+            head.localRotation = Quaternion.Slerp(head.localRotation, headWant, a.dt * 3.5f);
         }
     }
 }

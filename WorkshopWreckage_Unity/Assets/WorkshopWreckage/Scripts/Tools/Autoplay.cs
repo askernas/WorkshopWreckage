@@ -944,6 +944,12 @@ namespace WorkshopWreckage
             Check("Retrobot reaches into the drawers he fills", rb.drawerStoreCount == 0 || rb.maxDrawerGapInRange <= 0.05f, rb.drawerStoreCount == 0 ? "no drawer store in this run" : $"{rb.drawerStoreCount} drawer stores, largest claw-to-drawer gap {rb.maxDrawerGapInRange * 100:0.0} cm within his arms' range (overall {rb.maxDrawerGap * 100:0.0} cm; all stores {rb.storeCount}, largest {rb.maxStoreGap * 100:0.0} cm incl. deep shelf containers)");
             Check("Retrobot sets staged parts down where his claws are", rb.stageCount == 0 || rb.maxStageGapInRange <= 0.05f, rb.stageCount == 0 ? "no staging in this run" : $"{rb.stageCount} staged, largest claw-to-spot gap {rb.maxStageGapInRange * 100:0.0} cm within his arms' range (overall {rb.maxStageGap * 100:0.0} cm)");
             Check("the final alignment before a grip or release never stalls (bounded at 1.6 s)", rb.maxAlignTime <= 1.7f, $"longest {rb.maxAlignTime:0.00} s");
+            Check("Retrobot's grippers are open when they reach a part", rb.pickCount >= 1 && rb.minOpenAtContact >= 0.95f, $"lowest opening at contact {rb.minOpenAtContact:0.00} over {rb.pickCount} pick-ups");
+            Check("the grippers close on the part before it is lifted", rb.pickCount >= 1 && rb.minClosedAtAttach >= 0.99f, $"lowest closure at the grip {rb.minClosedAtAttach:0.00}");
+            Check("the grippers open before a part is let go (storing or staging)", rb.releases >= 1 && rb.minOpenAtRelease >= 0.99f, $"{rb.releases} releases, lowest opening {rb.minOpenAtRelease:0.00}");
+            Check("a carried part stays in the grippers while he walks and turns", rb.carrySyncMax <= 0.01f, $"largest gap {rb.carrySyncMax * 100:0.0} cm");
+            Check("no part is drawn into the claws from afar: every grip within 5 cm, the rest deferred", rb.maxGripGap <= 0.05f, $"largest grip gap {rb.maxGripGap * 100:0.0} cm, {rb.deferred} parts deferred");
+            Check("every direct store is within his arms' reach (deeper containers are staged instead)", rb.storeCount == 0 || rb.maxStoreGap <= 0.05f, rb.storeCount == 0 ? "no direct store in this run" : $"{rb.storeCount} stored, largest claw-to-target gap {rb.maxStoreGap * 100:0.0} cm");
 
             // size reference: seen from the player's eye height (1.65 m) while he walks
             var sizeShots = new (string name, float dist, float side)[]

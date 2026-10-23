@@ -27,6 +27,11 @@ namespace WorkshopWreckage
         public float reachHeight;  // world height above the feet that the claws reach down to (pick-up target; 0 = the floor)
         public Vector3 aim;        // world point the claws are raised to (deposit target), weighted by aimWeight
         public float aimWeight;    // 0..1
+        public float clawOpen;     // 0..1 grippers open (ready to take or let go of a part)
+        public float clawClose;    // 0..1 grippers closed on a part
+        public float gripWidth;    // width of the part held between the grippers (world m; 0 = none)
+        public Vector3 lookAhead;  // a point ahead on the robot's path (where it is about to go)
+        public float lookAheadWeight;
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and

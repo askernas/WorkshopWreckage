@@ -605,61 +605,85 @@ namespace WorkshopWreckage
             r.SetOperational();
             string dir = args.TryGetValue("watchdir", out var wd) ? wd : Path.Combine(Application.temporaryCachePath, "watch");
             Directory.CreateDirectory(dir);
-            var left = new Dictionary<string, int> { ["pick"] = 2, ["store"] = 2, ["stage"] = 2 };
+            // the situations to film: floor pick-up, pick-up beside a pile, drawer store, other direct store,
+            // staging, walking and turning with a load
+            var left = new Dictionary<string, int> { ["pick"] = 1, ["pickpile"] = 1, ["drawer"] = 1, ["store"] = 1, ["stage"] = 1, ["carrywalk"] = 1, ["carryturn"] = 1 };
             string pending = null;
             Robot.QAMoment = (rb, what) => { if (rb == r && pending == null && left.TryGetValue(what, out var n) && n > 0) pending = what; };
             var cam = player.cam.transform;
-            player.cam.fieldOfView = 40;
-            // the camera for a strip: chosen once (it doesn't swing round with the robot), from the
-            // first of a ring of spots around it, front-side first, with a clear view of it
-            Vector3 PickSpot()
+            player.cam.fieldOfView = 42;
+            int env = 1 << Layers.Env;
+            // what the shot must show: the robot's hands and the interaction target (or just the robot)
+            Vector3 Hands() => r.GetComponentInChildren<RobotModel>()?.GripPoint ?? r.transform.position + Vector3.up * 0.12f;
+            bool Clear(Vector3 from, Vector3 to) => !Physics.Linecast(from, to, env, QueryTriggerInteraction.Ignore);
+            bool Good(Vector3 spot, Vector3 a, Vector3 b) =>
+                !Physics.CheckSphere(spot, 0.08f, env, QueryTriggerInteraction.Ignore) && Clear(spot, a) && Clear(spot, b) && Clear(a + (spot - a).normalized * 0.05f, spot);
+            // a three-quarter view from the robot's front side first, at a short distance; then the
+            // other sides; then a little further out, then higher up (always with line of sight)
+            Vector3? PickSpot(Vector3 focus, Vector3 a, Vector3 b)
+            {
+                var fwd = r.transform.forward; fwd.y = 0; fwd.Normalize();
+                foreach (var dist in new[] { 0.6f, 0.8f, 1.0f })
+                    foreach (var up in new[] { 0.28f, 0.5f })
+                        foreach (var yaw in new[] { 50f, -50f, 80f, -80f, 25f, -25f, 115f, -115f })
+                        {
+                            var spot = focus + Quaternion.AngleAxis(yaw, Vector3.up) * fwd * dist + Vector3.up * up;
+                            if (Good(spot, a, b)) return spot;
+                        }
+                return null;
+            }
+            Vector3 Focus(string what) => what.StartsWith("carry") ? Hands() : Vector3.Lerp(Hands(), r.qaTarget, 0.5f);
+            Vector3 B(string what) => what.StartsWith("carry") ? r.transform.position + Vector3.up * 0.15f : r.qaTarget;
+            void Follow()
             {
                 var t = r.transform;
-                var at = t.position + Vector3.up * 0.14f;
-                foreach (var yaw in new[] { 55f, -55f, 90f, -90f, 25f, -25f, 125f, -125f, 0f, 180f })
-                {
-                    var dir = Quaternion.AngleAxis(yaw, Vector3.up) * t.forward;
-                    var spot = at + dir * 0.75f + Vector3.up * 0.3f;
-                    var toward = (at - spot).normalized;
-                    int env = 1 << Layers.Env;
-                    if (!Physics.CheckSphere(spot, 0.1f, env, QueryTriggerInteraction.Ignore) && !Physics.Linecast(spot, at - toward * 0.2f, env, QueryTriggerInteraction.Ignore)
-                        && !Physics.Linecast(at - toward * 0.2f, spot, env, QueryTriggerInteraction.Ignore)) return spot;
-                }
-                return at + t.forward * 0.75f + Vector3.up * 0.3f;
-            }
-            Vector3 fixedSpot = Vector3.zero;
-            void Follow(bool fixedCam = false)
-            {
-                var at = r.transform.position + Vector3.up * 0.12f;
-                var want = fixedCam ? fixedSpot : r.transform.position + r.transform.right * 0.55f + r.transform.forward * 0.42f + Vector3.up * 0.34f;
+                var at = t.position + Vector3.up * 0.12f;
+                var want = at + t.right * 0.55f + t.forward * 0.42f + Vector3.up * 0.34f;
                 cam.SetPositionAndRotation(want, Quaternion.LookRotation(at - want));
             }
-            float t0 = Time.realtimeSinceStartup;
+            float t0 = Time.realtimeSinceStartup, carryT = 0;
             Time.timeScale = 2;
-            while (left.Values.Any(v => v > 0) && Time.realtimeSinceStartup - t0 < 420)
+            while (left.Values.Any(v => v > 0) && Time.realtimeSinceStartup - t0 < 480)
             {
                 Follow();
+                // walking or turning with a load (sustained for a moment)
+                if (pending == null && r.carried.Count > 0)
+                {
+                    carryT += Time.unscaledDeltaTime;
+                    if (carryT > 0.3f && left["carryturn"] > 0 && Mathf.Abs(r.TurnRateQA) > 60f) pending = "carryturn";
+                    else if (carryT > 0.6f && left["carrywalk"] > 0 && r.SpeedQA > 0.3f) pending = "carrywalk";
+                }
+                else carryT = 0;
                 if (pending != null)
                 {
                     string what = pending;
-                    int n = 2 - left[what];
                     left[what]--;
                     Time.timeScale = 1;
-                    fixedSpot = PickSpot();
+                    var spot = PickSpot(Focus(what), Hands(), B(what));
+                    int reframes = 0;
                     for (int k = 0; k < 34; k++)
                     {
-                        Follow(true);
-                        yield return Capture(Path.Combine(dir, $"{what}{n}_{k:00}.png"), 1);
-                        yield return new WaitForSeconds(0.05f);
+                        // keep the hands and the target in view: re-check every few frames, move if blocked
+                        // a moving robot (carrying): the camera travels with it, re-chosen every few frames
+                        if (spot == null || (what.StartsWith("carry") && k % 3 == 0) || (k % 6 == 0 && !Good(spot.Value, Hands(), B(what))))
+                        {
+                            var again = PickSpot(Focus(what), Hands(), B(what));
+                            if (again.HasValue && spot.HasValue) reframes++;
+                            spot = again ?? spot;
+                        }
+                        if (spot.HasValue) cam.SetPositionAndRotation(spot.Value, Quaternion.LookRotation(Focus(what) - spot.Value));
+                        else Follow();
+                        yield return Capture(Path.Combine(dir, $"{what}_{k:00}.png"), 1);
+                        yield return new WaitForSeconds(what.StartsWith("carry") ? 0.04f : 0.05f);
                     }
-                    Debug.Log($"[robotwatch] captured {what} #{n}");
+                    Debug.Log($"[robotwatch] captured {what} ({(spot.HasValue ? "clear view" : "fallback follow camera")}, {reframes} re-framings)");
                     pending = null;
                     Time.timeScale = 2;
                 }
                 yield return null;
             }
             Time.timeScale = 1;
-            Debug.Log($"[robotwatch] done: pick gap {r.maxGripGap * 100:0.0} cm, store gap {r.maxStoreGap * 100:0.0} cm, stage gap {r.maxStageGap * 100:0.0} cm, longest alignment {r.maxAlignTime:0.00} s; left {string.Join(", ", left.Select(kv => kv.Key + " " + kv.Value))}");
+            Debug.Log($"[robotwatch] done: pick gap {r.maxGripGap * 100:0.0} cm, store gap {r.maxStoreGap * 100:0.0} cm, stage gap {r.maxStageGap * 100:0.0} cm, deferred {r.deferred}, longest alignment {r.maxAlignTime:0.00} s; left {string.Join(", ", left.Where(kv => kv.Value > 0).Select(kv => kv.Key))}");
             Application.Quit();
         }
 
