@@ -120,6 +120,13 @@ namespace WorkshopWreckage
                 Bolt(bk, new Vector3(x * 0.016f, -0.1f, -0.038f), new Vector3(0, 0, -1), 0.0055f, M(part, Gunmetal));
                 bk.RoundedBox(new Vector3(x * 0.036f, -0.165f, 0), new Vector3(0.082f, 0.018f, 0.084f), 0.006f, M(part, Gunmetal), 1, shin);
                 bk.RoundedBox(new Vector3(x * 0.055f, -0.275f, 0), new Vector3(0.08f, 0.2f, 0.082f), 0.022f, M(part, ToyRed), 2, shin);
+                // a second joint mid-shin (red disc, brass caps, gunmetal band), bolts and a hose down the leg, as on the sheet
+                var mid = new Vector3(x * 0.05f, -0.245f, 0);
+                bk.Lathe(mid + new Vector3(0, 0, -0.046f), Disc(0.034f, 0.092f, 0.007f), M(part, ToyRedDeep), BackRot, 18);
+                foreach (var zs in new[] { -1f, 1f }) bk.Lathe(mid + new Vector3(0, 0, zs * 0.046f), Dome(0.016f, 0.01f), M(part, Brass), zs < 0 ? FwdRot : BackRot, 12);
+                bk.RoundedBox(new Vector3(x * 0.062f, -0.31f, 0), new Vector3(0.086f, 0.014f, 0.088f), 0.005f, M(part, Gunmetal), 1, shin);
+                foreach (var y in new[] { -0.2f, -0.34f }) Bolt(bk, new Vector3(x * (0.055f + (y + 0.275f) * -0.16f), y, -0.042f), new Vector3(0, 0, -1), 0.0055f, M(part, Gunmetal));
+                Pipe(bk, part, new[] { new Vector3(x * 0.03f, -0.03f, 0.05f), new Vector3(x * 0.05f, -0.15f, 0.052f), new Vector3(x * 0.07f, -0.26f, 0.046f), new Vector3(x * 0.078f, -0.36f, 0.036f) }, 0.006f, Rubber, Brass);
                 bk.Lathe(new Vector3(x * 0.072f, -0.39f, 0), Disc(0.024f, 0.022f, 0.004f), M(part, Gunmetal), null, 12);
                 bk.Lathe(new Vector3(x * 0.072f, -0.43f, 0), Disc(0.056f, 0.034f, 0.008f), M(part, Rubber), null, 22);
                 bk.Lathe(new Vector3(x * 0.072f, -0.4f, 0), Disc(0.046f, 0.007f, 0.002f), M(part, Brass), null, 20);

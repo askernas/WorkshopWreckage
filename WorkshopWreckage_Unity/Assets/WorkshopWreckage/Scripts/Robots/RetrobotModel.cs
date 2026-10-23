@@ -18,7 +18,7 @@ namespace WorkshopWreckage
         public override float ModelHeight => 1.06f;
         static Material Yellow => ToyYellow;
         static Material YellowDeep => ToyYellowDeep;
-        const float HipY = 0.40f, ShoulderY = 0.62f, NeckY = 0.68f, ShoulderX = 0.222f, LegX = 0.14f;
+        const float HipY = 0.40f, ShoulderY = 0.62f, NeckY = 0.68f, ShoulderX = 0.238f, LegX = 0.14f;
         const float Flare = 11f;   // rest pose: the arms hang slightly out from the body, as on the sheet
 
         protected override void CreatePivots()
@@ -70,25 +70,25 @@ namespace WorkshopWreckage
             // pelvis: dark mechanical block with hip axle and brass bolts
             b.RoundedBox(new Vector3(0, 0.415f, 0), new Vector3(0.21f, 0.07f, 0.16f), 0.02f, M(P, Gunmetal), 2);
             b.Lathe(new Vector3(-0.18f, 0.405f, 0), Disc(0.03f, 0.36f, 0.006f), M(P, Dark), RightRot, 12);   // hip axle
-            b.Lathe(new Vector3(-0.2f, ShoulderY, 0), Disc(0.026f, 0.4f, 0.005f), M(P, Gunmetal), RightRot, 12);   // shoulder axle
+            b.Lathe(new Vector3(-0.215f, ShoulderY, 0), Disc(0.026f, 0.43f, 0.005f), M(P, Gunmetal), RightRot, 12);   // shoulder axle
             foreach (var x in new[] { -0.07f, 0f, 0.07f }) b.Rivet(new Vector3(x, 0.42f, -0.08f), new Vector3(0, 0, -1), 0.009f, M(P, Brass));
             // body
-            b.RoundedBox(new Vector3(0, 0.54f, 0), new Vector3(0.27f, 0.25f, 0.22f), 0.035f, M(P, Yellow), 3);
-            b.RoundedBox(new Vector3(0, 0.665f, 0), new Vector3(0.2f, 0.02f, 0.16f), 0.008f, M(P, YellowDeep), 2);   // collar
-            Grille(b, P, new Vector3(0, 0.585f, -0.112f), 0.15f, 0.075f, 6, false, -1);
-            b.RoundedBox(new Vector3(0, 0.468f, -0.113f), new Vector3(0.12f, 0.05f, 0.012f), 0.006f, M(P, YellowDeep), 2);   // lower plate
-            b.RoundedBox(new Vector3(0, 0.468f, -0.12f), new Vector3(0.065f, 0.012f, 0.006f), 0.003f, M(P, Dark), 1);       // slot
-            foreach (var x in new[] { -0.115f, 0.115f })
+            b.RoundedBox(new Vector3(0, 0.54f, 0), new Vector3(0.3f, 0.25f, 0.23f), 0.035f, M(P, Yellow), 3);
+            b.RoundedBox(new Vector3(0, 0.665f, 0), new Vector3(0.22f, 0.02f, 0.17f), 0.008f, M(P, YellowDeep), 2);   // collar
+            Grille(b, P, new Vector3(0, 0.585f, -0.117f), 0.15f, 0.075f, 6, false, -1);
+            b.RoundedBox(new Vector3(0, 0.468f, -0.118f), new Vector3(0.12f, 0.05f, 0.012f), 0.006f, M(P, YellowDeep), 2);   // lower plate
+            b.RoundedBox(new Vector3(0, 0.468f, -0.125f), new Vector3(0.065f, 0.012f, 0.006f), 0.003f, M(P, Dark), 1);       // slot
+            foreach (var x in new[] { -0.128f, 0.128f })
                 foreach (var y in new[] { 0.44f, 0.64f })
-                    Bolt(b, new Vector3(x, y, -0.11f), new Vector3(0, 0, -1), 0.008f, M(P, Gunmetal));
-            foreach (var x in new[] { -0.052f, 0.052f }) Bolt(b, new Vector3(x, 0.468f, -0.119f), new Vector3(0, 0, -1), 0.006f, M(P, Gunmetal));
-            foreach (var n in new[] { Vector3.left, Vector3.right, new Vector3(0, 0, 1) }) PanelFrame(b, P, new Vector3(0, 0.54f, 0), new Vector3(0.27f, 0.25f, 0.22f), n, 0.047f);
-            SeamLine(b, P, new Vector3(-0.1f, 0.625f, -0.111f), new Vector3(0.1f, 0.625f, -0.111f), new Vector3(0, 0, -1));   // the chest plate's top seam
-            Grille(b, P, new Vector3(0, 0.56f, 0.112f), 0.15f, 0.08f, 6, false, 1);   // back vent
+                    Bolt(b, new Vector3(x, y, -0.115f), new Vector3(0, 0, -1), 0.008f, M(P, Gunmetal));
+            foreach (var x in new[] { -0.052f, 0.052f }) Bolt(b, new Vector3(x, 0.468f, -0.124f), new Vector3(0, 0, -1), 0.006f, M(P, Gunmetal));
+            foreach (var n in new[] { Vector3.left, Vector3.right, new Vector3(0, 0, 1) }) PanelFrame(b, P, new Vector3(0, 0.54f, 0), new Vector3(0.3f, 0.25f, 0.23f), n, 0.047f);
+            SeamLine(b, P, new Vector3(-0.11f, 0.625f, -0.116f), new Vector3(0.11f, 0.625f, -0.116f), new Vector3(0, 0, -1));   // the chest plate's top seam
+            Grille(b, P, new Vector3(0, 0.56f, 0.117f), 0.15f, 0.08f, 6, false, 1);   // back vent
             // brass pipes down the back into the pelvis, dark hoses between the legs in front
             foreach (var x in new[] { -0.075f, 0.075f })
             {
-                Pipe(b, P, new[] { new Vector3(x, 0.52f, 0.105f), new Vector3(x, 0.49f, 0.132f), new Vector3(x, 0.44f, 0.118f), new Vector3(x, 0.41f, 0.076f) }, 0.009f, Brass, Gunmetal);
+                Pipe(b, P, new[] { new Vector3(x, 0.462f, 0.108f), new Vector3(x, 0.445f, 0.13f), new Vector3(x, 0.422f, 0.11f), new Vector3(x, 0.405f, 0.076f) }, 0.009f, Brass, Gunmetal);
                 Pipe(b, P, new[] { new Vector3(x, 0.432f, -0.104f), new Vector3(x * 1.15f, 0.405f, -0.122f), new Vector3(x * 0.7f, 0.39f, -0.078f) }, 0.0075f, Rubber, Brass);
             }
             // neck: stacked dark rings

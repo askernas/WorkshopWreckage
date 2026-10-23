@@ -88,9 +88,20 @@ namespace WorkshopWreckage
             b.Lathe(c + n * (r * 0.2f), new[] { new Vector2(r, 0), new Vector2(r, r * 0.5f), new Vector2(r * 0.72f, r * 0.74f), new Vector2(0, r * 0.74f) }, m, rot, 6, true);
         }
 
-        static Material _rust, _rustDark;
-        protected static Material RustMat => _rust ??= EnvMaterials.Plain(new Color(0.5f, 0.23f, 0.08f), 0f, 0.15f);
-        protected static Material RustDarkMat => _rustDark ??= EnvMaterials.Plain(new Color(0.25f, 0.11f, 0.05f), 0f, 0.1f);
+        static Material _stain;
+        /// <summary>A rust stain layer (WWStain: multiplies the lit paint under it).</summary>
+        protected static Material StainMat
+        {
+            get
+            {
+                if (_stain == null)
+                {
+                    _stain = new Material(Resources.Load<Shader>("WWStain")) { name = "RustStain" };
+                    _stain.SetColor("_Color", new Color(0.84f, 0.68f, 0.52f));   // orange-brown rust, not red
+                }
+                return _stain;
+            }
+        }
 
         /// <summary>A stable 0..1 hash of a model-space point: wear lands irregularly, but the same
         /// on every build.</summary>
@@ -100,19 +111,23 @@ namespace WorkshopWreckage
             return h - Mathf.Floor(h);
         }
 
-        /// <summary>A rust streak running down a vertical surface from p (Godot-local): a tapering
-        /// stain, darkest where it bleeds out of the bolt or seam.</summary>
-        protected void RustStreak(Batch b, string part, Vector3 p, Vector3 normal, float length, float w = 0.008f)
+        /// <summary>A rust streak running down a vertical surface from p (Godot-local): four
+        /// overlapping stain strips from the same source, wide and short to narrow and long, so the
+        /// multiplied tint is darkest where it bleeds out of the bolt or seam and fades to its tail.</summary>
+        protected void RustStreak(Batch b, string part, Vector3 p, Vector3 normal, float length, float w = 0.016f)
         {
+            if (assembling) return;   // stains are not drawn on ghosts
             var n = normal.normalized;
-            Material m = M(part, RustMat), md = M(part, RustDarkMat);
+            var m = M(part, StainMat);
             if (m == null || length < 0.012f || Mathf.Abs(n.y) > 0.3f) return;
             var rot = Quaternion.LookRotation(Vector3.down, Batch.G(n));
-            float[] wf = { 0.45f, 0.75f, 1f }, lf = { 1f, 0.6f, 0.28f };
-            for (int i = 0; i < 3; i++)   // three overlapping strips taper the stain; the dark head sits on top
+            float[] wf = { 1.1f, 0.85f, 0.62f, 0.4f }, lf = { 0.22f, 0.5f, 0.78f, 1f };
+            float drift = (Hash(p, 9) - 0.5f) * w * 0.5f;   // tails wander a little
+            var side = Vector3.Cross(Vector3.up, n).normalized;
+            for (int i = 0; i < 4; i++)
             {
                 float len = length * lf[i];
-                b.Box(p + Vector3.down * (len / 2) + n * (0.0005f + 0.0003f * i), new Vector3(w * wf[i], 0.0012f, len), i == 2 ? md : m, false, rot);
+                b.Box(p + Vector3.down * (len / 2) + side * (drift * i / 3f) + n * 0.0006f, new Vector3(w * wf[i], 0.001f, len), m, false, rot);
             }
         }
 
@@ -175,7 +190,7 @@ namespace WorkshopWreckage
                 {
                     var p = Vector3.Lerp(p0, p1, i / (float)cnt);
                     Bolt(b, p, n, boltR, m);
-                    if (wall && Hash(p) < 0.5f) RustStreak(b, part, p + Vector3.down * boltR, n, (p.y - boltR - floorY) * (0.35f + 0.6f * Hash(p, 1)), boltR * 1.7f);
+                    if (wall && Hash(p) < 0.5f) RustStreak(b, part, p, n, (p.y - floorY) * (0.35f + 0.6f * Hash(p, 1)), boltR * 2.6f);
                 }
             }
             if (!wall) return;
@@ -184,7 +199,7 @@ namespace WorkshopWreckage
                 float h = Hash(fc, i + 2);
                 if (h > 0.7f) continue;
                 var p = fc + u * (Mathf.Lerp(-hu, hu, Hash(fc, i + 5)) * 0.85f) + v * hv;
-                RustStreak(b, part, p, n, (p.y - floorY) * (0.25f + 0.5f * h), 0.009f);
+                RustStreak(b, part, p, n, (p.y - floorY) * (0.25f + 0.5f * h), 0.02f);
             }
         }
 
@@ -232,6 +247,7 @@ namespace WorkshopWreckage
             {
                 float t = Mathf.Lerp(-W / 2 + inset + 0.02f, W / 2 - inset - 0.02f, k / (float)(nTop - 1));
                 Bolt(b, new Vector3(t, H - inset, front), new Vector3(0, 0, -1), 0.0075f, M(shell, Gunmetal));
+                if (Hash(new Vector3(t, H, W)) < 0.35f) RustStreak(b, shell, new Vector3(t, H - inset, front), new Vector3(0, 0, -1), H * (0.12f + 0.2f * Hash(new Vector3(t, H, W), 3)), 0.018f);
                 Bolt(b, new Vector3(t, inset, front), new Vector3(0, 0, -1), 0.0075f, M(shell, Gunmetal));
             }
             foreach (var x in new[] { -W / 2 + inset, W / 2 - inset })
