@@ -54,6 +54,50 @@ namespace WorkshopWreckage
             if (collide) colliders.Add((c, size, rot));
         }
 
+        /// <summary>A lofted prism from a to b (Godot-local) whose chamfered-rectangle cross-section
+        /// (size.x across X, size.y across the other side) changes linearly from sizeA to sizeB:
+        /// tapered limbs and plinths. Flat-shaded sides, capped ends.</summary>
+        public void Loft(Vector3 aG, Vector3 bG, Vector2 sizeA, Vector2 sizeB, float chamferA, float chamferB, Material m)
+        {
+            if (m == null) return;   // a missing robot part: nothing is drawn
+            var (v, n, uv, t) = Part(m);
+            var ax = (bG - aG).normalized;
+            var u = Vector3.ProjectOnPlane(Vector3.right, ax);
+            if (u.sqrMagnitude < 1e-4f) u = Vector3.ProjectOnPlane(Vector3.forward, ax);
+            u.Normalize();
+            var w = Vector3.Cross(ax, u).normalized;
+            Vector3[] Section(Vector3 c, Vector2 s, float ch)
+            {
+                float hx = s.x / 2, hz = s.y / 2;
+                ch = Mathf.Min(ch, Mathf.Min(hx, hz) * 0.9f);
+                float[,] p = { { hx - ch, -hz }, { hx, -hz + ch }, { hx, hz - ch }, { hx - ch, hz }, { -hx + ch, hz }, { -hx, hz - ch }, { -hx, -hz + ch }, { -hx + ch, -hz } };
+                var r = new Vector3[8];
+                for (int i = 0; i < 8; i++) r[i] = c + u * p[i, 0] + w * p[i, 1];
+                return r;
+            }
+            var A = Section(aG, sizeA, chamferA);
+            var B = Section(bG, sizeB, chamferB);
+            for (int i = 0; i < 8; i++)
+            {
+                int j = (i + 1) % 8;
+                var fn = Vector3.Cross(A[j] - A[i], B[i] - A[i]).normalized;
+                var fc = (A[i] + A[j] + B[i] + B[j]) / 4;
+                var outward = fc - (aG + ax * Vector3.Dot(fc - aG, ax));
+                if (Vector3.Dot(fn, outward) < 0) fn = -fn;
+                int b = v.Count;
+                foreach (var q in new[] { A[i], A[j], B[j], B[i] }) { v.Add(G(q)); n.Add(G(fn)); uv.Add(Vector2.zero); }
+                Tri(t, v, b, b + 1, b + 2, G(fn));
+                Tri(t, v, b, b + 2, b + 3, G(fn));
+            }
+            foreach (var (ring, c, dir) in new[] { (A, aG, -ax), (B, bG, ax) })
+            {
+                int b = v.Count;
+                v.Add(G(c)); n.Add(G(dir)); uv.Add(Vector2.zero);
+                foreach (var q in ring) { v.Add(G(q)); n.Add(G(dir)); uv.Add(Vector2.zero); }
+                for (int i = 0; i < 8; i++) Tri(t, v, b, b + 1 + i, b + 1 + (i + 1) % 8, G(dir));
+            }
+        }
+
         /// <summary>Adds a triangle, wound so its front face points along `normalHint`
         /// (Unity front faces: Cross(b - a, c - a) along the outward normal).</summary>
         static void Tri(List<int> t, List<Vector3> v, int a, int b, int c, Vector3 normalHint)

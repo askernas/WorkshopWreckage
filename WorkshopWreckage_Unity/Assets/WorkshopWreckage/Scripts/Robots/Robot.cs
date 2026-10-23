@@ -254,7 +254,7 @@ namespace WorkshopWreckage
             if (_model is SortingArmModel sam)
             {
                 sam.SetStanding(true);
-                sam.Pose(90, 72, 96, 12);   // the sheet's hero pose: upper arm up and out, forearm down, claw to the floor
+                sam.Pose(90, 60, 100, 20);   // the sheet's hero pose: upper arm up and out, forearm down, claw to the floor
                 sam.Grip(0.8f);
                 return;
             }
