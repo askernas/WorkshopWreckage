@@ -190,23 +190,7 @@ namespace WorkshopWreckage
             }
             if (s.mouth) FramedGrille(b, P, new Vector3(0, 0.04f, z0), 0.104f, 0.04f, 7, true, -1);
             float earY = H * s.earY;
-            foreach (var sd in new[] { -1f, 1f })
-            {
-                float x0 = sd * (W / 2 - 0.004f);
-                b.Lathe(new Vector3(x0, earY, 0), Disc(0.086f, 0.01f, 0.003f), M(P, Gunmetal), SideRot(sd), 28);
-                b.Lathe(new Vector3(x0 + sd * 0.01f, earY, 0), EarFrustum(0.075f, 0.058f, 0.056f), M(P, ToyRed), SideRot(sd), 28, true);
-                Hub(b, P, new Vector3(x0 + sd * 0.062f, earY, 0), sd, 0.036f, 6, 0.005f);
-                if (!s.antennas) continue;
-                var collar = new Vector3(sd * (W / 2 + 0.036f), earY + 0.064f, 0);
-                b.Lathe(collar - new Vector3(0, 0.006f, 0), Disc(0.016f, 0.02f, 0.003f), M(AP, Gunmetal), null, 14);
-                b.Lathe(collar + new Vector3(0, 0.014f, 0), Disc(0.012f, 0.008f, 0.002f), M(AP, BrightSteel), null, 12);
-                float top = H + 0.07f;
-                b.Lathe(collar + new Vector3(0, 0.022f, 0), Disc(0.0065f, top - collar.y - 0.022f - 0.02f, 0.001f), M(AP, Gunmetal), null, 10);
-                b.Lathe(new Vector3(collar.x, top - 0.029f, 0), Ball(0.029f), M(AP, ToyRed), null, 18);
-            }
-            foreach (var sd in new[] { -1f, 1f })
-                foreach (var z in new[] { -0.03f, 0.025f })
-                    GreaseRun(b, P, new Vector3(sd * W / 2, earY - 0.08f, z), X(sd), 0.05f, 0.012f);
+            FamilyEarsAndAntennas(b, P, AP, AP, W, H, earY, s.antennas);
             if (s.beacon)
             {
                 b.Lathe(new Vector3(0, H - 0.004f, 0), Disc(0.064f, 0.026f, 0.005f), M(P, Gunmetal), null, 28);
@@ -277,6 +261,33 @@ namespace WorkshopWreckage
                 co.localPosition = home + down * (e * 0.5f);
                 tb.localPosition = home + down * (e * 0.5f); tb.localScale = new Vector3(1, e * 0.5f, 1);
             }
+        }
+
+        /// <summary>The family's canonical head-side assembly (the user's canon, 2026-10-24): on each side of a
+        /// head W wide and H tall, at height earY, a dark steel flange, the red truncated-cone ear housing
+        /// with a raised rim and a bolted steel bearing hub, and (with antennas) a collar on top of the housing
+        /// with a steel rod up to a red ball 0.07 above the head; grease runs below. Any head uses it, the
+        /// family head and the older detailed head alike.</summary>
+        protected void FamilyEarsAndAntennas(Batch b, string earPart, string antPartL, string antPartR, float W, float H, float earY, bool antennas = true)
+        {
+            foreach (var sd in new[] { -1f, 1f })
+            {
+                string AP = sd < 0 ? antPartL : antPartR;
+                float x0 = sd * (W / 2 - 0.004f);
+                b.Lathe(new Vector3(x0, earY, 0), Disc(0.086f, 0.01f, 0.003f), M(earPart, Gunmetal), SideRot(sd), 28);
+                b.Lathe(new Vector3(x0 + sd * 0.01f, earY, 0), EarFrustum(0.075f, 0.058f, 0.056f), M(earPart, ToyRed), SideRot(sd), 28, true);
+                Hub(b, earPart, new Vector3(x0 + sd * 0.062f, earY, 0), sd, 0.036f, 6, 0.005f);
+                if (!antennas) continue;
+                var collar = new Vector3(sd * (W / 2 + 0.036f), earY + 0.064f, 0);
+                b.Lathe(collar - new Vector3(0, 0.006f, 0), Disc(0.016f, 0.02f, 0.003f), M(AP, Gunmetal), null, 14);
+                b.Lathe(collar + new Vector3(0, 0.014f, 0), Disc(0.012f, 0.008f, 0.002f), M(AP, BrightSteel), null, 12);
+                float top = H + 0.07f;
+                b.Lathe(collar + new Vector3(0, 0.022f, 0), Disc(0.0065f, top - collar.y - 0.022f - 0.02f, 0.001f), M(AP, Gunmetal), null, 10);
+                b.Lathe(new Vector3(collar.x, top - 0.029f, 0), Ball(0.029f), M(AP, ToyRed), null, 18);
+            }
+            foreach (var sd in new[] { -1f, 1f })
+                foreach (var z in new[] { -0.03f, 0.025f })
+                    GreaseRun(b, earPart, new Vector3(sd * W / 2, earY - 0.08f, z), X(sd), 0.05f, 0.012f);
         }
 
         // ------------------------------------------------------------ the family arm and gripper

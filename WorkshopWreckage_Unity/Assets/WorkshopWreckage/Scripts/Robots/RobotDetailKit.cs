@@ -274,7 +274,7 @@ namespace WorkshopWreckage
         /// slatted vent on the back.</summary>
         protected void DetailedHead(Transform pivot, Material paint, Vector3 size, int eyeCount, float eyeR,
             string shell, string eyeL, string eyeRight, string antL, string antR, string earL, string earR, string beacon,
-            bool antennasBehindEars, bool mouth, float earScale = 1f)
+            bool antennasBehindEars, bool mouth, float earScale = 1f, bool familyEars = false)
         {
             var b = new Batch();
             float W = size.x, H = size.y, D = size.z, front = -D / 2;
@@ -309,7 +309,8 @@ namespace WorkshopWreckage
             if (mouth) Grille(b, shell, new Vector3(0, H * 0.2f, front - 0.001f), W * 0.32f, 0.04f, 7, true, -1);
             // ears
             float earY = H * 0.5f, er = Mathf.Min(0.07f, H * 0.22f) * earScale;
-            foreach (var (s, ear) in new[] { (-1f, earL), (1f, earR) })
+            if (familyEars) FamilyEarsAndAntennas(b, earL, antL, antR, W, H, earY);   // the canonical cone housings and antennas
+            else foreach (var (s, ear) in new[] { (-1f, earL), (1f, earR) })
             {
                 b.Lathe(new Vector3(s * (W / 2 - 0.005f), earY, 0), Disc(er * 0.72f, 0.012f, 0.003f), M(ear, Gunmetal), SideRot(s), 20);
                 b.Lathe(new Vector3(s * (W / 2 + 0.006f), earY, 0), Disc(er, 0.04f, 0.01f), M(ear, ToyRed), SideRot(s), 26);
@@ -317,7 +318,7 @@ namespace WorkshopWreckage
                 b.Lathe(new Vector3(s * (W / 2 + 0.056f), earY, 0), Dome(er * 0.23f, 0.01f), M(ear, Brass), SideRot(s), 12);
             }
             // antennas
-            foreach (var (s, ant) in new[] { (-1f, antL), (1f, antR) })
+            if (!familyEars) foreach (var (s, ant) in new[] { (-1f, antL), (1f, antR) })
             {
                 var basePos = antennasBehindEars ? new Vector3(s * (W / 2 + 0.02f), earY + er * 0.8f, 0.03f) : new Vector3(s * W * 0.36f, H - 0.004f, 0.02f);
                 b.Lathe(basePos, Disc(0.014f, 0.02f, 0.003f), M(ant, Gunmetal), null, 12);
