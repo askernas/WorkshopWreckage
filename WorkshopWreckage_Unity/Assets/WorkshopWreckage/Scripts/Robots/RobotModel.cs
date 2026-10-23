@@ -25,6 +25,8 @@ namespace WorkshopWreckage
         public float time;
         public float gesture;      // 0..1 progress of a personality gesture (0 = none)
         public float reachHeight;  // world height above the feet that the claws reach down to (pick-up target; 0 = the floor)
+        public Vector3 aim;        // world point the claws are raised to (deposit target), weighted by aimWeight
+        public float aimWeight;    // 0..1
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and
@@ -105,6 +107,13 @@ namespace WorkshopWreckage
         /// <summary>How far in front of the robot (world, flat) the claws come down when it bends to
         /// pick something up at the given height, or null (no such pose).</summary>
         public virtual float? GripReach(float reachHeight) => null;
+
+        /// <summary>How far in front of the robot (world, flat) the claws are when raised to a height
+        /// above its feet (aiming at a destination), or null (no aimed deposit).</summary>
+        public virtual float? AimReach(float aimHeight) => null;
+
+        /// <summary>QA: clears any state the animation carries between frames.</summary>
+        public virtual void ResetPose() { }
 
         readonly List<(Transform t, Vector3 p, Quaternion r)> _snapshot = new();
         /// <summary>Remembers every pivot's pose (to measure a trial pose without showing it).</summary>

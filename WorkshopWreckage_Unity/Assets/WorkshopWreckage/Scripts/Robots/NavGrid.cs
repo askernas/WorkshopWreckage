@@ -70,6 +70,8 @@ namespace WorkshopWreckage
         public Vector2Int CellOf(Vector3 p) => new(Mathf.Clamp(Mathf.FloorToInt((p.x - _origin.x) / Cell), 0, w - 1), Mathf.Clamp(Mathf.FloorToInt((p.z - _origin.y) / Cell), 0, h - 1));
         public bool Blocked(Vector2Int c) => c.x < 0 || c.y < 0 || c.x >= w || c.y >= h || _blocked[c.y * w + c.x];
         public bool Walkable(Vector3 p) => !Blocked(CellOf(p));
+        /// <summary>Blocked by parts lying there (piles), not just by furniture and its safety margin.</summary>
+        public bool BlockedByItems(Vector3 p) { var c = CellOf(p); int i = c.y * w + c.x; return _blocked[i] && !_static[i]; }
 
         /// <summary>Nearest walkable point within maxDist of p (null if none).</summary>
         public Vector3? NearestFree(Vector3 p, float maxDist)

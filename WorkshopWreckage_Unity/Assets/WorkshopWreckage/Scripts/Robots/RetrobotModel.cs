@@ -499,11 +499,11 @@ namespace WorkshopWreckage
             Done(ft, ankle);
         }
 
-        // ------------------------------------------------------------ animation (F5)
+        // ------------------------------------------------------------ animation (F5, F6)
 
         /// <summary>Largest stride swing at the hip (deg): short, deliberate steps.</summary>
         const float MaxStride = 24f;
-        /// <summary>Stepping on the spot while turning (deg).</summary>
+        /// <summary>Stepping on the spot while turning (deg of lift-equivalent stride).</summary>
         const float TurnStride = 9f;
 
         /// <summary>Retrobot's cadence follows its speed so that the stride (at most MaxStride at the
@@ -524,85 +524,208 @@ namespace WorkshopWreckage
             Animate(new RobotAnim { dt = 0, bend = 1, armReach = 1, reachHeight = reachHeight });
             var gp = GripPoint.Value - transform.position;
             RestorePose();
-            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), new Vector3(transform.forward.x, 0, transform.forward.z).normalized);
+            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
         }
 
-        /// <summary>One leg: the hip pitch happens in the splayed plane; the knee undoes that pitch
-        /// and the splay, then applies the summed pitch (the shin is upright from the front); the
-        /// ankle keeps the boot flat.</summary>
-        void PoseLeg(Transform leg, Transform knee, Transform ankle, float side, float hip, float kneePitch)
+        public override float? AimReach(float aimHeight)
         {
-            leg.localRotation = Quaternion.Euler(0, 0, side * HipSplay) * Quaternion.Euler(hip, 0, 0);
+            if (clawTipL == null || clawTipR == null) return null;
+            SnapshotPose();
+            Animate(new RobotAnim { dt = 0, armHold = 1, aimWeight = 1, aim = transform.position + FlatForward * 0.15f + Vector3.up * aimHeight });
+            var gp = GripPoint.Value - transform.position;
+            RestorePose();
+            return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
+        }
+
+        Vector3 FlatForward => new Vector3(transform.forward.x, 0, transform.forward.z).normalized;
+
+        public override void ResetPose() { _twistL = _twistR = 0; }
+
+        // the planted boots' headings while turning on the spot (deg, relative to the body)
+        float _twistL, _twistR;
+
+        /// <summary>One leg: the turning twist about the vertical at the hip, then the hip pitch in the
+        /// splayed plane; the knee undoes that pitch and the splay, then applies the summed pitch (the
+        /// shin is upright from the front); the ankle keeps the boot flat.</summary>
+        void PoseLeg(Transform leg, Transform knee, Transform ankle, float side, float hip, float kneePitch, float twist)
+        {
+            leg.localRotation = Quaternion.Euler(0, twist, 0) * Quaternion.Euler(0, 0, side * HipSplay) * Quaternion.Euler(hip, 0, 0);
             knee.localRotation = Quaternion.Euler(-hip, 0, 0) * Quaternion.Euler(0, 0, -side * HipSplay) * Quaternion.Euler(hip + kneePitch, 0, 0);
             ankle.localRotation = Quaternion.Euler(-(hip + kneePitch), 0, 0);
         }
 
+        /// <summary>Thigh length as seen from the side (the splay shortens its drop).</summary>
+        static float ThighSide => ThighL * Mathf.Cos(HipSplay * Mathf.Deg2Rad);
+
         /// <summary>Vertical distance hip to ankle (model units) for a hip and knee pitch.</summary>
-        static float LegDrop(float hip, float knee) =>
-            ThighL * Mathf.Cos(hip * Mathf.Deg2Rad) * Mathf.Cos(HipSplay * Mathf.Deg2Rad) + ShinL * Mathf.Cos((hip + knee) * Mathf.Deg2Rad);
+        static float LegDrop(float hip, float knee) => ThighSide * Mathf.Cos(hip * Mathf.Deg2Rad) + ShinL * Mathf.Cos((hip + knee) * Mathf.Deg2Rad);
+
+        /// <summary>Two-bone leg IK in the side plane: the hip and knee pitch (deg) that put the ankle
+        /// at (z back, y down) from the hip. Used to keep the boots planted while the body shifts and
+        /// crouches. At the rest target it returns the rest pose (hip -10, knee +39).</summary>
+        static void LegIK(float z, float y, out float hip, out float knee)
+        {
+            float l1 = ThighSide, l2 = ShinL;
+            float d = Mathf.Clamp(Mathf.Sqrt(z * z + y * y), Mathf.Abs(l1 - l2) + 1e-4f, l1 + l2 - 1e-4f);
+            float phi = Mathf.Atan2(z, -y);
+            float a = Mathf.Acos(Mathf.Clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+            float b = Mathf.Acos(Mathf.Clamp((l2 * l2 + d * d - l1 * l1) / (2 * l2 * d), -1, 1));
+            hip = (phi - a) * Mathf.Rad2Deg;
+            knee = (phi + b) * Mathf.Rad2Deg - hip;
+        }
+
+        /// <summary>Re-solves a leg so its ankle stays where it was while the body moves (dz back, dy up).</summary>
+        static void KeepAnkle(ref float hip, ref float knee, float dz, float dy)
+        {
+            float h = hip * Mathf.Deg2Rad, s = (hip + knee) * Mathf.Deg2Rad;
+            float z = ThighSide * Mathf.Sin(h) + ShinL * Mathf.Sin(s), y = -(ThighSide * Mathf.Cos(h) + ShinL * Mathf.Cos(s));
+            LegIK(z - dz, y - dy, out hip, out knee);
+        }
+
+        static float Ease(float x) { x = Mathf.Clamp01(x); return x * x * (3 - 2 * x); }
+
+        /// <summary>The arm pitch (deg) for holding, lifting and reaching down. Reaching down overrides
+        /// holding (setting a carried part down lowers the arms; it must not raise them).</summary>
+        static float ArmPitch(float hold, float lift, float reach) => Mathf.Lerp(-68 * hold - 40 * lift - 16 * (1 - hold), -45, reach);
 
         /// <summary>Legs, body, upper body and arms for one frame. `depth` scales the whole pick-up pose
-        /// (leg crouch, lean and reach down together, so the claws only ever move down as it grows); the
-        /// floor guard lowers it so the claws stop at the part instead of going through the floor.</summary>
-        void PoseBody(RobotAnim a, float stride, float walking, float depth)
+        /// (the floor guard lowers it so the claws stop at the part). The pick-up is a small robot
+        /// reaching carefully: first a little weight shift back, then it crouches through the knees with
+        /// the boots planted (leg IK), leans only moderately and reaches with the arms.</summary>
+        void PoseBody(RobotAnim a, float stride, float lift, float walking, float depth)
         {
             float s = Mathf.Sin(a.phase), c = Mathf.Cos(a.phase);
             float bend = a.bend * depth;
-            a.armReach *= depth;
-            // the left leg moves back (planted) while cos > 0 and swings forward (lifted) while cos < 0
-            float lift = Mathf.Clamp01(stride / (MaxStride * 0.6f));
+            a.armReach = Mathf.Min(1, a.armReach * depth);
+            // the pick-up choreography (model units, degrees)
+            float shift = 0.012f * Ease(bend / 0.3f);                 // hips back: counterweight to the reach
+            float crouch = 0.085f * Ease((bend - 0.12f) / 0.88f);     // down through the knees
+            float lean = 20f * Ease((bend - 0.15f) / 0.85f);          // only as much as needed
+            float deeper = Mathf.Clamp01(bend - 1);                   // a part lower than its feet: further, up to twice
+            crouch += 0.1f * deeper;
+            lean += 18f * deeper;
+            shift += 0.012f * deeper;
+            // walking: the stride swing, the lifted boot (knee and hip flex)
             float liftL = Mathf.Max(0, -c) * lift, liftR = Mathf.Max(0, c) * lift;
-            // a pick-up crouches the legs a little; the reach comes from leaning and the arms
-            float hipL = HipRest + stride * s - 18 * bend - 12 * liftL, hipR = HipRest - stride * s - 18 * bend - 12 * liftR;
-            float kL = KneeRest + 36 * bend + 28 * liftL, kR = KneeRest + 36 * bend + 28 * liftR;
-            PoseLeg(legL, kneeL, ankleL, -1, hipL, kL);
-            PoseLeg(legR, kneeR, ankleR, 1, hipR, kR);
-            // the body rides on whichever leg reaches lowest (the planted one): feet stay on the floor
+            float hipL = HipRest + stride * s - 12 * liftL, hipR = HipRest - stride * s - 12 * liftR;
+            float kL = KneeRest + 28 * liftL, kR = KneeRest + 28 * liftR;
+            // the body rides on the planted leg (exact floor contact), then shifts and crouches with the
+            // boots kept where they stand
+            // the F4 stance: hip height as designed without the splay (the splay sinks the hips 1.3 mm)
             float rest = ThighL * Mathf.Cos(HipRest * Mathf.Deg2Rad) + ShinL * Mathf.Cos((HipRest + KneeRest) * Mathf.Deg2Rad);
-            float idle = (1 - walking) * (1 - bend) * (1 - a.armLift);
+            float walkY = Mathf.Max(LegDrop(hipL, kL), LegDrop(hipR, kR)) - rest;
+            if (shift > 1e-5f || crouch > 1e-5f)
+            {
+                KeepAnkle(ref hipL, ref kL, shift, -crouch);
+                KeepAnkle(ref hipR, ref kR, shift, -crouch);
+            }
+            PoseLeg(legL, kneeL, ankleL, -1, hipL, kL, _twistL);
+            PoseLeg(legR, kneeR, ankleR, 1, hipR, kR, _twistR);
+            float idle = (1 - walking) * (1 - bend) * (1 - a.armLift) * (1 - a.aimWeight);
             float breathe = 0.0022f * Mathf.Sin(a.time * 2.3f) * idle;   // a faint idle hum
-            body.localPosition = new Vector3(0, Mathf.Max(LegDrop(hipL, kL), LegDrop(hipR, kR)) - rest + breathe, 0);
+            body.localPosition = new Vector3(0, walkY - crouch + breathe, -shift);   // Godot +Z (back) is Unity -Z
             body.localRotation = Quaternion.Euler(0, 0, s * 1.5f * walking);
-            upper.localRotation = Quaternion.Euler(bend * 40 + 4 * a.gait - 3 * a.armHold * (1 - bend), 0, 0);   // leans back a touch under a load
+            upper.localRotation = Quaternion.Euler(lean + 4 * a.gait - 3 * a.armHold * (1 - bend), 0, 0);   // leans back a touch under a load
             float armSwing = s * stride * 0.9f;
             float hold = Mathf.Max(a.armHold, a.armReach);
             float empty = 1 - hold;
-            float pitch = -68 * a.armHold - 40 * a.armLift - 35 * a.armReach - 16 * (1 - hold);
+            float pitch = ArmPitch(a.armHold, a.armLift, a.armReach);
             float inward = 10 * hold;
             armL.localRotation = Quaternion.Euler(pitch - armSwing * empty, 0, inward - Flare * empty);
             armR.localRotation = Quaternion.Euler(pitch + armSwing * empty, 0, -inward + Flare * empty);
             PoseElbows(a, 38);
         }
 
+        void SetArmPitch(float pitch, float inward)
+        {
+            armL.localRotation = Quaternion.Euler(pitch, 0, inward);
+            armR.localRotation = Quaternion.Euler(pitch, 0, -inward);
+        }
+
         float LowestClaw() => Mathf.Min(clawTipL.position.y, clawTipR.position.y);
 
         /// <summary>Retrobot's walk: short, quick mechanical steps whose stride is matched to the ground
-        /// speed; the swinging leg lifts its boot (knee and hip flex), the ankles keep both boots flat,
-        /// and the body rides exactly on the planted leg (the bob comes from the legs, never through the
-        /// floor). The 8 deg thigh splay holds through the whole cycle. Bending to pick up crouches, leans
-        /// and reaches down together; the claws stop at the part's height and never go below the floor.</summary>
+        /// speed; the swinging leg lifts its boot, the ankles keep both boots flat, and the body rides
+        /// exactly on the planted leg. Turning on the spot, the planted boot keeps its heading while the
+        /// lifted one steps round. The 8 deg thigh splay holds throughout. Picking up: weight shift,
+        /// crouch, moderate lean, reach; the claws stop at the part (floor guard). Depositing: the arms
+        /// rise until the claws are at the destination (aim).</summary>
         public override void Animate(RobotAnim a)
         {
             float lh = HipY * Mathf.Max(1e-4f, transform.lossyScale.y);
             float walking = Mathf.Clamp01(a.gait / 0.45f);
-            float stride = a.speed > 1e-3f ? Mathf.Min(MaxStride, a.speed / (lh * StepRate(a.speed01, a.speed)) * Mathf.Rad2Deg) : 0;
-            stride = Mathf.Max(stride, TurnStride * Mathf.Clamp01(Mathf.Abs(a.turnRate) / 120f)) * walking;
-            PoseBody(a, stride, walking, 1);
-            if ((a.bend > 0.01f || a.armReach > 0.01f) && clawTipL != null && clawTipR != null)
+            float turn01 = Mathf.Clamp01(Mathf.Abs(a.turnRate) / 120f);
+            float stride = a.speed > 1e-3f ? Mathf.Min(MaxStride, a.speed / (lh * StepRate(a.speed01, a.speed)) * Mathf.Rad2Deg) * walking : 0;
+            float lift = Mathf.Clamp01(Mathf.Max(stride, TurnStride * turn01 * walking) / (MaxStride * 0.6f));
+            // turning on the spot: the planted boot holds its heading (it twists back against the body's
+            // turn), the lifted boot swings round ahead of the turn; untwists when the turn ends
+            if (a.dt > 0)
+            {
+                float turnW = Mathf.Clamp01(Mathf.Abs(a.turnRate) / 60f) * (1 - Mathf.Clamp01(a.speed01 * 4f)) * walking;
+                float dYaw = a.turnRate * a.dt * turnW;
+                bool plantedL = Mathf.Cos(a.phase) > 0;
+                float ahead = Mathf.Clamp(a.turnRate * 0.1f, -22f, 22f) * turnW;
+                float swing = 360f * a.dt;
+                if (turnW > 0.01f)
+                {
+                    _twistL = plantedL ? _twistL - dYaw : Mathf.MoveTowards(_twistL, ahead, swing);
+                    _twistR = plantedL ? Mathf.MoveTowards(_twistR, ahead, swing) : _twistR - dYaw;
+                }
+                else
+                {
+                    _twistL = Mathf.MoveTowards(_twistL, 0, 150f * a.dt);
+                    _twistR = Mathf.MoveTowards(_twistR, 0, 150f * a.dt);
+                }
+                _twistL = Mathf.Clamp(_twistL, -30f, 30f);
+                _twistR = Mathf.Clamp(_twistR, -30f, 30f);
+            }
+            PoseBody(a, stride, lift, walking, 1);
+            bool guard = clawTipL != null && clawTipR != null;
+            if ((a.bend > 0.01f || a.armReach > 0.01f) && guard)
             {
                 // floor guard: the deepest pick-up pose whose claws stay at the part (never below the floor)
-                float target = transform.position.y + Mathf.Max(a.reachHeight, 0.004f) + 0.008f * transform.lossyScale.y / 0.283f;
-                if (LowestClaw() < target)
+                float target = transform.position.y + Mathf.Max(a.reachHeight, -0.08f) + 0.008f * transform.lossyScale.y / 0.283f;
+                if (a.bend > 0.9f && LowestClaw() > target + 0.004f)
+                {
+                    // the part lies lower than the full pose reaches (it stands on the debris layer): reach
+                    // further, up to twice as deep, only as far as the part
+                    float lo = 1, hi = 2f;
+                    PoseBody(a, stride, lift, walking, hi);
+                    if (LowestClaw() > target) lo = hi;
+                    else
+                        for (int it = 0; it < 6; it++)
+                        {
+                            float m = (lo + hi) * 0.5f;
+                            PoseBody(a, stride, lift, walking, m);
+                            if (LowestClaw() < target) hi = m; else lo = m;
+                        }
+                    PoseBody(a, stride, lift, walking, lo);
+                }
+                else if (LowestClaw() < target)
                 {
                     float lo = 0, hi = 1;
                     for (int it = 0; it < 7; it++)
                     {
                         float m = (lo + hi) * 0.5f;
-                        PoseBody(a, stride, walking, m);
+                        PoseBody(a, stride, lift, walking, m);
                         if (LowestClaw() < target) hi = m; else lo = m;
                     }
-                    PoseBody(a, stride, walking, lo);
+                    PoseBody(a, stride, lift, walking, lo);
                 }
+            }
+            if (a.aimWeight > 0.001f && guard)
+            {
+                // aim: raise the (straight) arms until the claws are at the destination's height
+                float hold = Mathf.Max(a.armHold, a.armReach);
+                float basePitch = ArmPitch(a.armHold, a.armLift, a.armReach), inward = 10 * hold;
+                float lo = -150f, hi = 0f;
+                for (int it = 0; it < 8; it++)
+                {
+                    float m = (lo + hi) * 0.5f;
+                    SetArmPitch(m, inward);
+                    if (GripPoint.Value.y < a.aim.y) hi = m; else lo = m;
+                }
+                SetArmPitch(Mathf.Lerp(basePitch, (lo + hi) * 0.5f, Ease(a.aimWeight)), inward);
             }
             if (a.gesture > 0)
             {

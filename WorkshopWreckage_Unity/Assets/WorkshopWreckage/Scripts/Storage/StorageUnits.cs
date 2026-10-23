@@ -414,8 +414,9 @@ namespace WorkshopWreckage
 
         public int SlotOf(string destId) => _labelIndex.TryGetValue(destId, out var i) ? i : -1;
 
-        /// <summary>Opens a drawer with the given contents (mesh, materials, tray-local Unity matrix).</summary>
-        public void OpenDrawer(int slot, List<(Mesh mesh, Material[] mats, Matrix4x4 local)> contents, float hold = 1.4f)
+        /// <summary>Opens a drawer with the given contents (mesh, materials, tray-local Unity matrix);
+        /// `slide` is how far it comes out (a small robot standing in front opens it only part way).</summary>
+        public void OpenDrawer(int slot, List<(Mesh mesh, Material[] mats, Matrix4x4 local)> contents, float hold = 1.4f, float slide = 0.26f)
         {
             if (_open.TryGetValue(slot, out var o))
             {
@@ -442,7 +443,7 @@ namespace WorkshopWreckage
             tb.Build(tray.transform, "tray");
             FillTray(tray.transform, contents);
             _open[slot] = (node, hold, false);
-            StartCoroutine(Slide(node.transform, 0, 0.26f, 0.16f));
+            StartCoroutine(Slide(node.transform, 0, slide, 0.16f));
             Sfx.Play("drawer_open", FrontWorld(slot).GetColumn(3), -6);
         }
 

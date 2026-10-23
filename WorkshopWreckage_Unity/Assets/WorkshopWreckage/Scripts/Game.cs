@@ -128,6 +128,7 @@ namespace WorkshopWreckage
             // QA: item lighting terms (1 normals, 2 ambient, 3 main light, 4 additional lights)
             if (args.TryGetValue("itemdebug", out var idm)) Shader.SetGlobalFloat("_WWItemDebug", float.Parse(idm, System.Globalization.CultureInfo.InvariantCulture));
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
+            if (args.TryGetValue("robotwatch", out var rwatch)) { SetState("play"); StartCoroutine(RobotWatch(rwatch)); return; }
             if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
@@ -517,6 +518,7 @@ namespace WorkshopWreckage
 
         const int StudioLayer = 30;
         (Transform robot, Bounds bounds)? _studio;
+        Vector3 _studioFwd = Vector3.back;
 
         /// <summary>Studio camera pose k (0 front, 1 side with the robot facing right, 2 back,
         /// 3 three-quarter front left, 4 three-quarter rear, then close-ups three-quarter from
@@ -529,7 +531,7 @@ namespace WorkshopWreckage
             var (rt, bb) = _studio.Value;
             k %= 13;
             float yaw = new[] { 0f, 90f, 180f, -35f, 145f, -30f, 70f, -45f, -40f, -15f, -40f, 90f, 0f }[k];
-            var dir = Quaternion.AngleAxis(yaw, Vector3.up) * rt.forward;   // from the robot towards the camera
+            var dir = Quaternion.AngleAxis(yaw, Vector3.up) * _studioFwd;   // from the robot towards the camera (fixed: a turning robot turns in the frame)
             if (k == 12)   // the lower body straight from the front: pelvis, thighs, knees, boots
             {
                 bb.SetMinMax(bb.min, new Vector3(bb.max.x, bb.min.y + bb.size.y * 0.42f, bb.max.z));
@@ -586,6 +588,78 @@ namespace WorkshopWreckage
                 if (FrameTimingManager.GetLatestTimings(1, timings) > 0 && timings[0].gpuFrameTime > 0) { gpu += timings[0].gpuFrameTime; cpu += timings[0].cpuMainThreadFrameTime; gpuN++; }
             }
             Debug.Log(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[robotbench] frame {0:0.000} ms, gpu {1:0.000} ms, cpu main {2:0.000} ms over {3} frames", frame / n, gpuN > 0 ? gpu / gpuN : -1, gpuN > 0 ? cpu / gpuN : -1, n));
+            Application.Quit();
+        }
+
+        /// <summary>QA (--robotwatch=retrobot --watchdir=dir): in-game evidence of a robot at work. It is
+        /// activated at once and works as usual in the workshop; a camera stays beside it, and each time
+        /// it starts a pick-up, a deposit or a staging (two of each) a strip of frames is saved
+        /// (pick0_00.png ...). Work in between runs at double speed; captures at normal speed.</summary>
+        IEnumerator RobotWatch(string id)
+        {
+            var r = robots.Find(x => x.id == id);
+            if (r == null) { Application.Quit(); yield break; }
+            player.enabled = false;
+            hud.SetHudVisible(false);
+            workbench.ForceInstall(workbench.P(id));
+            r.SetOperational();
+            string dir = args.TryGetValue("watchdir", out var wd) ? wd : Path.Combine(Application.temporaryCachePath, "watch");
+            Directory.CreateDirectory(dir);
+            var left = new Dictionary<string, int> { ["pick"] = 2, ["store"] = 2, ["stage"] = 2 };
+            string pending = null;
+            Robot.QAMoment = (rb, what) => { if (rb == r && pending == null && left.TryGetValue(what, out var n) && n > 0) pending = what; };
+            var cam = player.cam.transform;
+            player.cam.fieldOfView = 40;
+            // the camera for a strip: chosen once (it doesn't swing round with the robot), from the
+            // first of a ring of spots around it, front-side first, with a clear view of it
+            Vector3 PickSpot()
+            {
+                var t = r.transform;
+                var at = t.position + Vector3.up * 0.14f;
+                foreach (var yaw in new[] { 55f, -55f, 90f, -90f, 25f, -25f, 125f, -125f, 0f, 180f })
+                {
+                    var dir = Quaternion.AngleAxis(yaw, Vector3.up) * t.forward;
+                    var spot = at + dir * 0.75f + Vector3.up * 0.3f;
+                    var toward = (at - spot).normalized;
+                    int env = 1 << Layers.Env;
+                    if (!Physics.CheckSphere(spot, 0.1f, env, QueryTriggerInteraction.Ignore) && !Physics.Linecast(spot, at - toward * 0.2f, env, QueryTriggerInteraction.Ignore)
+                        && !Physics.Linecast(at - toward * 0.2f, spot, env, QueryTriggerInteraction.Ignore)) return spot;
+                }
+                return at + t.forward * 0.75f + Vector3.up * 0.3f;
+            }
+            Vector3 fixedSpot = Vector3.zero;
+            void Follow(bool fixedCam = false)
+            {
+                var at = r.transform.position + Vector3.up * 0.12f;
+                var want = fixedCam ? fixedSpot : r.transform.position + r.transform.right * 0.55f + r.transform.forward * 0.42f + Vector3.up * 0.34f;
+                cam.SetPositionAndRotation(want, Quaternion.LookRotation(at - want));
+            }
+            float t0 = Time.realtimeSinceStartup;
+            Time.timeScale = 2;
+            while (left.Values.Any(v => v > 0) && Time.realtimeSinceStartup - t0 < 420)
+            {
+                Follow();
+                if (pending != null)
+                {
+                    string what = pending;
+                    int n = 2 - left[what];
+                    left[what]--;
+                    Time.timeScale = 1;
+                    fixedSpot = PickSpot();
+                    for (int k = 0; k < 34; k++)
+                    {
+                        Follow(true);
+                        yield return Capture(Path.Combine(dir, $"{what}{n}_{k:00}.png"), 1);
+                        yield return new WaitForSeconds(0.05f);
+                    }
+                    Debug.Log($"[robotwatch] captured {what} #{n}");
+                    pending = null;
+                    Time.timeScale = 2;
+                }
+                yield return null;
+            }
+            Time.timeScale = 1;
+            Debug.Log($"[robotwatch] done: pick gap {r.maxGripGap * 100:0.0} cm, store gap {r.maxStoreGap * 100:0.0} cm, stage gap {r.maxStageGap * 100:0.0} cm, longest alignment {r.maxAlignTime:0.00} s; left {string.Join(", ", left.Select(kv => kv.Key + " " + kv.Value))}");
             Application.Quit();
         }
 
@@ -661,6 +735,7 @@ namespace WorkshopWreckage
                 // the same framing, but in the workshop as the game draws and lights it
                 player.cam.fieldOfView = 30;
                 _studio = (r.transform, RendererBounds(r, pos));
+                _studioFwd = r.transform.forward;
                 return;
             }
             foreach (var t in r.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = StudioLayer;
@@ -675,6 +750,7 @@ namespace WorkshopWreckage
             player.cam.backgroundColor = new Color(0.9f, 0.9f, 0.89f);
             player.cam.fieldOfView = 22;   // a long lens: little perspective distortion, like the sheets
             _studio = (r.transform, RendererBounds(r, pos));
+            _studioFwd = r.transform.forward;
             var key = new GameObject("StudioKey").AddComponent<Light>();
             key.type = LightType.Directional;
             key.color = new Color(1f, 0.96f, 0.9f);

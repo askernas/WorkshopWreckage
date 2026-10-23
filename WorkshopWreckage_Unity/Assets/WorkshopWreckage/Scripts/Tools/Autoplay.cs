@@ -940,6 +940,10 @@ namespace WorkshopWreckage
             Check("parts for destinations above his reach are piled in front of them, still unsorted",
                   rb.staged == 0 || rb.IsPiledBelowDestination(rb.lastStagedId), rb.staged == 0 ? "none needed yet" : $"part {rb.lastStagedId} waits below {g.world.DefOf(rb.lastStagedId).storageBox}");
             Check("robot sorting is recorded as robot-assisted", g.telemetry.sortedRobot - robotBefore == rb.delivered, $"{g.telemetry.sortedRobot - robotBefore} robot sorts");
+            Check("Retrobot's claws reach the part when he can stand beside it (no grabbing at thin air)", rb.pickCount >= 1 && rb.maxPickGapInRange <= 0.05f, $"{rb.pickCount} pick-ups, largest claw-to-part gap {rb.maxPickGapInRange * 100:0.0} cm where he could stand beside it and it lies within his arms' range ({rb.outOfRange} interactions out of range or blocked by piles; largest gap overall {rb.maxGripGap * 100:0.0} cm)");
+            Check("Retrobot reaches into the drawers he fills", rb.drawerStoreCount == 0 || rb.maxDrawerGapInRange <= 0.05f, rb.drawerStoreCount == 0 ? "no drawer store in this run" : $"{rb.drawerStoreCount} drawer stores, largest claw-to-drawer gap {rb.maxDrawerGapInRange * 100:0.0} cm within his arms' range (overall {rb.maxDrawerGap * 100:0.0} cm; all stores {rb.storeCount}, largest {rb.maxStoreGap * 100:0.0} cm incl. deep shelf containers)");
+            Check("Retrobot sets staged parts down where his claws are", rb.stageCount == 0 || rb.maxStageGapInRange <= 0.05f, rb.stageCount == 0 ? "no staging in this run" : $"{rb.stageCount} staged, largest claw-to-spot gap {rb.maxStageGapInRange * 100:0.0} cm within his arms' range (overall {rb.maxStageGap * 100:0.0} cm)");
+            Check("the final alignment before a grip or release never stalls (bounded at 1.6 s)", rb.maxAlignTime <= 1.7f, $"longest {rb.maxAlignTime:0.00} s");
 
             // size reference: seen from the player's eye height (1.65 m) while he walks
             var sizeShots = new (string name, float dist, float side)[]
