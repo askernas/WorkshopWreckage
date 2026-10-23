@@ -115,6 +115,27 @@ namespace WorkshopWreckage
         }
 
         protected bool Has(string part) => installed.Contains(part);
+
+        readonly List<(Transform t, float side)> _elbows = new();
+
+        /// <summary>The elbow pivot under an arm pivot (made once, kept across rebuilds; its
+        /// geometry is rebuilt like any pivot's), placed at the Godot-local elbow point.</summary>
+        protected Transform Elbow(Transform arm, Vector3 posG, float side)
+        {
+            var e = arm.Find("Elbow");
+            if (e == null) { e = Pivot("Elbow", arm, Vector3.zero); _elbows.Add((e, side)); }
+            e.localPosition = Batch.G(posG);
+            return e;
+        }
+
+        /// <summary>The "ready" stance of the concept sheets: forearms raised forward by `bendDeg`
+        /// at rest (and optionally rolled back inwards by `rollDeg`, so a forearm can hang from an
+        /// arm held out sideways); the arms straighten as they reach or hold, so carrying is unchanged.</summary>
+        protected void PoseElbows(RobotAnim a, float bendDeg, float rollDeg = 0)
+        {
+            float rest = 1 - Mathf.Max(a.armHold, a.armReach);
+            foreach (var (e, side) in _elbows) e.localRotation = Quaternion.Euler(-bendDeg * rest, 0, -side * rollDeg * rest);
+        }
         /// <summary>The material of a primitive belonging to `part`. A missing part is a
         /// faint ghost while the robot is on the workbench (so the player sees what is still
         /// to find), and is not drawn at all otherwise.</summary>

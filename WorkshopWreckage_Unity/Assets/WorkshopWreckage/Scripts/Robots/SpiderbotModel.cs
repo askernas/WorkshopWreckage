@@ -104,6 +104,12 @@ namespace WorkshopWreckage
                 bh.RoundedBox(new Vector3(x * 0.075f, 0.07f, 0), new Vector3(0.18f, 0.066f, 0.076f), 0.02f, M(part, ToyGreen), 2, tilt);
                 bh.RoundedBox(new Vector3(x * 0.075f, 0.07f, 0), new Vector3(0.13f, 0.07f, 0.082f), 0.006f, M(part, ToyGreenDeep), 1, tilt);   // band
                 foreach (var t in new[] { 0.045f, 0.105f }) Bolt(bh, new Vector3(x * t, t * 0.93f, -0.04f), new Vector3(0, 0, -1), 0.0055f, M(part, Gunmetal));
+                {
+                    var dir = new Vector3(x * Mathf.Cos(0.75f), Mathf.Sin(0.75f), 0);
+                    var nrm = new Vector3(-x * Mathf.Sin(0.75f), Mathf.Cos(0.75f), 0);
+                    var top = new Vector3(x * 0.075f, 0.07f, 0.022f) + nrm * 0.033f;
+                    Pipe(bh, part, new[] { top - dir * 0.08f + nrm * 0.006f, top + nrm * 0.02f, top + dir * 0.075f + nrm * 0.006f }, 0.0065f, Rubber, Brass);
+                }
                 Done(bh, _hip[i]);
                 var bk = new Batch();   // big knee joint, olive upper shin, heavy red lower shin, puck foot
                 bk.Lathe(new Vector3(0, 0, -0.046f), Disc(0.052f, 0.092f, 0.01f), M(part, ToyRed), BackRot, 22);
@@ -122,9 +128,11 @@ namespace WorkshopWreckage
             foreach (var (jaw, s) in new[] { (_jawL, -1f), (_jawR, 1f) })
             {
                 var b = new Batch();
-                b.RoundedBox(new Vector3(0, -0.03f, -0.03f), new Vector3(0.026f, 0.06f, 0.06f), 0.008f, M("gripping jaws", ToyRed), 2, Batch.R(Vector3.right, 0.4f));
-                b.RoundedBox(new Vector3(-s * 0.012f, -0.07f, -0.055f), new Vector3(0.024f, 0.032f, 0.032f), 0.008f, M("gripping jaws", ToyRed), 2);
-                b.Rivet(new Vector3(s * 0.013f, -0.03f, -0.03f), new Vector3(s, 0, 0), 0.005f, M("gripping jaws", Brass));
+                const float J = 1.6f;   // the sheet's mandibles are big
+                b.RoundedBox(new Vector3(0, -0.03f, -0.03f) * J, new Vector3(0.026f, 0.06f, 0.06f) * J, 0.008f * J, M("gripping jaws", ToyRed), 2, Batch.R(Vector3.right, 0.4f));
+                b.RoundedBox(new Vector3(-s * 0.012f, -0.07f, -0.055f) * J, new Vector3(0.024f, 0.032f, 0.032f) * J, 0.008f * J, M("gripping jaws", ToyRed), 2);
+                b.Box(new Vector3(-s * 0.02f, -0.06f, -0.05f) * J, new Vector3(0.006f, 0.02f, 0.03f) * J, M("gripping jaws", Dark));
+                b.Rivet(new Vector3(s * 0.013f, -0.03f, -0.03f) * J, new Vector3(s, 0, 0), 0.006f * J, M("gripping jaws", Brass));
                 Done(b, jaw);
             }
             DetailedHead(head, ToyGreen, new Vector3(0.34f, 0.27f, 0.28f), 2, 0.048f,

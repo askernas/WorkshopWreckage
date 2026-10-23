@@ -88,6 +88,64 @@ namespace WorkshopWreckage
             b.Lathe(c + n * (r * 0.2f), new[] { new Vector2(r, 0), new Vector2(r, r * 0.5f), new Vector2(r * 0.72f, r * 0.74f), new Vector2(0, r * 0.74f) }, m, rot, 6, true);
         }
 
+        static Material _rust, _rustDark;
+        protected static Material RustMat => _rust ??= EnvMaterials.Plain(new Color(0.5f, 0.23f, 0.08f), 0f, 0.15f);
+        protected static Material RustDarkMat => _rustDark ??= EnvMaterials.Plain(new Color(0.25f, 0.11f, 0.05f), 0f, 0.1f);
+
+        /// <summary>A stable 0..1 hash of a model-space point: wear lands irregularly, but the same
+        /// on every build.</summary>
+        protected static float Hash(Vector3 p, float salt = 0)
+        {
+            float h = Mathf.Sin(Vector3.Dot(p, new Vector3(127.1f, 311.7f, 74.7f)) + salt * 17.3f) * 43758.5453f;
+            return h - Mathf.Floor(h);
+        }
+
+        /// <summary>A rust streak running down a vertical surface from p (Godot-local): a tapering
+        /// stain, darkest where it bleeds out of the bolt or seam.</summary>
+        protected void RustStreak(Batch b, string part, Vector3 p, Vector3 normal, float length, float w = 0.008f)
+        {
+            var n = normal.normalized;
+            Material m = M(part, RustMat), md = M(part, RustDarkMat);
+            if (m == null || length < 0.012f || Mathf.Abs(n.y) > 0.3f) return;
+            var rot = Quaternion.LookRotation(Vector3.down, Batch.G(n));
+            float[] wf = { 0.45f, 0.75f, 1f }, lf = { 1f, 0.6f, 0.28f };
+            for (int i = 0; i < 3; i++)   // three overlapping strips taper the stain; the dark head sits on top
+            {
+                float len = length * lf[i];
+                b.Box(p + Vector3.down * (len / 2) + n * (0.0005f + 0.0003f * i), new Vector3(w * wf[i], 0.0012f, len), i == 2 ? md : m, false, rot);
+            }
+        }
+
+        static Vector3 CatmullRom(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t) =>
+            0.5f * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * p1 - p0 - 3 * p2 + p3) * t * t * t);
+
+        /// <summary>A hose or pipe along a smooth curve through Godot-local points, with ferrules
+        /// (`ends`) where it plugs in. Keep it within one pivot so it never tears when animating.</summary>
+        protected void Pipe(Batch b, string part, Vector3[] pts, float r, Material m, Material ends = null, int perSpan = 5)
+        {
+            var mm = M(part, m);
+            if (mm == null || pts.Length < 2) return;
+            var path = new List<Vector3>();
+            for (int i = 0; i < pts.Length - 1; i++)
+                for (int s = 0; s < perSpan; s++)
+                    path.Add(CatmullRom(pts[Mathf.Max(0, i - 1)], pts[i], pts[i + 1], pts[Mathf.Min(pts.Length - 1, i + 2)], s / (float)perSpan));
+            path.Add(pts[^1]);
+            for (int k = 0; k < path.Count - 1; k++)
+            {
+                var d = path[k + 1] - path[k];
+                float len = d.magnitude;
+                if (len < 1e-4f) continue;
+                b.Cylinder((path[k] + path[k + 1]) / 2, r, len + r * 0.7f, mm, Quaternion.FromToRotation(Vector3.up, Batch.G(d / len)), 10);
+            }
+            var me = M(part, ends);
+            if (me == null) return;
+            foreach (var (p, q) in new[] { (path[0], path[1]), (path[^1], path[^2]) })
+            {
+                var d = (q - p).normalized;
+                b.Cylinder(p + d * r * 1.2f, r * 1.5f, r * 2.6f, me, Quaternion.FromToRotation(Vector3.up, Batch.G(d)), 10);
+            }
+        }
+
         /// <summary>A bolted plate on one face of an axis-aligned box (Godot-local centre and size,
         /// normal one of ±X, ±Y, ±Z): a seam rectangle inset from the edges (keep it past the
         /// bevel) and hex bolts just inside it, at the corners and spaced along the sides.</summary>
@@ -107,11 +165,26 @@ namespace WorkshopWreckage
             float bu = hu - 0.012f, bv = hv - 0.012f;
             if (bu < 0.006f || bv < 0.006f) return;
             var m = M(part, Gunmetal);
+            bool wall = an.y < 0.5f;
+            float floorY = c.y - size.y / 2 + inset * 0.7f;   // streaks stop short of the bottom bevel
             for (int k = 0; k < 4; k++)
             {
                 Vector3 p0 = P(k, bu, bv), p1 = P(k + 1, bu, bv);
                 int cnt = Mathf.Max(1, Mathf.RoundToInt((p1 - p0).magnitude / spacing));
-                for (int i = 0; i < cnt; i++) Bolt(b, Vector3.Lerp(p0, p1, i / (float)cnt), n, boltR, m);
+                for (int i = 0; i < cnt; i++)
+                {
+                    var p = Vector3.Lerp(p0, p1, i / (float)cnt);
+                    Bolt(b, p, n, boltR, m);
+                    if (wall && Hash(p) < 0.5f) RustStreak(b, part, p + Vector3.down * boltR, n, (p.y - boltR - floorY) * (0.35f + 0.6f * Hash(p, 1)), boltR * 1.7f);
+                }
+            }
+            if (!wall) return;
+            for (int i = 0; i < 2; i++)   // rust bleeding out of the top seam
+            {
+                float h = Hash(fc, i + 2);
+                if (h > 0.7f) continue;
+                var p = fc + u * (Mathf.Lerp(-hu, hu, Hash(fc, i + 5)) * 0.85f) + v * hv;
+                RustStreak(b, part, p, n, (p.y - floorY) * (0.25f + 0.5f * h), 0.009f);
             }
         }
 
@@ -214,16 +287,18 @@ namespace WorkshopWreckage
                 beacons.Add(Separate(pivot, "G_beacon", lb => lb.Lathe(new Vector3(0, H + 0.016f, 0), Dome(0.044f, 0.05f, 8), BeaconOffMat, null, 24)));
         }
 
-        /// <summary>Segmented arm hanging from its shoulder pivot (Godot-local, scale k), chunky
-        /// like the concept sheets: a big red shoulder disc with a gunmetal collar and brass hub,
-        /// a banded upper arm, a gear-toothed elbow with red joint discs and brass caps, a wide
-        /// riveted gauntlet with cuff bands, a wrist axle, and a red pincer claw (palm block,
-        /// knuckled fingers with dark pads and brass pivots) opening sideways.</summary>
-        protected void DetailedArm(Batch b, float s, string part, string clawPart, Material paint, Material paintDeep, Material red, float k = 1f)
+        /// <summary>The family arm (scale k) from its shoulder pivot, chunky like the concept
+        /// sheets, in two pieces: the shoulder (big red disc, gunmetal collar, brass hub), a banded
+        /// upper arm and the geared elbow stay on the arm pivot; the riveted gauntlet, the wrist and
+        /// a big red pincer (scale k * clawScale: palm block, two hooked fingers curling inwards with
+        /// dark teeth and brass pivots) hang from an elbow pivot that rests bent forward, the
+        /// "ready" stance (see PoseElbows).</summary>
+        protected void DetailedArm(Transform arm, float s, string part, string clawPart, Material paint, Material paintDeep, Material red, float k = 1f, float clawScale = 1.35f)
         {
             Vector3 V(float x, float y, float z) => new Vector3(x, y, z) * k;
             Material P = M(part, paint), PD = M(part, paintDeep), G = M(part, Gunmetal), Br = M(part, Brass), Rd = M(part, red);
             Material CG = M(clawPart, Gunmetal), CR = M(clawPart, red), CB = M(clawPart, Brass), CD = M(clawPart, Dark);
+            var b = new Batch();
             // shoulder
             b.Lathe(V(-s * 0.012f, 0, 0), Disc(0.05f * k, 0.034f * k, 0.006f * k), G, SideRot(s), 20);
             b.Lathe(V(s * 0.02f, 0, 0), Disc(0.074f * k, 0.042f * k, 0.012f * k), Rd, SideRot(s), 26);
@@ -245,25 +320,44 @@ namespace WorkshopWreckage
                 b.Lathe(V(side * 0.056f, -0.162f, 0), Disc(0.036f * k, 0.012f * k, 0.003f * k), Rd, SideRot(side), 18);
                 b.Lathe(V(side * 0.068f, -0.162f, 0), Dome(0.016f * k, 0.01f * k), Br, SideRot(side), 10);
             }
-            // forearm: a wide gauntlet with cuff bands and rivets
-            b.RoundedBox(V(0, -0.238f, 0), V(0.114f, 0.12f, 0.114f), 0.028f * k, P, 2);
-            b.RoundedBox(V(0, -0.195f, 0), V(0.12f, 0.02f, 0.12f), 0.007f * k, PD, 2);
-            b.RoundedBox(V(0, -0.288f, 0), V(0.12f, 0.016f, 0.12f), 0.006f * k, PD, 2);
-            foreach (var z in new[] { -0.03f, 0.03f }) Bolt(b, V(s * 0.058f, -0.24f, z), new Vector3(s, 0, 0), 0.007f * k, G);
-            foreach (var x in new[] { -0.032f, 0.032f }) Bolt(b, V(x, -0.24f, -0.058f), new Vector3(0, 0, -1), 0.0065f * k, G);
-            // wrist axle and palm block
-            b.Lathe(V(-0.04f, -0.31f, 0), Disc(0.032f * k, 0.08f * k, 0.005f * k), CG, RightRot, 16);
-            foreach (var side in new[] { -1f, 1f }) b.Lathe(V(side * 0.04f, -0.31f, 0), Dome(0.014f * k, 0.008f * k), CB, SideRot(side), 10);
-            b.RoundedBox(V(0, -0.336f, 0), V(0.088f, 0.03f, 0.07f), 0.01f * k, CG, 2);
-            // pincer: two knuckled red fingers
-            foreach (var f in new[] { -1f, 1f })
+            Done(b, arm);
+
+            // ---- forearm and claw, on the elbow pivot (coordinates relative to the elbow axle)
+            var elbow = Elbow(arm, V(0, -0.162f, 0), s);
+            var f = new Batch();
+            Vector3 E(float x, float y, float z) => V(x, y + 0.162f, z);
+            float cs = clawScale, kc = k * cs;
+            var wrist = E(0, -0.31f, 0);
+            // the claw is twisted round the forearm so its opening shows from the front and the side
+            var tw = Quaternion.AngleAxis(s * 40f, Vector3.up);       // Godot-space points
+            var twU = Quaternion.AngleAxis(-s * 40f, Vector3.up);     // the same twist for Unity-space rotations
+            Vector3 C(float x, float y, float z) => wrist + tw * ((E(x, y, z) - wrist) * cs);   // claw points, scaled about the wrist
+            Vector3 CV(float x, float y, float z) => new Vector3(x, y, z) * kc;           // claw sizes
+            // a hose on the back, from the elbow into the gauntlet
+            Pipe(f, part, new[] { E(s * 0.03f, -0.13f, 0.07f), E(s * 0.034f, -0.19f, 0.082f), E(s * 0.026f, -0.252f, 0.058f) }, 0.0075f * k, Rubber, Brass);
+            // forearm: a wide gauntlet with cuff bands and bolts
+            f.RoundedBox(E(0, -0.238f, 0), V(0.118f, 0.12f, 0.118f), 0.028f * k, P, 2);
+            f.RoundedBox(E(0, -0.195f, 0), V(0.124f, 0.02f, 0.124f), 0.007f * k, PD, 2);
+            f.RoundedBox(E(0, -0.288f, 0), V(0.124f, 0.016f, 0.124f), 0.006f * k, PD, 2);
+            foreach (var z in new[] { -0.03f, 0.03f }) Bolt(f, E(s * 0.06f, -0.24f, z), new Vector3(s, 0, 0), 0.007f * k, G);
+            foreach (var x in new[] { -0.032f, 0.032f }) Bolt(f, E(x, -0.24f, -0.06f), new Vector3(0, 0, -1), 0.0065f * k, G);
+            // wrist axle
+            f.Lathe(E(-0.042f, -0.31f, 0), Disc(0.034f * k, 0.084f * k, 0.005f * k), CG, RightRot, 16);
+            foreach (var side in new[] { -1f, 1f }) f.Lathe(E(side * 0.042f, -0.31f, 0), Dome(0.015f * k, 0.008f * k), CB, SideRot(side), 10);
+            // claw: palm block and two hooked fingers (base out, knuckle, tip curling in), dark teeth
+            f.RoundedBox(C(0, -0.334f, 0), CV(0.094f, 0.032f, 0.072f), 0.011f * kc, CG, 2, twU);
+            f.Lathe(C(0, -0.352f, -0.036f), Disc(0.012f * kc, 0.006f * kc, 0.002f * kc), CB, twU * BackRot, 10);
+            foreach (var fs in new[] { -1f, 1f })
             {
-                b.RoundedBox(V(f * 0.036f, -0.378f, 0), V(0.034f, 0.08f, 0.06f), 0.011f * k, CR, 2, Batch.R(Vector3.forward, f * 0.3f));
-                b.RoundedBox(V(f * 0.047f, -0.437f, 0), V(0.03f, 0.06f, 0.056f), 0.01f * k, CR, 2, Batch.R(Vector3.forward, -f * 0.42f));
-                b.RoundedBox(V(f * 0.03f, -0.44f, 0), V(0.009f, 0.044f, 0.044f), 0.003f * k, CD, 1, Batch.R(Vector3.forward, -f * 0.42f));
-                b.Rivet(V(f * 0.04f, -0.362f, -0.031f), new Vector3(0, 0, -1), 0.007f * k, CB);
-                b.Rivet(V(f * 0.046f, -0.41f, -0.029f), new Vector3(0, 0, -1), 0.006f * k, CB);
+                f.RoundedBox(C(fs * 0.036f, -0.375f, 0), CV(0.034f, 0.07f, 0.062f), 0.011f * kc, CR, 2, twU * Batch.R(Vector3.forward, fs * 0.42f));   // base, opening out
+                f.RoundedBox(C(fs * 0.056f, -0.425f, 0), CV(0.03f, 0.05f, 0.058f), 0.01f * kc, CR, 2, twU * Batch.R(Vector3.forward, fs * 0.05f));     // knuckle
+                f.RoundedBox(C(fs * 0.044f, -0.47f, 0), CV(0.026f, 0.05f, 0.054f), 0.009f * kc, CR, 2, twU * Batch.R(Vector3.forward, -fs * 0.6f));    // tip, curling in
+                for (int t = 0; t < 3; t++)   // teeth on the inner edge
+                    f.Box(C(fs * (0.034f - t * 0.002f), -0.415f - t * 0.022f, 0), CV(0.012f, 0.008f, 0.04f), CD, false, twU * Batch.R(Vector3.forward, fs * 0.2f));
+                f.Rivet(C(fs * 0.04f, -0.36f, -0.032f), tw * new Vector3(0, 0, -1), 0.0075f * kc, CB);
+                f.Rivet(C(fs * 0.056f, -0.425f, -0.03f), tw * new Vector3(0, 0, -1), 0.0065f * kc, CB);
             }
+            Done(f, elbow);
         }
     }
 }

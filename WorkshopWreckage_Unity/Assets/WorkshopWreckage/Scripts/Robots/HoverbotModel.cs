@@ -26,8 +26,8 @@ namespace WorkshopWreckage
             _saucer = Pivot("Saucer", body, Vector3.zero);
             head = Pivot("Head", _saucer, new Vector3(0, HeadY, 0));
             _rotor = Pivot("Rotor", _saucer, new Vector3(0, RotorY, 0));
-            _armL = Pivot("ArmL", _saucer, new Vector3(-RimR - 0.02f, 0.27f, 0));
-            _armR = Pivot("ArmR", _saucer, new Vector3(RimR + 0.02f, 0.27f, 0));
+            _armL = Pivot("ArmL", _saucer, new Vector3(-RimR - 0.045f, 0.29f, 0));
+            _armR = Pivot("ArmR", _saucer, new Vector3(RimR + 0.045f, 0.29f, 0));
             carry = Pivot("Carry", _saucer, new Vector3(0, 0.05f, 0.05f));   // held under the saucer
             Mount(head, "head", Vector3.up, 0.05f);
             Mount(_rotor, "rotor hub", Vector3.up, 0.035f);
@@ -80,6 +80,10 @@ namespace WorkshopWreckage
                         SeamLine(b, part, dir * prof[i].x + Vector3.up * prof[i].y, dir * prof[i + 1].x + Vector3.up * prof[i + 1].y, dir * nr.x + Vector3.up * nr.y, 0.0042f, 0.0016f);
                     }
             }
+            // brass feed pipes along the underside, from the skirt out to the arm ports
+            foreach (var sd in new[] { -1f, 1f })
+                foreach (var z in new[] { -0.06f, 0.06f })
+                    Pipe(b, "lower saucer shell", new[] { new Vector3(sd * 0.338f, 0.158f, z), new Vector3(sd * 0.36f, 0.177f, z), new Vector3(sd * 0.41f, 0.216f, z * 0.9f), new Vector3(sd * 0.434f, 0.248f, z * 0.7f) }, 0.0075f, Brass, Gunmetal);
             // slot window in the front of the rim band, and the side ports the arms come out of
             Grille(b, "upper saucer shell", new Vector3(0, 0.29f, -RimR - 0.004f), 0.2f, 0.044f, 3, false, -1);
             foreach (var sd in new[] { -1f, 1f })
@@ -148,12 +152,15 @@ namespace WorkshopWreckage
             }
             foreach (var (arm, s, part, claw) in new[] { (_armL, -1f, "left arm", "left claw"), (_armR, 1f, "right arm", "right claw") })
             {
-                var a = new Batch();
-                DetailedArm(a, s, part, claw, ToyRed, ToyRedDeep, ToyRed, 0.56f);
-                Done(a, arm);
+                DetailedArm(arm, s, part, claw, ToyRed, ToyRedDeep, ToyRed, 0.55f, 2.1f);   // a short arm, a big claw (the sheet)
             }
             DetailedHead(head, ToyRed, new Vector3(0.44f, 0.31f, 0.32f), 2, 0.06f,
                 "head", "left eye lens", "right eye lens", "left antenna", "right antenna", "left ear cap", "right ear cap", null, true, true);
+            {
+                var w = new Batch();   // the loose wire under the head (it is on the sheet)
+                Pipe(w, "head", new[] { new Vector3(0.19f, 0.03f, 0.06f), new Vector3(0.205f, -0.005f, 0.08f), new Vector3(0.212f, -0.03f, 0.07f) }, 0.004f, Rubber, Brass);
+                Done(w, head);
+            }
         }
 
         public override (Transform parent, Vector3 local) CarrySlot(int i, int n)
@@ -172,8 +179,10 @@ namespace WorkshopWreckage
             _saucer.localRotation = Quaternion.Euler(_tilt, 0, -a.turnRate * 0.05f + Mathf.Sin(a.time * 1.7f) * 2f);
             float pitch = -20 * a.armHold - 50 * a.armReach - 60 * a.armLift;
             float wiggle = Mathf.Sin(a.time * 3.3f) * 6 * (1 - a.armHold);
-            _armL.localRotation = Quaternion.Euler(pitch + wiggle, 0, 4 + 6 * a.armHold);   // tucked under the rim
-            _armR.localRotation = Quaternion.Euler(pitch - wiggle, 0, -4 - 6 * a.armHold);
+            float empty = 1 - Mathf.Max(a.armHold, a.armReach);
+            _armL.localRotation = Quaternion.Euler(pitch - 4 * empty + wiggle, 0, -65 * empty + 6 * a.armHold);   // held out sideways from the port...   // out of the side ports, claws beside the shell
+            _armR.localRotation = Quaternion.Euler(pitch - 4 * empty - wiggle, 0, 65 * empty - 6 * a.armHold);
+            PoseElbows(a, 14, 62);   // ...and the claw hanging beside the shell
             LookHead(a, 70);
             if (a.gesture > 0)
             {

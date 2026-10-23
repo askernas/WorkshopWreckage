@@ -70,9 +70,7 @@ namespace WorkshopWreckage
             }
             foreach (var (arm, s, part) in new[] { (_armL, -1f, "left arm"), (_armR, 1f, "right arm") })
             {
-                var b = new Batch();
-                DetailedArm(b, s, part, part, ToyGreen, ToyGreenDeep, ToyRed, 1f);
-                Done(b, arm);
+                DetailedArm(arm, s, part, part, ToyGreen, ToyGreenDeep, ToyRed, 1.15f, 1.35f);
             }
             DetailedHead(head, ToyGreen, new Vector3(0.36f, 0.32f, 0.32f), 1, 0.078f,
                 "head shell", "optical eye", null, "antenna pair", "antenna pair", "head shell", "head shell", null, false, false);
@@ -133,6 +131,11 @@ namespace WorkshopWreckage
             Grille(b, "torso", new Vector3(0, 0.6f, 0.106f), 0.15f, 0.08f, 6, false, 1);
             foreach (var n in new[] { Vector3.left, Vector3.right, new Vector3(0, 0, 1) }) PanelFrame(b, "torso", new Vector3(0, TorsoY, 0), new Vector3(0.27f, 0.21f, 0.21f), n, 0.042f);
             b.Lathe(new Vector3(-0.19f, ShoulderY, 0), Disc(0.024f, 0.38f, 0.005f), M("torso", Gunmetal), RightRot, 12);   // shoulder axle
+            foreach (var s in new[] { -1f, 1f })
+            {
+                Pipe(b, "torso", new[] { new Vector3(s * 0.07f, 0.545f, 0.1f), new Vector3(s * 0.07f, 0.505f, 0.128f), new Vector3(s * 0.07f, 0.46f, 0.1f), new Vector3(s * 0.07f, 0.442f, 0.078f) }, 0.009f, Brass, Gunmetal);
+                Pipe(b, "torso", new[] { new Vector3(s * 0.133f, 0.505f, 0.03f), new Vector3(s * 0.158f, 0.465f, 0.05f), new Vector3(s * 0.13f, 0.43f, 0.04f) }, 0.0075f, Rubber, Brass);
+            }
             for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.685f + k * 0.009f, 0), Disc(0.05f - k * 0.004f, 0.009f, 0.003f), M("torso", Gunmetal), null, 16);
             Done(b, _leanGeo);
         }
@@ -151,10 +154,11 @@ namespace WorkshopWreckage
             _gyro.localRotation = Quaternion.Euler(a.time * 720f, 0, 0);
             if (a.gesture > 0) _lean.localRotation *= Quaternion.Euler(0, Mathf.SmoothStep(0, 360, a.gesture), Mathf.Sin(a.gesture * Mathf.PI * 4) * 6);   // nervous pirouette
             float empty = 1 - Mathf.Max(a.armHold, a.armReach);
-            float pitch = -70 * a.armHold - 40 * a.armLift - 45 * a.armReach;
+            float pitch = -70 * a.armHold - 40 * a.armLift - 45 * a.armReach - 16 * (1 - Mathf.Max(a.armHold, a.armReach));
             float flap = Mathf.Sin(a.time * 2.7f) * 8 * empty;
             _armL.localRotation = Quaternion.Euler(pitch + flap, 0, 8 * a.armHold - 20 * empty);   // at rest the arms swing wide beside the wheel
             _armR.localRotation = Quaternion.Euler(pitch - flap, 0, -8 * a.armHold + 20 * empty);
+            PoseElbows(a, 38);
             LookHead(a);
         }
     }

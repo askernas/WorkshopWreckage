@@ -19,7 +19,7 @@ namespace WorkshopWreckage
         readonly Transform[] _boxes = new Transform[3];
         float _offL, _offR;
         public override float ModelHeight => 0.9f;
-        const float ArmRest = -62f;
+        const float ArmRest = -78f;
         const float TrackX = 0.25f, TrackW = 0.17f, EndZ = 0.47f, EndR = 0.145f, EndY = 0.145f, Cleat = 0.06f, SprocketR = 0.118f;
         static readonly float[] BoxZ = { -0.07f, 0.2f, 0.47f };   // Godot z (front = -z)
         static readonly string[] BoxPart = { "front cargo box", "middle cargo box", "rear cargo box" };
@@ -124,6 +124,11 @@ namespace WorkshopWreckage
                 PanelFrame(b, "chassis", new Vector3(0, 0.41f, -0.39f), new Vector3(0.48f, 0.16f, 0.36f), new Vector3(0, 0, -1), 0.03f, 0.007f, 0.08f);
                 Grille(b, "chassis", new Vector3(0, 0.2f, -0.501f), 0.16f, 0.08f, 5, false, -1);
                 foreach (var n in new[] { Vector3.left, Vector3.right }) PanelFrame(b, "chassis", new Vector3(0, 0.41f, -0.39f), new Vector3(0.48f, 0.16f, 0.36f), n, 0.042f);
+                foreach (var s in new[] { -1f, 1f })
+                {
+                    Pipe(b, "chassis", new[] { new Vector3(s * 0.2f, 0.47f, -0.21f), new Vector3(s * 0.22f, 0.45f, -0.17f), new Vector3(s * 0.24f, 0.37f, -0.12f), new Vector3(s * 0.26f, 0.338f, -0.06f) }, 0.009f, Brass, Gunmetal);
+                    Pipe(b, "chassis", new[] { new Vector3(s * 0.15f, 0.47f, -0.21f), new Vector3(s * 0.16f, 0.46f, -0.16f), new Vector3(s * 0.19f, 0.39f, -0.11f), new Vector3(s * 0.2f, 0.338f, -0.05f) }, 0.0075f, Rubber, Brass);
+                }
                 b.RoundedBox(new Vector3(0, 0.2f, 0.505f), new Vector3(0.16f, 0.1f, 0.02f), 0.008f, M("battery pack", Gunmetal), 2);
                 b.Lathe(new Vector3(-0.08f, 0.26f, 0.38f), Disc(0.045f, 0.16f, 0.008f), M("drive motor", Gunmetal), RightRot, 16);
                 b.Lathe(new Vector3(-0.27f, 0.43f, -0.55f), Disc(0.026f, 0.54f, 0.005f), M("chassis", Gunmetal), RightRot, 12);   // shoulder axle across the front
@@ -160,9 +165,7 @@ namespace WorkshopWreckage
             }
             foreach (var (arm, s, part, claw) in new[] { (_armL, -1f, "left arm", "left claw"), (_armR, 1f, "right arm", "right claw") })
             {
-                var b = new Batch();
-                DetailedArm(b, s, part, claw, ToyYellow, ToyYellowDeep, ToyRed, 0.95f);
-                Done(b, arm);
+                DetailedArm(arm, s, part, claw, ToyYellow, ToyYellowDeep, ToyRed, 1.1f, 1.35f);
             }
             DetailedHead(head, ToyYellow, new Vector3(0.42f, 0.28f, 0.34f), 1, 0.075f,
                 "head", "optical eye", null, "antenna pair", "antenna pair", "head", "head", "siren light", false, true);
@@ -194,6 +197,7 @@ namespace WorkshopWreckage
             float sway = Mathf.Sin(a.time * 1.3f) * 4;
             _armL.localRotation = Quaternion.Euler(pitch + sway, 0, 6);
             _armR.localRotation = Quaternion.Euler(pitch - sway, 0, -6);
+            PoseElbows(a, 8);   // reaching forward at track height, claws open (the sheet)
             LookHead(a, 50);
             if (a.gesture > 0)
             {

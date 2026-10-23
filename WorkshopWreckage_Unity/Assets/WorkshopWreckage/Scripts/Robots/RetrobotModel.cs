@@ -19,7 +19,7 @@ namespace WorkshopWreckage
         static Material Yellow => ToyYellow;
         static Material YellowDeep => ToyYellowDeep;
         const float HipY = 0.40f, ShoulderY = 0.62f, NeckY = 0.68f, ShoulderX = 0.222f, LegX = 0.14f;
-        const float Flare = 6f;   // rest pose: the arms hang slightly out from the body, as on the sheet
+        const float Flare = 11f;   // rest pose: the arms hang slightly out from the body, as on the sheet
 
         protected override void CreatePivots()
         {
@@ -58,9 +58,7 @@ namespace WorkshopWreckage
             foreach (var (leg, s) in new[] { (legL, -1f), (legR, 1f) }) BuildLeg(leg, s);
             foreach (var (arm, s, part) in new[] { (armL, -1f, ArmL), (armR, 1f, ArmR) })
             {
-                var b = new Batch();
-                DetailedArm(b, s, part, part, Yellow, YellowDeep, ToyRed);
-                Done(b, arm);
+                DetailedArm(arm, s, part, part, Yellow, YellowDeep, ToyRed, 1.12f, 1.3f);
             }
             DetailedHead(head, Yellow, new Vector3(0.36f, 0.32f, 0.32f), 2, 0.048f, Head, Head, null, Head, Head, Head, Head, Head, true, true);
         }
@@ -87,6 +85,12 @@ namespace WorkshopWreckage
             foreach (var n in new[] { Vector3.left, Vector3.right, new Vector3(0, 0, 1) }) PanelFrame(b, P, new Vector3(0, 0.54f, 0), new Vector3(0.27f, 0.25f, 0.22f), n, 0.047f);
             SeamLine(b, P, new Vector3(-0.1f, 0.625f, -0.111f), new Vector3(0.1f, 0.625f, -0.111f), new Vector3(0, 0, -1));   // the chest plate's top seam
             Grille(b, P, new Vector3(0, 0.56f, 0.112f), 0.15f, 0.08f, 6, false, 1);   // back vent
+            // brass pipes down the back into the pelvis, dark hoses between the legs in front
+            foreach (var x in new[] { -0.075f, 0.075f })
+            {
+                Pipe(b, P, new[] { new Vector3(x, 0.52f, 0.105f), new Vector3(x, 0.49f, 0.132f), new Vector3(x, 0.44f, 0.118f), new Vector3(x, 0.41f, 0.076f) }, 0.009f, Brass, Gunmetal);
+                Pipe(b, P, new[] { new Vector3(x, 0.432f, -0.104f), new Vector3(x * 1.15f, 0.405f, -0.122f), new Vector3(x * 0.7f, 0.39f, -0.078f) }, 0.0075f, Rubber, Brass);
+            }
             // neck: stacked dark rings
             for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.672f + k * 0.012f, 0), Disc(0.05f - k * 0.004f, 0.012f, 0.003f), M(P, Gunmetal), null, 16);
             Done(b, upperGeo);
@@ -120,6 +124,7 @@ namespace WorkshopWreckage
                 b.Lathe(new Vector3(dx, -0.205f, 0.026f), Disc(0.018f, 0.022f, 0.003f), Br, null, 10);
             }
             b.Lathe(new Vector3(-0.048f, -0.29f, 0), Disc(0.032f, 0.096f, 0.006f), G, RightRot, 14);   // ankle
+            Pipe(b, P, new[] { new Vector3(s * 0.045f, -0.07f, 0.062f), new Vector3(s * 0.05f, -0.14f, 0.086f), new Vector3(s * 0.048f, -0.2f, 0.05f) }, 0.0075f, Rubber, Brass);   // hose round the knee
             // foot: a big boot on a wide dark sole plate, toe vent, red heel
             b.RoundedBox(new Vector3(0, -0.336f, -0.04f), new Vector3(0.15f, 0.078f, 0.26f), 0.028f, Y, 3);
             b.RoundedBox(new Vector3(0, -0.3f, -0.065f), new Vector3(0.116f, 0.02f, 0.15f), 0.008f, YD, 2);
@@ -143,10 +148,11 @@ namespace WorkshopWreckage
             body.localRotation = Quaternion.Euler(0, 0, s * 3 * a.gait);
             upper.localRotation = Quaternion.Euler(a.bend * 40 + 5 * a.gait, 0, 0);
             float empty = 1 - Mathf.Max(a.armHold, a.armReach);
-            float pitch = -68 * a.armHold - 40 * a.armLift - 35 * a.armReach;
+            float pitch = -68 * a.armHold - 40 * a.armLift - 35 * a.armReach - 16 * (1 - Mathf.Max(a.armHold, a.armReach));
             float inward = 10 * Mathf.Max(a.armHold, a.armReach);
             armL.localRotation = Quaternion.Euler(pitch - swing * 1.1f * empty, 0, inward - Flare * empty);
             armR.localRotation = Quaternion.Euler(pitch + swing * 1.1f * empty, 0, -inward + Flare * empty);
+            PoseElbows(a, 38);
             if (a.gesture > 0)
             {
                 // a cheerful wave with the right arm, head tilted
