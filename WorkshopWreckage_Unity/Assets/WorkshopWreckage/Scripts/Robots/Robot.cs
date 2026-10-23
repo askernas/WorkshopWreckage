@@ -249,7 +249,17 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Model QA: one neutral animation frame, the standing rest pose.</summary>
-        public void PoseRest() => _model.Animate(new RobotAnim { dt = 1, altitude = Flies ? 0.6f : 0 });
+        public void PoseRest()
+        {
+            if (_model is SortingArmModel sam)
+            {
+                sam.SetStanding(true);
+                sam.Pose(90, 72, 96, 12);   // the sheet's hero pose: upper arm up and out, forearm down, claw to the floor
+                sam.Grip(0.8f);
+                return;
+            }
+            _model.Animate(new RobotAnim { dt = 1, altitude = Flies ? 0.6f : 0 });
+        }
 
         /// <summary>Loading a save (or a legacy save's finished robot): operational at once, at home.</summary>
         public void SetOperational()

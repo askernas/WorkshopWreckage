@@ -164,7 +164,7 @@ namespace WorkshopWreckage
         /// <summary>A bolted plate on one face of an axis-aligned box (Godot-local centre and size,
         /// normal one of ±X, ±Y, ±Z): a seam rectangle inset from the edges (keep it past the
         /// bevel) and hex bolts just inside it, at the corners and spaced along the sides.</summary>
-        protected void PanelFrame(Batch b, string part, Vector3 c, Vector3 size, Vector3 normal, float inset, float boltR = 0.0065f, float spacing = 0.075f)
+        protected void PanelFrame(Batch b, string part, Vector3 c, Vector3 size, Vector3 normal, float inset, float boltR = 0.0065f, float spacing = 0.075f, float seamW = 0.0042f, float maxStreak = 9f)
         {
             var n = normal.normalized;
             var an = new Vector3(Mathf.Abs(n.x), Mathf.Abs(n.y), Mathf.Abs(n.z));
@@ -176,7 +176,7 @@ namespace WorkshopWreckage
             var fc = c + n * (Vector3.Dot(size, an) / 2);
             float[] su = { -1, 1, 1, -1 }, sv = { -1, -1, 1, 1 };
             Vector3 P(int k, float du, float dv) => fc + u * (su[k % 4] * du) + v * (sv[k % 4] * dv);
-            for (int k = 0; k < 4; k++) SeamLine(b, part, P(k, hu, hv), P(k + 1, hu, hv), n);
+            for (int k = 0; k < 4; k++) SeamLine(b, part, P(k, hu, hv), P(k + 1, hu, hv), n, seamW);
             float bu = hu - 0.012f, bv = hv - 0.012f;
             if (bu < 0.006f || bv < 0.006f) return;
             var m = M(part, Gunmetal);
@@ -190,7 +190,7 @@ namespace WorkshopWreckage
                 {
                     var p = Vector3.Lerp(p0, p1, i / (float)cnt);
                     Bolt(b, p, n, boltR, m);
-                    if (wall && Hash(p) < 0.5f) RustStreak(b, part, p, n, (p.y - floorY) * (0.35f + 0.6f * Hash(p, 1)), boltR * 2.6f);
+                    if (wall && Hash(p) < 0.5f) RustStreak(b, part, p, n, Mathf.Min(maxStreak, (p.y - floorY) * (0.35f + 0.6f * Hash(p, 1))), boltR * 2.6f);
                 }
             }
             if (!wall) return;
@@ -199,7 +199,43 @@ namespace WorkshopWreckage
                 float h = Hash(fc, i + 2);
                 if (h > 0.7f) continue;
                 var p = fc + u * (Mathf.Lerp(-hu, hu, Hash(fc, i + 5)) * 0.85f) + v * hv;
-                RustStreak(b, part, p, n, (p.y - floorY) * (0.25f + 0.5f * h), 0.02f);
+                RustStreak(b, part, p, n, Mathf.Min(maxStreak, (p.y - floorY) * (0.25f + 0.5f * h)), 0.02f);
+            }
+        }
+
+        // 7-segment glyphs (a top, b top right, c bottom right, d bottom, e bottom left, f top left, g middle)
+        static readonly Dictionary<char, string> Glyphs = new()
+        {
+            ['A'] = "abcefg", ['-'] = "g", ['0'] = "abcdef", ['1'] = "bc", ['2'] = "abged", ['3'] = "abgcd",
+            ['4'] = "fgbc", ['5'] = "afgcd", ['6'] = "afgedc", ['7'] = "abc", ['8'] = "abcdefg", ['9'] = "abcdfg",
+        };
+
+        /// <summary>Stencilled lettering (blocky 7-segment glyphs) on an axis-aligned face: text
+        /// runs along `right` from `origin` (the first glyph's bottom-left), letters stand along
+        /// `up`; `normal` = right x up points out of the face. Worn dark paint.</summary>
+        protected void Stencil(Batch b, string part, Vector3 origin, Vector3 right, Vector3 up, Vector3 normal, float h, string text)
+        {
+            var m = M(part, Dark);
+            if (m == null) return;
+            float w = h * 0.58f, t = h * 0.15f;
+            Vector3 Abs(Vector3 v) => new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (!Glyphs.TryGetValue(text[i], out var segs)) continue;
+                var o = origin + right * (i * h * 0.82f);
+                foreach (var sg in segs)
+                {
+                    // segment centre (in glyph units) and whether it is horizontal
+                    var (cx, cy, horiz) = sg switch
+                    {
+                        'a' => (w / 2, h - t / 2, true), 'g' => (w / 2, h / 2, true), 'd' => (w / 2, t / 2, true),
+                        'b' => (w - t / 2, h * 0.75f, false), 'c' => (w - t / 2, h * 0.25f, false),
+                        'f' => (t / 2, h * 0.75f, false), _ => (t / 2, h * 0.25f, false),
+                    };
+                    float sx = horiz ? w : t, sy = horiz ? t : h / 2 + t / 2;
+                    if (Hash(o + up * cy + right * cx, 4) < 0.18f) sx *= 0.6f;   // worn stencil: a few segments partly gone
+                    b.Box(o + right * cx + up * cy + normal * 0.0012f, Abs(right) * sx + Abs(up) * sy + Abs(normal) * 0.002f, m);
+                }
             }
         }
 

@@ -2,8 +2,11 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>The Sorting Arm Mk I after resources/robot_arm.png: a yellow industrial arm
-    /// with red joints that hangs from a docking coupler on a cabinet socket. Built at true
+    /// <summary>The Sorting Arm Mk I after resources/robot_arm.png, in the robot family's look:
+    /// a mustard toy-enamel industrial arm (bolted panel plates, seams, rust, looping hoses, the
+    /// stencilled "A-01"), big red joint caps with bolt rings and brass hubs, a red drum turret
+    /// with amber indicators, and a big hooked red / gunmetal pincer; it hangs from a bolted
+    /// docking coupler on a cabinet socket. Built at true
     /// size (≈2 m reach from the socket) and shown at 0.42 scale on the bench and while
     /// carried (folded, standing on its coupler). Pose is driven by SortingArm through
     /// analytic two-bone IK in the shoulder plane; the elbow always bends outward (away
@@ -15,8 +18,6 @@ namespace WorkshopWreckage
         public const float L1 = 0.85f, L2 = 0.8f, ShoulderDrop = 0.18f, GripLen = 0.17f;
         Transform _shoulder, _upper, _elbow, _wrist, _fingerL, _fingerR;
         public override float ModelHeight => 2.0f;
-        static Material _yellow;
-        static Material Yellow => _yellow ??= Paint(new Color(0.88f, 0.64f, 0.12f), 0.45f);
 
         protected override void CreatePivots()
         {
@@ -39,58 +40,130 @@ namespace WorkshopWreckage
             Fold(1);
         }
 
+        const string Cpl = "docking coupler", Tur = "shoulder turret", Ctl = "control unit", Up = "upper arm", Mot = "motor cartridge",
+            Elb = "elbow servo", Fore = "forearm", Wr = "wrist rotator", Sens = "sensor head", Cab = "cable harness";
+
+        /// <summary>A big joint: gunmetal axle across X, red disc caps both sides with a bolt ring,
+        /// gunmetal collar and brass hub (shoulder and elbow).</summary>
+        void Joint(Batch b, string part, float r, float halfW)
+        {
+            b.Lathe(new Vector3(-halfW, 0, 0), Disc(r * 0.72f, halfW * 2, 0.006f), M(part, Gunmetal), RightRot, 24);
+            foreach (var s in new[] { -1f, 1f })
+            {
+                b.Lathe(new Vector3(s * (halfW - 0.035f), 0, 0), Disc(r, 0.045f, 0.012f), M(part, ToyRed), SideRot(s), 32);
+                b.Lathe(new Vector3(s * (halfW + 0.01f), 0, 0), Disc(r * 0.5f, 0.012f, 0.003f), M(part, Gunmetal), SideRot(s), 20);
+                b.Lathe(new Vector3(s * (halfW + 0.022f), 0, 0), Dome(r * 0.3f, 0.02f), M(part, Brass), SideRot(s), 16);
+                for (int k = 0; k < 8; k++)
+                {
+                    float a = k * Mathf.PI / 4 + 0.2f;
+                    Bolt(b, new Vector3(s * (halfW + 0.01f), Mathf.Sin(a) * r * 0.74f, Mathf.Cos(a) * r * 0.74f), new Vector3(s, 0, 0), 0.01f, M(part, Gunmetal));
+                }
+            }
+        }
+
+        /// <summary>A banded, bolted, seamed box-section limb from y = top down to y = bottom.</summary>
+        void Limb(Batch b, string part, float top, float bottom, float w, float d)
+        {
+            var c = new Vector3(0, (top + bottom) / 2, 0);
+            var size = new Vector3(w, top - bottom, d);
+            b.RoundedBox(c, size, 0.024f, M(part, ToyYellow), 3);
+            foreach (var y in new[] { top - 0.025f, bottom + 0.025f })
+                b.RoundedBox(new Vector3(0, y, 0), new Vector3(w + 0.006f, 0.022f, d + 0.006f), 0.007f, M(part, ToyYellowDeep), 2);
+            foreach (var n in new[] { Vector3.left, Vector3.right })
+            {
+                PanelFrame(b, part, c, size, n, 0.032f, 0.011f, 0.12f, 0.006f, 0.07f);   // short drips: the limbs tilt in every pose
+                SeamLine(b, part, c + n * (w / 2) + new Vector3(0, 0, -d / 2 + 0.032f), c + n * (w / 2) + new Vector3(0, 0, d / 2 - 0.032f), n, 0.006f);
+            }
+            foreach (var zs in new[] { -1f, 1f })   // front and back: a seam down the middle
+                SeamLine(b, part, new Vector3(0, top - 0.05f, zs * d / 2), new Vector3(0, bottom + 0.05f, zs * d / 2), new Vector3(0, 0, zs), 0.006f);
+        }
+
         protected override void BuildGeometry()
         {
             {
-                var b = new Batch();   // docking coupler: plate, locking pins, power contacts
-                b.RoundedBox(new Vector3(0, -0.03f, 0), new Vector3(0.36f, 0.06f, 0.3f), 0.012f, M("docking coupler", Yellow), 2);
+                var b = new Batch();   // docking coupler: gunmetal backing plate, bolted mustard plinth, amber lights, red panel
+                b.RoundedBox(new Vector3(0, -0.012f, 0), new Vector3(0.42f, 0.024f, 0.36f), 0.006f, M(Cpl, Gunmetal), 2);
+                var pc = new Vector3(0, -0.058f, 0);
+                var ps = new Vector3(0.36f, 0.07f, 0.3f);
+                b.RoundedBox(pc, ps, 0.018f, M(Cpl, ToyYellow), 3);
+                foreach (var x in new[] { -0.15f, 0.15f })
+                    foreach (var z in new[] { -0.12f, 0.12f })
+                        Bolt(b, new Vector3(x, -0.093f, z), Vector3.down, 0.012f, M(Cpl, Gunmetal));
                 foreach (var x in new[] { -0.14f, 0.14f })
-                    b.Cylinder(new Vector3(x, 0.012f, 0.09f), 0.016f, 0.03f, M("docking coupler", Dark));
-                b.Box(new Vector3(0, -0.035f, -0.152f), new Vector3(0.12f, 0.025f, 0.006f), M("docking coupler", Dark));
-                for (int k = 0; k < 3; k++) b.Box(new Vector3(-0.03f + k * 0.03f, -0.035f, -0.156f), new Vector3(0.012f, 0.012f, 0.004f), M("docking coupler", Brass));
+                    b.Cylinder(new Vector3(x, 0.012f, 0.09f), 0.016f, 0.03f, M(Cpl, Dark));   // locking pins
+                b.RoundedBox(new Vector3(0, -0.058f, -0.151f), new Vector3(0.14f, 0.03f, 0.006f), 0.004f, M(Cpl, Gunmetal), 1);
+                b.RoundedBox(new Vector3(0, -0.058f, -0.155f), new Vector3(0.11f, 0.014f, 0.004f), 0.003f, M(Cpl, Glow), 1);   // amber light slot
+                b.RoundedBox(new Vector3(0.181f, -0.058f, 0), new Vector3(0.008f, 0.042f, 0.16f), 0.004f, M(Cpl, ToyRed), 1);   // red side panel
+                for (int k = 0; k < 3; k++) b.Box(new Vector3(-0.03f + k * 0.03f, -0.058f, 0.153f), new Vector3(0.012f, 0.012f, 0.004f), M(Cpl, Brass));   // power contacts
+                SeamLine(b, Cpl, new Vector3(-0.181f, -0.058f, -0.12f), new Vector3(-0.181f, -0.058f, 0.12f), Vector3.left, 0.006f);
                 Done(b, body);
             }
-            if (Has("docking coupler")) beacons.Add(Prim(PrimitiveType.Sphere, body, new Vector3(0.13f, -0.04f, -0.15f), Vector3.one * 0.025f, Quaternion.identity, BeaconOffMat));
+            if (Has(Cpl)) beacons.Add(Prim(PrimitiveType.Sphere, body, new Vector3(0.13f, -0.06f, -0.152f), Vector3.one * 0.026f, Quaternion.identity, BeaconOffMat));
             {
-                var b = new Batch();   // shoulder turret + control unit
-                b.Cylinder(new Vector3(0, -0.06f, 0), 0.11f, 0.12f, M("shoulder turret", Red), null, 24);
-                b.Cylinder(new Vector3(0, -0.005f, 0), 0.125f, 0.012f, M("shoulder turret", Dark), null, 24);
-                b.Cylinder(new Vector3(0, -0.12f, 0), 0.07f, 0.02f, M("shoulder turret", Dark), AxisX, 16);
-                b.RoundedBox(new Vector3(0.16f, -0.05f, 0), new Vector3(0.1f, 0.09f, 0.15f), 0.01f, M("control unit", Yellow), 2);
-                b.Box(new Vector3(0.212f, -0.05f, 0), new Vector3(0.006f, 0.05f, 0.1f), M("control unit", Dark));
+                var b = new Batch();   // shoulder turret: flange, red drum with a bolt ring and amber light; control unit with a hose
+                b.Lathe(Vector3.zero, Disc(0.135f, 0.02f, 0.004f), M(Tur, Gunmetal), DownRot, 32);
+                b.Lathe(new Vector3(0, -0.02f, 0), Disc(0.1f, 0.016f, 0.003f), M(Tur, Gunmetal), DownRot, 28);
+                b.Lathe(new Vector3(0, -0.034f, 0), Disc(0.13f, 0.086f, 0.016f), M(Tur, ToyRed), DownRot, 36);
+                b.Lathe(new Vector3(0, -0.118f, 0), Disc(0.133f, 0.01f, 0.003f), M(Tur, Brass), DownRot, 36);
+                for (int k = 0; k < 12; k++)
+                {
+                    float a = k * Mathf.PI / 6 + 0.13f;
+                    var dir = new Vector3(Mathf.Sin(a), 0, Mathf.Cos(a));
+                    Bolt(b, dir * 0.13f + new Vector3(0, -0.048f, 0), dir, 0.01f, M(Tur, Gunmetal));
+                    if (Hash(dir, 6) < 0.4f) RustStreak(b, Tur, dir * 0.131f + new Vector3(0, -0.052f, 0), dir, 0.04f + 0.02f * Hash(dir, 7), 0.02f);
+                }
+                b.RoundedBox(new Vector3(0, -0.085f, -0.13f), new Vector3(0.05f, 0.02f, 0.008f), 0.004f, M(Tur, Glow), 1);
+                var cc = new Vector3(0.19f, -0.065f, 0);
+                var cs = new Vector3(0.1f, 0.11f, 0.17f);
+                b.RoundedBox(cc, cs, 0.016f, M(Ctl, ToyYellow), 3);
+                PanelFrame(b, Ctl, cc, cs, Vector3.right, 0.02f, 0.009f, 0.1f, 0.005f);
+                foreach (var y in new[] { -0.045f, -0.085f }) b.RoundedBox(new Vector3(0.2f, y, -0.086f), new Vector3(0.03f, 0.012f, 0.005f), 0.003f, M(Ctl, Glow), 1);
+                Pipe(b, Ctl, new[] { new Vector3(0.15f, -0.01f, 0.07f), new Vector3(0.13f, 0.02f, 0.11f), new Vector3(0.09f, -0.01f, 0.13f), new Vector3(0.06f, -0.06f, 0.11f) }, 0.014f, Rubber, Brass);
                 Done(b, _shoulder);
             }
             {
-                var b = new Batch();   // upper arm: box section with red bosses, motor cartridge, cable
-                b.RoundedBox(new Vector3(0, -L1 / 2, 0), new Vector3(0.08f, L1 * 0.86f, 0.1f), 0.012f, M("upper arm", Yellow), 2);
-                b.Cylinder(Vector3.zero, 0.065f, 0.12f, M("upper arm", Red), AxisX, 20);
-                b.Box(new Vector3(0, -L1 / 2, -0.051f), new Vector3(0.04f, L1 * 0.5f, 0.004f), M("upper arm", Dark));
-                b.Cylinder(new Vector3(0.075f, -0.22f, 0), 0.04f, 0.24f, M("motor cartridge", Dark), null, 16);
-                for (int k = 0; k < 4; k++) b.Cylinder(new Vector3(0.075f, -0.14f - k * 0.05f, 0), 0.046f, 0.012f, M("motor cartridge", Yellow), null, 16);
-                b.Cylinder(new Vector3(-0.052f, -L1 / 2, 0.02f), 0.012f, L1 * 0.8f, M("cable harness", Rubber), null, 8);
+                var b = new Batch();   // upper arm: shoulder joint, the limb with "A-01", motor cartridge, looping hoses
+                Joint(b, Up, 0.11f, 0.105f);
+                Limb(b, Up, -0.1f, -L1 + 0.09f, 0.15f, 0.17f);
+                Stencil(b, Up, new Vector3(0.0765f, -0.3f, 0.045f), Vector3.down, new Vector3(0, 0, -1), Vector3.right, 0.09f, "A-01");   // reads from the shoulder towards the elbow
+                b.Lathe(new Vector3(-0.1f, -0.13f, 0.01f), Disc(0.042f, 0.2f, 0.006f), M(Mot, Gunmetal), DownRot, 20);
+                foreach (var y in new[] { -0.16f, -0.21f, -0.26f }) b.Lathe(new Vector3(-0.1f, y, 0.01f), Disc(0.046f, 0.012f, 0.003f), M(Mot, Brass), DownRot, 20);
+                b.Lathe(new Vector3(-0.1f, -0.33f, 0.01f), Dome(0.042f, 0.022f), M(Mot, ToyRed), DownRot, 20);
+                Pipe(b, Cab, new[] { new Vector3(-0.03f, -0.07f, 0.075f), new Vector3(-0.05f, -0.17f, 0.125f), new Vector3(-0.035f, -0.42f, 0.1f), new Vector3(-0.03f, -0.68f, 0.082f), new Vector3(-0.02f, -0.77f, 0.06f) }, 0.014f, Rubber, Brass);
+                Pipe(b, Cab, new[] { new Vector3(0.035f, -0.07f, 0.075f), new Vector3(0.07f, -0.16f, 0.12f), new Vector3(0.05f, -0.3f, 0.085f) }, 0.011f, Rubber, Brass);
                 Done(b, _upper);
             }
             {
-                var b = new Batch();   // elbow servo + forearm
-                b.Cylinder(Vector3.zero, 0.07f, 0.14f, M("elbow servo", Red), AxisX, 20);
-                b.Cylinder(new Vector3(0.075f, 0, 0), 0.04f, 0.02f, M("elbow servo", Dark), AxisX, 16);
-                b.RoundedBox(new Vector3(0, -L2 / 2, 0), new Vector3(0.07f, L2 * 0.86f, 0.085f), 0.01f, M("forearm", Yellow), 2);
-                b.Cylinder(new Vector3(-0.045f, -L2 / 2, 0.015f), 0.011f, L2 * 0.8f, M("cable harness", Rubber), null, 8);
+                var b = new Batch();   // elbow joint and the forearm
+                Joint(b, Elb, 0.1f, 0.095f);
+                Limb(b, Fore, -0.095f, -L2 + 0.045f, 0.13f, 0.15f);
+                b.Lathe(new Vector3(0, -L2 + 0.05f, 0), Disc(0.07f, 0.03f, 0.006f), M(Fore, Gunmetal), DownRot, 24);   // end collar into the wrist
+                Pipe(b, Cab, new[] { new Vector3(0.02f, -0.07f, 0.07f), new Vector3(0.03f, -0.35f, 0.08f), new Vector3(0.02f, -0.66f, 0.068f), new Vector3(0.01f, -0.72f, 0.05f) }, 0.012f, Rubber, Brass);
                 Done(b, _elbow);
             }
             {
-                var b = new Batch();   // wrist rotator, palm, sensor head
-                b.Cylinder(new Vector3(0, -0.035f, 0), 0.048f, 0.07f, M("wrist rotator", Red), null, 18);
-                b.Box(new Vector3(0, -0.085f, 0), new Vector3(0.13f, 0.03f, 0.06f), M("wrist rotator", Dark));
-                b.Box(new Vector3(0, -0.05f, -0.06f), new Vector3(0.06f, 0.04f, 0.04f), M("sensor head", Yellow));
+                var b = new Batch();   // wrist: collar, red rotator drum, gunmetal palm with bolts, sensor housing
+                b.Lathe(new Vector3(0, 0.03f, 0), Disc(0.06f, 0.03f, 0.006f), M(Wr, Gunmetal), DownRot, 24);
+                b.Lathe(new Vector3(0, 0f, 0), Disc(0.062f, 0.05f, 0.012f), M(Wr, ToyRed), DownRot, 28);
+                b.Lathe(new Vector3(0, -0.05f, 0), Disc(0.064f, 0.008f, 0.002f), M(Wr, Brass), DownRot, 28);
+                b.Lathe(new Vector3(0, -0.058f, 0), Disc(0.05f, 0.012f, 0.003f), M(Wr, Gunmetal), DownRot, 24);
+                b.RoundedBox(new Vector3(0, -0.085f, 0), new Vector3(0.16f, 0.036f, 0.085f), 0.01f, M(Wr, Gunmetal), 2);
+                foreach (var x in new[] { -0.06f, 0.06f }) Bolt(b, new Vector3(x, -0.085f, -0.043f), new Vector3(0, 0, -1), 0.008f, M(Wr, Gunmetal));
+                b.RoundedBox(new Vector3(0, -0.04f, -0.07f), new Vector3(0.075f, 0.05f, 0.04f), 0.01f, M(Sens, ToyYellow), 2);
                 Done(b, _wrist);
             }
-            if (Has("sensor head")) eyes.Add(Prim(PrimitiveType.Cylinder, _wrist, new Vector3(0, -0.05f, -0.082f), new Vector3(0.028f, 0.004f, 0.028f), AxisZ, EyeOffMat));
-            foreach (var (pivot, part) in new[] { (_fingerL, "left finger"), (_fingerR, "right finger") })
+            if (Has(Sens)) eyes.Add(Separate(_wrist, "G_sensor", lb => lb.RoundedBox(new Vector3(0, -0.04f, -0.091f), new Vector3(0.05f, 0.016f, 0.006f), 0.004f, EyeOffMat, 1)));
+            foreach (var (pivot, part, fs) in new[] { (_fingerL, "left finger", -1f), (_fingerR, "right finger", 1f) })
             {
-                var b = new Batch();
-                b.Box(new Vector3(0, -0.055f, 0), new Vector3(0.02f, 0.11f, 0.045f), M(part, Yellow));
-                b.Box(new Vector3(pivot == _fingerL ? 0.012f : -0.012f, -0.09f, 0), new Vector3(0.008f, 0.05f, 0.04f), M(part, Rubber));
+                var b = new Batch();   // a big hooked finger: red base opening out, brass knuckles, gunmetal tip curling in, teeth
+                const float F = 1.6f;
+                b.RoundedBox(new Vector3(fs * 0.012f, -0.05f, 0) * F, new Vector3(0.042f, 0.1f, 0.066f) * F, 0.013f * F, M(part, ToyRed), 2, Batch.R(Vector3.forward, fs * 0.22f));
+                b.Rivet(new Vector3(fs * 0.012f, -0.012f, -0.034f) * F, new Vector3(0, 0, -1), 0.011f * F, M(part, Brass));
+                b.Rivet(new Vector3(fs * 0.024f, -0.1f, -0.034f) * F, new Vector3(0, 0, -1), 0.01f * F, M(part, Brass));
+                b.RoundedBox(new Vector3(fs * 0.012f, -0.14f, 0) * F, new Vector3(0.036f, 0.085f, 0.06f) * F, 0.011f * F, M(part, Gunmetal), 2, Batch.R(Vector3.forward, -fs * 0.5f));
+                for (int t = 0; t < 3; t++)
+                    b.Box(new Vector3(-fs * (0.006f + t * 0.004f), -0.07f - t * 0.03f, 0) * F, new Vector3(0.014f, 0.01f, 0.05f) * F, M(part, Dark), false, Batch.R(Vector3.forward, fs * 0.2f));
+                RustStreak(b, part, new Vector3(fs * 0.034f, -0.03f, 0) * F, new Vector3(fs, 0, 0), 0.08f, 0.024f);
                 Done(b, pivot);
             }
         }
@@ -121,9 +194,19 @@ namespace WorkshopWreckage
             Grip(0.6f);
         }
 
+        /// <summary>Sets the joints directly (degrees): turret yaw, upper arm, elbow and wrist pitch.
+        /// Model QA / posters; play poses come from Reach, Park and Fold.</summary>
+        public void Pose(float yaw, float upper, float elbow, float wrist)
+        {
+            _shoulder.localRotation = Quaternion.Euler(0, yaw, 0);
+            _upper.localRotation = Quaternion.AngleAxis(upper, Vector3.right);
+            _elbow.localRotation = Quaternion.AngleAxis(elbow, Vector3.right);
+            _wrist.localRotation = Quaternion.AngleAxis(wrist, Vector3.right);
+        }
+
         public void Grip(float open01)
         {
-            float x = 0.012f + 0.045f * Mathf.Clamp01(open01);
+            float x = 0.012f + 0.07f * Mathf.Clamp01(open01);
             _fingerL.localPosition = new Vector3(-x, -0.1f, 0);
             _fingerR.localPosition = new Vector3(x, -0.1f, 0);
         }
