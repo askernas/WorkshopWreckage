@@ -98,6 +98,7 @@ namespace WorkshopWreckage
             m.SetFloat("_Fade", fade);
             m.SetFloat("_Scratch", scratch);
             m.SetColor("_ScratchColor", new Color(0.62f, 0.57f, 0.48f));
+            m.SetColor("_ChipColor", new Color(0.3f, 0.29f, 0.27f));   // worn-through steel, not black holes
             m.SetFloat("_Grime", grime);
             m.SetVector("_GrimeColor", new Vector4(0.62f, 0.55f, 0.45f, 1));
         });

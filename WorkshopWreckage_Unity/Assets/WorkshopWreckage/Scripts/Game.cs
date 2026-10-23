@@ -520,15 +520,21 @@ namespace WorkshopWreckage
         /// <summary>Studio camera pose k (0 front, 1 side with the robot facing right, 2 back,
         /// 3 three-quarter front left, 4 three-quarter rear, then close-ups three-quarter from
         /// the front: 5 head, 6 right shoulder, elbow and forearm, 7 right wrist and claw (the
-        /// lower part of the forearm pivot), 8 right hip, knee and foot), framing the robot's
-        /// bounds (or the close-up's own; a robot without that pivot gets the full view).</summary>
+        /// lower part of the forearm pivot), 8 right hip, knee and foot, 9 the hips and pelvis from
+        /// the front (a band of the whole robot), 10 the right boot, 11 the right leg in profile),
+        /// framing the robot's bounds (or the close-up's own; a robot without that pivot gets the full view).</summary>
         void StudioCamera(int k)
         {
             var (rt, bb) = _studio.Value;
-            k %= 9;
-            float yaw = new[] { 0f, 90f, 180f, -35f, 145f, -30f, 70f, -45f, -40f }[k];
+            k %= 12;
+            float yaw = new[] { 0f, 90f, 180f, -35f, 145f, -30f, 70f, -45f, -40f, -15f, -40f, 90f }[k];
             var dir = Quaternion.AngleAxis(yaw, Vector3.up) * rt.forward;   // from the robot towards the camera
-            var close = k switch { 5 => "Head", 6 => "ArmR", 7 => "ArmR/Elbow", 8 => "LegR", _ => null };
+            if (k == 9)
+            {
+                bb.SetMinMax(new Vector3(bb.min.x, bb.min.y + bb.size.y * 0.2f, bb.min.z), new Vector3(bb.max.x, bb.min.y + bb.size.y * 0.47f, bb.max.z));
+                bb.Expand(new Vector3(-bb.size.x * 0.45f, 0, 0));   // the legs and pelvis, not the claws
+            }
+            var close = k switch { 5 => "Head", 6 => "ArmR", 7 => "ArmR/Elbow", 8 => "LegR", 10 => "LegR/Knee/Ankle", 11 => "LegR", _ => null };
             var sub = close == null ? null : rt.GetComponentsInChildren<Transform>(true).FirstOrDefault(t => PathEndsWith(t, close));
             var rs = sub != null ? sub.GetComponentsInChildren<Renderer>() : new Renderer[0];
             if (rs.Length > 0)
