@@ -59,6 +59,8 @@ namespace WorkshopWreckage
         Step _lastStep;
         float _bend, _armHold, _armReach, _armLift;
         float _reachY;   // height above the feet of the part being picked up (the claws reach down to it)
+        bool _planAhead;        // robots.json plan_ahead: choose the next part while walking to deliver
+        float _decidePause;     // robots.json decide_pause: standing still after a delivery before setting off
         int _capacity, _types;
         public int Capacity => _capacity;
         float _walk, _turn, _reach, _maxPickH, _followDist, _radius, _pickTime, _depositTime, _height, _maxItem, _stepH, _gather, _cruise;
@@ -116,6 +118,8 @@ namespace WorkshopWreckage
             _chargeMinutes = (float)Json.Num(c, "charge_minutes", 1);
             _canStore = Json.Bool(c, "can_direct_store", true);
             _canClimb = Json.Bool(c, "can_climb");
+            _planAhead = Json.Bool(c, "plan_ahead");
+            _decidePause = (float)Json.Num(c, "decide_pause", 0.15);
             _largeItem = (float)Json.Num(RootConfig(), "large_item_size", 0.25);
             ApplyUpgrades();
             if (!Flies && !Stationary)
@@ -623,8 +627,9 @@ namespace WorkshopWreckage
                     if (handoverPending && carried.Count == 0) { handoverPending = false; _step = Step.ToPlayer; _path = null; break; }
                     Brake(dt);
                     if (Flies) HoverHold(dt, Mathf.Max(0.6f, _altitude));
+                    if (_planReady && _plannedId >= 0) FaceTowards(g.world.instances[_plannedId].Position, dt);   // "deciding": looks at the next part
                     _idleT -= dt;
-                    if (_idleT <= 0) ChooseNext();
+                    if (_idleT <= 0 && !TryCommitPlan()) ChooseNext();
                     break;
                 case Step.ToItem:
                 {
@@ -696,6 +701,8 @@ namespace WorkshopWreckage
                 case Step.ToDest:
                     if (carried.Count == 0) { _step = Step.Choose; break; }
                     if (_path == null && !PlanDelivery()) { DropCarried($"{displayName} can't reach where that part belongs"); break; }
+                    if (_planAhead && !Flies && _planner == null && !_planReady && SlotsUsed >= _capacity && _path != null && _path.Count > 0)
+                        _planner = StartCoroutine(PlanNext(_path[_path.Count - 1]));
                     if (Flies ? FlyTo(_hoverTarget, dt, true) : Steer(dt)) { _step = Step.Depositing; StartCoroutine(Deposit()); }
                     break;
                 default:
@@ -824,6 +831,96 @@ namespace WorkshopWreckage
             if (carried.Count > 0) { _step = Step.ToDest; _path = null; return; }
             _idleT = 0.5f;
             if (tries == 0) status = "nothing left it can reach";
+        }
+
+        // ---------------------------------------------------------------- planning ahead (robots.json plan_ahead)
+
+        Coroutine _planner;
+        bool _planReady;
+        int _plannedId = -1;
+        readonly List<(float score, int id)> _planList = new();
+        public static int planUsed, planFallback;   // QA: how often a planned part was taken
+
+        /// <summary>Chooses the next part while the robot walks to deliver: the same rules and scoring as
+        /// ChooseNext, from the spot where it will stand, spread over frames (items scored in slices, one
+        /// path per frame) so the choice never costs a frame of its own. Reserves nothing; the result is
+        /// checked again when it is used (TryCommitPlan).</summary>
+        IEnumerator PlanNext(Vector3 from)
+        {
+            _planReady = false;
+            _plannedId = -1;
+            yield return null;
+            _nav.RefreshItems(g.world, _stepH);
+            _stagedNow = StagedCounts();
+            _planList.Clear();
+            var all = g.world.instances;
+            for (int i = 0; i < all.Count; i++)
+            {
+                var inst = all[i];
+                if (Pickable(inst))
+                {
+                    float sc = (inst.Position - from).magnitude;
+                    if (strategy == "opportunistic")
+                        sc += (ReachableDest(g.db.Get(inst.defId).storageBox) ? 0 : 1.5f) - (_targetRank > 0 && g.progress.SortedOf(inst.defId) > 0 ? 1.5f : 0);
+                    _planList.Add((sc, inst.id));
+                }
+                if (i % 600 == 599) yield return null;
+            }
+            _planList.Sort((a, b) => a.score.CompareTo(b.score));
+            int tries = 0, maxTries = 6 + 3 * _searchRank, coveredSkips = 0;
+            foreach (var (_, id) in _planList)
+            {
+                var inst = g.world.instances[id];
+                if (!Pickable(inst)) continue;
+                if (g.Covered(id)) { if (++coveredSkips > 40) break; continue; }
+                if (++tries > maxTries) break;
+                yield return null;   // one path per frame
+                bool high = inst.Position.y > _maxPickH;
+                var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : g.InTray(inst.Position) ? 0.65f : _reach);
+                if (goal.HasValue && _nav.Path(from, goal.Value) != null) { _plannedId = id; break; }
+            }
+            _planList.Clear();
+            _planReady = true;
+            _planner = null;
+        }
+
+        /// <summary>After a delivery: takes the part planned on the way if it is still a valid choice
+        /// (still pickable, not reserved, not covered, no tray work or player request first) and still
+        /// reachable from here (one path). Otherwise false, and the robot chooses as usual.</summary>
+        bool TryCommitPlan()
+        {
+            if (!_planAhead) return false;
+            if (_planner != null) { StopCoroutine(_planner); _planner = null; }
+            bool ready = _planReady;
+            int id = _plannedId;
+            _planReady = false;
+            _plannedId = -1;
+            if (!ready || id < 0) return false;
+            bool ok = carried.Count == 0 && preferDef < 0 && !handoverPending && !paused && Battery >= 0.12f;
+            var inst = g.world.instances[id];
+            if (ok) ok = Pickable(inst) && !g.Covered(id) && !g.index.QuerySphere(g.TrayCenter, 1f).Any(i => g.InTray(g.world.instances[i].Position) && Pickable(g.world.instances[i]));
+            if (ok)
+            {
+                _nav.RefreshItems(g.world, _stepH);
+                bool high = inst.Position.y > _maxPickH;
+                var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : g.InTray(inst.Position) ? 0.65f : _reach);
+                var path = goal.HasValue ? _nav.Path(transform.position, goal.Value) : null;
+                if (path != null)
+                {
+                    _path = path;
+                    _pathIdx = 0;
+                    targetId = id;
+                    g.robotReserved.Add(id);
+                    _step = Step.ToItem;
+                    status = "";
+                    planUsed++;
+                    Debug.Log($"[robotplan] {this.id} takes the part it planned on the way ({planUsed} planned, {planFallback} chosen afresh)");
+                    return true;
+                }
+            }
+            planFallback++;
+            Debug.Log($"[robotplan] {this.id} chooses afresh ({planUsed} planned, {planFallback} chosen afresh)");
+            return false;
         }
 
         /// <summary>Spiderbot: works through its one assigned definition. Known copies in
@@ -1088,7 +1185,7 @@ namespace WorkshopWreckage
             _path = null;
             if (carried.Any(c => g.world.DefOf(c).storageBox == _destBox)) DropCarried($"{displayName}: that destination is full");
             _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
-            _idleT = 0.15f;
+            _idleT = carried.Count > 0 ? 0.15f : _decidePause;
             MaybeGesture();
         }
 
@@ -1207,7 +1304,7 @@ namespace WorkshopWreckage
             _bend = 0; _armReach = 0;
             _path = null;
             _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
-            _idleT = 0.15f;
+            _idleT = carried.Count > 0 ? 0.15f : _decidePause;
         }
 
         void DropCarried(string why)

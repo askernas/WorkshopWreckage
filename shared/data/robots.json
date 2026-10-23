@@ -11,6 +11,7 @@
 			"reach": 0.32, "reach_height": 0.35, "max_item_size": 0.33, "heap_step_height": 0.18,
 			"can_direct_store": true, "can_climb": false, "can_fly": false,
 			"pick_time": 1.1, "deposit_time": 0.9, "follow_distance": 1.1, "radius": 0.12,
+			"plan_ahead": true, "decide_pause": 0.5,
 			"limits": {"capacity": 3, "item_types": 3, "reach_height": 0.62, "walk_speed": 1.05, "heap_step_height": 0.18},
 			"strengths": ["Reliable all-rounder", "Stores low destinations itself"],
 			"limitations": ["One part at a time (upgradable to three)", "Walks only on flat floor, around heaps", "Cannot climb or fly", "Never reaches the high shelves"],
