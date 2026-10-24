@@ -235,7 +235,7 @@ namespace WorkshopWreckage
                 _ => (RobotModel)new GameObject("Model").AddComponent<RetrobotModel>(),
             };
             _model.transform.SetParent(transform, false);
-            if (_model is HoverbotModel hm) hm.PaintFactory(ModuleSkin.HoverbotFactory(id));   // three Hoverbots, one model, three factory skins
+            if (_model is HoverbotModel hm) hm.PaintFactory(id);   // three Hoverbots, one model, three factory skins
             _model.Init();
             _model.transform.localScale = Vector3.one * (_height / _model.ModelHeight);
             if (_model is SortingArmModel sam)
@@ -301,6 +301,29 @@ namespace WorkshopWreckage
         }
 
         RobotWorkbench.Project Project => g.workbench?.P(id);
+
+        /// <summary>Points the model at the modules fitted to this chassis (its own, a donor's, or an empty slot)
+        /// and rebuilds it when that changed. A chassis not built yet shows its own parts as always.</summary>
+        public void ApplyModules()
+        {
+            var reg = g.modules;
+            bool tracked = reg != null && RobotModules.IsChassis(id) && reg.Built(id);
+            string From(ModuleSlot s)
+            {
+                if (!tracked || (s == ModuleSlot.Prop && !RobotModules.IsHover(id))) return null;
+                var m = reg.At(id, s);
+                return m == null ? "" : m.origin == id ? null : m.origin;
+            }
+            var (h, l, r, p) = (From(ModuleSlot.Head), From(ModuleSlot.ArmL), From(ModuleSlot.ArmR), From(ModuleSlot.Prop));
+            if (_modelFroms == (h, l, r, p)) return;
+            _modelFroms = (h, l, r, p);
+            (_model.headFrom, _model.armLFrom, _model.armRFrom, _model.propFrom) = (h, l, r, p);
+            _model.Rebuild();
+            if (Operational) _model.SetEyes(true);
+        }
+        (string, string, string, string) _modelFroms;
+        /// <summary>QA: the module origins the model was last built with (null = own, "" = empty).</summary>
+        public (string h, string l, string r, string p) ModelFroms => _modelFroms;
 
         /// <summary>Rebuilds the model from the workbench state. While unbuilt the robot
         /// stands on its mat; missing parts show as ghosts with empty sockets.</summary>
@@ -372,6 +395,7 @@ namespace WorkshopWreckage
             _step = Step.Choose;
             transform.SetPositionAndRotation(home, homeRot);
             if (Flies) _altitude = 0.6f;
+            g.modules?.EnsureBuilt(id);
             if (arm != null) { arm.ToBench(); return; }
             AdoptCarried();
         }
@@ -438,9 +462,11 @@ namespace WorkshopWreckage
             Sfx.Play("complete", transform.position + Vector3.up * 0.3f, -2);
             mode = Mode.Working;
             _step = Step.Choose;
+            g.modules?.OnFirstActivation(id, g.playTime);   // its own head, arms (and propeller) are mounted modules from now on
             g.progression?.OnRobotRepaired(id);
             GameEvents.Raise(GameEventKind.RobotActivated, Owner, type);
             g.hud.Toast($"{displayName} is online and starts sorting!", true);
+            g.modules?.CheckAllOperational(rid => g.robots.Find(r => r.id == rid)?.Operational == true);
             g.workbench?.Refresh();
             foreach (var r in g.robots) if (r != this && r.mode == Mode.Assembling) r.RefreshAssembly();   // the next Hoverbot may take the mat
         }

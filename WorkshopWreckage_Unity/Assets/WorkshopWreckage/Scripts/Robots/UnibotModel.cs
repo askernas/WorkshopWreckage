@@ -75,10 +75,10 @@ namespace WorkshopWreckage
                 Done(b, _gyro);
             }
             foreach (var (arm, s, part) in new[] { (_armL, -1f, "left arm"), (_armR, 1f, "right arm") })
-                FamilyArm(arm, s, part, new ArmSpec { paint = ToyGreen, paintDeep = ToyGreenDeep, red = ToyRed, clawScale = 1.08f, twist = 20f });
+                BuildArmModule(arm, s, part, new ArmSpec { paint = ToyGreen, paintDeep = ToyGreenDeep, red = ToyRed, clawScale = 1.08f, twist = 20f });
             // Unibot keeps its own head design (the user's choice, 2026-10-24): the earlier detailed head
-            DetailedHead(head, ToyGreen, new Vector3(0.36f, 0.32f, 0.32f), 1, 0.078f,
-                "head shell", "optical eye", null, "antenna pair", "antenna pair", "head shell", "head shell", null, false, false, 1f, true);   // with the canonical ear cones and antennas
+            BuildHeadModule(() => DetailedHead(head, ToyGreen, new Vector3(0.36f, 0.32f, 0.32f), 1, 0.078f,
+                "head shell", "optical eye", null, "antenna pair", "antenna pair", "head shell", "head shell", null, false, false, 1f, true));   // with the canonical ear cones and antennas
         }
 
         void BuildWheel()

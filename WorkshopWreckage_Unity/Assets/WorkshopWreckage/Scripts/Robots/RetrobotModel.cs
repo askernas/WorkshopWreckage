@@ -96,8 +96,8 @@ namespace WorkshopWreckage
             BuildTorso();
             foreach (var (leg, knee, ankle, s) in new[] { (legL, kneeL, ankleL, -1f), (legR, kneeR, ankleR, 1f) }) BuildLeg(leg, knee, ankle, s);
             foreach (var (arm, s, part) in new[] { (armL, -1f, ArmL), (armR, 1f, ArmR) })
-                FamilyArm(arm, s, part, new ArmSpec { paint = Yellow, paintDeep = YellowDeep, red = ToyRed, clawScale = 1.08f, twist = 20f });
-            FamilyHead(head, Head, new HeadSpec { w = HeadW, h = HeadH, d = HeadD, eyeX = 0.097f, eyeY = 0.46f, earY = 0.47f, paint = Yellow, beacon = true, antennas = true, mouth = true });
+                BuildArmModule(arm, s, part, new ArmSpec { paint = Yellow, paintDeep = YellowDeep, red = ToyRed, clawScale = 1.08f, twist = 20f });
+            BuildHeadModule(() => FamilyHead(head, Head, new HeadSpec { w = HeadW, h = HeadH, d = HeadD, eyeX = 0.097f, eyeY = 0.46f, earY = 0.47f, paint = Yellow, beacon = true, antennas = true, mouth = true }));
         }
 
         // ------------------------------------------------------------ torso

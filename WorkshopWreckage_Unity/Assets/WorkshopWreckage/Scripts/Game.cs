@@ -32,6 +32,8 @@ namespace WorkshopWreckage
         public Interaction interaction;
         public Hud hud;
         public RobotWorkbench workbench;
+        /// <summary>The 24 detachable heads, arms and propellers and where each one is (Modify Robot).</summary>
+        public RobotModules modules;
         public readonly List<Robot> robots = new();
         public Robot retrobot => robots.Find(r => r.id == "retrobot");
         /// <summary>Sorting Arm sockets of the current layout (two per drawer cabinet).</summary>
@@ -258,6 +260,7 @@ namespace WorkshopWreckage
                 _postersFor = layout;
             }
             workbench.ResetState();
+            modules = new RobotModules();
             SpawnRobots();
             workbench.Load(save);
             foreach (var u in units.Values) { u.labelProvider = LabelFor; u.RefreshLabels(); }
@@ -267,6 +270,9 @@ namespace WorkshopWreckage
             objectives.Completed += o => { hud.Toast("Objective complete: " + o.text, true); Sfx.Play("milestone", null, -4); };
             if (save != null && save.TryGetValue("robots", out var ro))
                 foreach (var kv in Json.Obj(ro)) robots.Find(r => r.id == kv.Key)?.LoadState(Json.Obj(kv.Value));
+            modules.Load(save != null ? Json.Obj(save.GetValueOrDefault("modules")) : null, robots);
+            foreach (var e in modules.Audit()) Debug.LogError("[modules] " + e);
+            foreach (var r in robots) r.ApplyModules();
             foreach (var r in robots) r.RefreshAssembly();   // which crafted Hoverbot is on the bench depends on the others
             workbench.Refresh();
             progress.Milestone += (key, text) => { hud.Toast(text, key.StartsWith("zone") || key == "first_pickup"); Sfx.Play("milestone", null, -6); };
@@ -772,6 +778,21 @@ namespace WorkshopWreckage
             r.SetOperational();
             r.enabled = false;
             if (r.arm != null) r.arm.enabled = false;
+            // QA (--modules=head:retrobot,arm_l:unibot,arm_r:spiderbot,prop:hoverbot_3 or <slot>:empty): fit other robots'
+            // modules, exchanged through the registry exactly as at the workbench
+            if (args.TryGetValue("modules", out var mods))
+            {
+                foreach (var spec in mods.Split(','))
+                {
+                    var kv = spec.Split(':');
+                    var slot = (ModuleSlot)System.Array.IndexOf(new[] { "head", "arm_l", "arm_r", "prop" }, kv[0]);
+                    if (kv[1] == "empty") { modules.Remove(id, slot); continue; }
+                    modules.EnsureBuilt(kv[1]);
+                    modules.Swap(id, kv[1], slot, 0);
+                }
+                foreach (var e in modules.Audit()) Debug.LogError("[modules] " + e);
+                r.ApplyModules();
+            }
             var pos = Shared.Pos(layout.spawn.x, 0, layout.spawn.z - 1.2f);
             r.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(Vector3.back));   // faces south, towards the camera
             r.PoseRest();

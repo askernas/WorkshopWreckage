@@ -152,12 +152,12 @@ namespace WorkshopWreckage
             }
             // the gripping jaws: two short family arms under the front, the grippers meet below the face
             foreach (var (jaw, sd) in new[] { (_jawL, -1f), (_jawR, 1f) })
-                FamilyArm(jaw, sd, "gripping jaws", new ArmSpec { paint = ToyGreen, paintDeep = ToyGreenDeep, red = ToyRed, clawScale = 1.15f, twist = 20f });
-            FamilyHead(head, "head", new HeadSpec
+                BuildArmModule(jaw, sd, "gripping jaws", new ArmSpec { paint = ToyGreen, paintDeep = ToyGreenDeep, red = ToyRed, clawScale = 1.15f, twist = 20f });
+            BuildHeadModule(() => FamilyHead(head, "head", new HeadSpec
             {
                 w = 0.34f, h = 0.27f, d = 0.28f, eyes = 2, eyeX = 0.08f, eyeScale = 0.95f, eyeY = 0.52f, earY = 0.5f, paint = ToyGreen,
                 beacon = true, antennas = true, mouth = true, eyePart = "eye pair", antennaPart = "antenna pair",
-            });
+            }));
         }
 
         // ------------------------------------------------------------ Layer B: the tripod gait on planted feet

@@ -16,8 +16,16 @@ namespace WorkshopWreckage
         RobotUpgraded,     // a robot upgrade was bought (robotType = the type)
         RobotTripCompleted,// a robot emptied its load (deposited and/or staged everything it carried)
         LevelReached,      // the player reached a level (count = the level)
-        ModuleFitted,      // a cosmetic head / arm module was fitted to a robot (Modify Robot)
-        RobotSummoned,     // a robot was called to the workbench (Modify Robot)
+        ModuleFitted,      // a head / arm / propeller module was fitted to a robot (category = module id, destination = robot id)
+        RobotSummoned,     // a robot was called to the workbench (Modify Robot; destination = robot id)
+        ModuleRemoved,     // a module went from a robot to a workbench spare slot (category = module id, destination = robot id)
+        ModuleExchanged,   // a module moved directly from one robot to another (destination = the receiving robot id)
+        FirstModuleTransfer, // the first time a module was fitted to a robot other than its origin
+        RobotIncomplete,   // a built robot lost a required module (it stays parked at the workbench)
+        RobotBuilt,        // a chassis became complete: first build or repair. category = paint scheme ("mixed" if not
+                           // colour coordinated), destination = robot id, count = flags 1 first, 2 colour coordinated,
+                           // 4 the chassis' own scheme, 8 all factory originals. A note only: no achievements yet
+        AllRobotsOperational, // all seven chassis were operational at the same time
     }
 
     /// <summary>One gameplay event: stable identifiers only (no object references), so a listener can
@@ -92,6 +100,13 @@ namespace WorkshopWreckage
                     break;
                 case GameEventKind.RobotTripCompleted:
                     Add(k + "/parts/" + who, e.count);
+                    break;
+                case GameEventKind.RobotBuilt:
+                    Add(k + ((e.count & 1) != 0 ? "/first" : "/repair"));
+                    if ((e.count & 2) != 0) { Add(k + "/coordinated"); Add(k + "/coordinated/" + e.category); }
+                    if ((e.count & 4) != 0) Add(k + "/coordinated_chassis");
+                    if ((e.count & 8) != 0) Add(k + "/original");
+                    if (e.destination != "") Add(k + "/robot:" + e.destination);
                     break;
                 case GameEventKind.LevelReached:
                     counters["level_max"] = Math.Max(Get("level_max"), e.count);

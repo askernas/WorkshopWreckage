@@ -484,6 +484,7 @@ namespace WorkshopWreckage
                 ["robots"] = g.robots.ToDictionary(r => r.id, r => (object)r.ToDict()),
                 ["objectives"] = g.objectives.ToList(),
                 ["workbench"] = g.workbench.ToDict(),
+                ["modules"] = g.modules.ToDict(),
                 ["items"] = items, ["item_defs"] = itemDefs, ["storage"] = storage,
                 ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),

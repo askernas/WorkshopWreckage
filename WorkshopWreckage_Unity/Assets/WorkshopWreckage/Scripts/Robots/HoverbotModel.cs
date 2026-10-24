@@ -34,7 +34,11 @@ namespace WorkshopWreckage
         /// Init. The three Hoverbots share this one model; only these skins differ (ModuleSkin.HoverbotFactory).</summary>
         public ModuleSkin chassisSkin = ModuleSkin.ClassicRed, headSkin = ModuleSkin.ClassicRed, armLSkin = ModuleSkin.ClassicRed,
             armRSkin = ModuleSkin.ClassicRed, propSkin = ModuleSkin.ClassicRed;
-        public void PaintFactory(ModuleSkin s) => chassisSkin = headSkin = armLSkin = armRSkin = propSkin = s;
+        public void PaintFactory(string robotId) => chassisSkin = headSkin = armLSkin = armRSkin = propSkin = ModuleSkin.HoverbotFactory(robotId);
+
+        protected override bool OwnBuild(string from) => from == null || RobotModules.IsHover(from);
+        /// <summary>The skin of a Hoverbot module from `from` (null: this chassis' own).</summary>
+        ModuleSkin SkinFrom(string from) => from == null ? chassisSkin : RobotModules.IsHover(from) ? ModuleSkin.HoverbotFactory(from) : chassisSkin;
 
         ModuleSkin SkinOf(string part) => part switch
         {
@@ -47,9 +51,11 @@ namespace WorkshopWreckage
 
         /// <summary>Each part in its module's skin. The arm segments are built in kit yellow only to tell them
         /// apart from the red grippers, which stay red in every skin (as do the metals, eyes and wear).</summary>
-        protected override Material SkinPart(string part, Material m)
+        protected override Material SkinPart(string part, Material m) => ModulePaint(SkinOf(part), part, m);
+
+        /// <summary>A Hoverbot part's paint in skin s (also a Hoverbot module's finish on another chassis).</summary>
+        public static Material ModulePaint(ModuleSkin s, string part, Material m)
         {
-            var s = SkinOf(part);
             if (s.Factory || part.EndsWith(" claw")) return FamilySkin(m == ToyYellow ? ToyRed : m == ToyYellowDeep ? ToyRedDeep : m);
             if (m == ToyYellow) return s.Arm;
             if (m == ToyYellowDeep) return s.ArmDeep;
@@ -81,42 +87,6 @@ namespace WorkshopWreckage
             b.Lathe(Vector3.zero, new[] { new Vector2(r0 - 0.003f, y0 - 0.0004f), new Vector2(r0, y0), new Vector2(r1, y1), new Vector2(r1 - 0.003f, y1 + 0.0004f) }, M(part, mat), null, 48);
         }
 
-        /// <summary>Emblem linework: tongues grown from a root (across, up, in units of the emblem's size), at an angle
-        /// (deg), with a length and greatest width; drawn in three overlapping segments tapering to a point (flame),
-        /// swelling in the middle (petal) or flat (line).</summary>
-        static readonly (float u, float v, float a, float l, float w, char taper)[] LotusStrokes =
-        {
-            (0, -0.32f, 90, 0.78f, 0.26f, 'p'), (-0.04f, -0.34f, 122, 0.66f, 0.22f, 'p'), (0.04f, -0.34f, 58, 0.66f, 0.22f, 'p'),
-            (-0.08f, -0.36f, 152, 0.5f, 0.18f, 'p'), (0.08f, -0.36f, 28, 0.5f, 0.18f, 'p'), (-0.42f, -0.4f, 0, 0.84f, 0.06f, 'l'),
-        }, FlameStrokes =
-        {
-            (0, -0.5f, 90, 1.05f, 0.22f, 'f'), (-0.06f, -0.48f, 112, 0.82f, 0.17f, 'f'), (0.06f, -0.48f, 68, 0.82f, 0.17f, 'f'),
-            (-0.12f, -0.46f, 136, 0.56f, 0.14f, 'f'), (0.12f, -0.46f, 44, 0.56f, 0.14f, 'f'),
-            (-0.4f, -0.08f, 70, 0.34f, 0.1f, 'f'), (0.4f, -0.08f, 110, 0.34f, 0.1f, 'f'),
-        };
-
-        /// <summary>A painted emblem centred at c on a surface with outward normal n (batch coordinates), upright
-        /// (or upside down) along the surface.</summary>
-        void Emblem(Batch b, string part, string kind, Vector3 c, Vector3 n, float size, Material mat, bool flip = false)
-        {
-            var nU = new Vector3(n.x, n.y, -n.z).normalized;
-            var upU = Vector3.ProjectOnPlane(Vector3.up, nU).normalized * (flip ? -1 : 1);
-            var rot = Quaternion.LookRotation(nU, upU);
-            var rightU = rot * Vector3.right;
-            foreach (var s in kind == "lotus" ? LotusStrokes : FlameStrokes)
-            {
-                var dir = new Vector2(Mathf.Cos(s.a * Mathf.Deg2Rad), Mathf.Sin(s.a * Mathf.Deg2Rad));
-                int segs = s.taper == 'l' ? 1 : 3;
-                for (int i = 0; i < segs; i++)
-                {
-                    float w = s.taper == 'f' ? 1f - 0.32f * i : s.taper == 'p' ? (i == 1 ? 1f : i == 0 ? 0.62f : 0.5f) : 1f;
-                    float t = (i + 0.5f) / segs, len = s.l / segs * (segs > 1 ? 1.25f : 1f);
-                    var q = new Vector2(s.u, s.v) + dir * (s.l * t);
-                    var o = (rightU * q.x + upU * q.y) * size + nU * 0.0012f;
-                    b.RoundedBox(c + new Vector3(o.x, o.y, -o.z), new Vector3(len * size, s.w * w * size, 0.0018f), 0.0008f, M(part, mat), 1, rot * Quaternion.Euler(0, 0, s.a));
-                }
-            }
-        }
         protected override bool HeadTopTaken => true;
         /// <summary>The flier keeps its load in the hold under the saucer (no claw grip in the robot logic).</summary>
         public override Vector3? GripPoint => null;
@@ -153,6 +123,13 @@ namespace WorkshopWreckage
 
         protected override void BuildGeometry()
         {
+            // Hoverbot modules on a Hoverbot keep this model's own build, in their own skin; other robots'
+            // modules are built by BuildHeadModule / BuildArmModule
+            headSkin = SkinFrom(headFrom);
+            armLSkin = SkinFrom(armLFrom);
+            armRSkin = SkinFrom(armRFrom);
+            propSkin = SkinFrom(propFrom == "" ? null : propFrom);
+            _mast.localPosition = Batch.G(new Vector3(0, HeadY + (OwnBuild(headFrom) ? HeadH : HeadHeightOf(headFrom)), 0));
             var b = new Batch();
             // saucer: a deep lens (the concept sheet), red shells either side of a red rim band
             // with dark seams, a wide dark slatted skirt underneath
@@ -274,48 +251,33 @@ namespace WorkshopWreckage
             if (Has("siren light"))
                 beacons.Add(Separate(_saucer, "G_siren", lb => lb.Lathe(new Vector3(0, 0.37f, -0.39f), Dome(0.03f, 0.028f, 6), BeaconOffMat, Quaternion.FromToRotation(Vector3.up, new Vector3(0, 0.6f, 0.8f)), 16)));
             {
-                var r = new Batch();   // propeller: red dome hub, two riveted paddle blades
-                r.Lathe(new Vector3(0, -0.01f, 0), Disc(0.04f, 0.02f, 0.005f), M("rotor hub", Gunmetal), null, 18);
-                r.Lathe(new Vector3(0, 0.01f, 0), Dome(0.038f, 0.032f), M("rotor hub", ToyRed), null, 18);
-                foreach (var (s, part) in new[] { (1f, "propeller blade a"), (-1f, "propeller blade b") })
+                System.Action prop = () =>
                 {
-                    var twist = Batch.R(Vector3.right, s * 0.3f);   // pitched: the paddles read from the front
-                    r.RoundedBox(new Vector3(s * 0.07f, 0.005f, 0), new Vector3(0.08f, 0.022f, 0.03f), 0.006f, M(part, Gunmetal), 2, twist);   // shank
-                    r.RoundedBox(new Vector3(s * 0.26f, 0.005f, 0), new Vector3(0.3f, 0.014f, 0.1f), 0.007f, M(part, ToyRed), 2, twist);
-                    r.Lathe(new Vector3(s * 0.41f, -0.002f, 0), Disc(0.05f, 0.014f, 0.004f), M(part, ToyRed), twist, 24);              // rounded tip
-                    r.RoundedBox(new Vector3(s * 0.26f, 0.005f, 0), new Vector3(0.31f, 0.017f, 0.008f), 0.003f, M(part, Gunmetal), 1, twist);   // spine
-                    foreach (var t in new[] { 0.16f, 0.26f, 0.36f }) Bolt(r, new Vector3(s * t, 0.013f, 0.03f), Vector3.up, 0.005f, M(part, Gunmetal));
-                    if (propSkin.Stripe is Material ps)   // two diagonal stripes across each blade towards its tip
-                        foreach (var t in new[] { 0.31f, 0.35f })
-                            r.RoundedBox(new Vector3(s * t, 0.005f, 0), new Vector3(propSkin.emblem == "flame" ? 0.017f : 0.013f, 0.0158f, 0.094f), 0.002f, M(part, ps), 1, twist * Batch.R(Vector3.up, s * 0.45f));
-                }
-                Done(r, _rotor);
+                    var r = new Batch();   // propeller: red dome hub, two riveted paddle blades
+                    r.Lathe(new Vector3(0, -0.01f, 0), Disc(0.04f, 0.02f, 0.005f), M("rotor hub", Gunmetal), null, 18);
+                    r.Lathe(new Vector3(0, 0.01f, 0), Dome(0.038f, 0.032f), M("rotor hub", ToyRed), null, 18);
+                    foreach (var (s, part) in new[] { (1f, "propeller blade a"), (-1f, "propeller blade b") })
+                    {
+                        var twist = Batch.R(Vector3.right, s * 0.3f);   // pitched: the paddles read from the front
+                        r.RoundedBox(new Vector3(s * 0.07f, 0.005f, 0), new Vector3(0.08f, 0.022f, 0.03f), 0.006f, M(part, Gunmetal), 2, twist);   // shank
+                        r.RoundedBox(new Vector3(s * 0.26f, 0.005f, 0), new Vector3(0.3f, 0.014f, 0.1f), 0.007f, M(part, ToyRed), 2, twist);
+                        r.Lathe(new Vector3(s * 0.41f, -0.002f, 0), Disc(0.05f, 0.014f, 0.004f), M(part, ToyRed), twist, 24);              // rounded tip
+                        r.RoundedBox(new Vector3(s * 0.26f, 0.005f, 0), new Vector3(0.31f, 0.017f, 0.008f), 0.003f, M(part, Gunmetal), 1, twist);   // spine
+                        foreach (var t in new[] { 0.16f, 0.26f, 0.36f }) Bolt(r, new Vector3(s * t, 0.013f, 0.03f), Vector3.up, 0.005f, M(part, Gunmetal));
+                        if (propSkin.Stripe is Material ps)   // two diagonal stripes across each blade towards its tip
+                            foreach (var t in new[] { 0.31f, 0.35f })
+                                r.RoundedBox(new Vector3(s * t, 0.005f, 0), new Vector3(propSkin.emblem == "flame" ? 0.017f : 0.013f, 0.0158f, 0.094f), 0.002f, M(part, ps), 1, twist * Batch.R(Vector3.up, s * 0.45f));
+                    }
+                    Done(r, _rotor);
+                };
+                if (propFrom == "") AsModule("", prop); else prop();
             }
             foreach (var (arm, s, part, claw) in new[] { (_armL, -1f, "left arm", "left claw"), (_armR, 1f, "right arm", "right claw") })
             {
                 arm.localScale = Vector3.one * 0.85f;   // short arms out of the rim ports, big grippers (the sheet)
-                FamilyArm(arm, s, part, new ArmSpec { paint = ToyYellow, paintDeep = ToyYellowDeep, red = ToyRed, clawScale = 1.3f, twist = 0f, clawPart = claw });   // yellow: the arm's own paint (SkinPart)
+                BuildArmModule(arm, s, part, new ArmSpec { paint = ToyYellow, paintDeep = ToyYellowDeep, red = ToyRed, clawScale = 1.3f, twist = 0f, clawPart = claw });   // yellow: the arm's own paint (SkinPart)
             }
-            DetailedHead(head, ToyRed, new Vector3(0.44f, HeadH, 0.32f), 2, 0.06f,
-                "head", "left eye lens", "right eye lens", "left antenna", "right antenna", "left ear cap", "right ear cap", null, true, true, familyEars: true);
-            {
-                var w = new Batch();   // the loose wire under the head (it is on the sheet)
-                Pipe(w, "head", new[] { new Vector3(0.19f, 0.03f, 0.06f), new Vector3(0.205f, -0.005f, 0.08f), new Vector3(0.212f, -0.03f, 0.07f) }, 0.004f, Rubber, Brass);
-                if (headSkin.Stripe is Material hs)
-                {
-                    // pin lines round the head behind the face and near the back (thin slices of a slightly larger
-                    // head box, so they follow its rounded edges), and the emblem on the forehead between the eyes
-                    // a painted frame on the flat of the face, just inside its rounded edges (the eye rings sit over it)
-                    float bev = Mathf.Min(0.058f, HeadH * 0.19f), wide = headSkin.emblem == "flame" ? 0.007f : 0.0045f;
-                    float fx = 0.22f - bev - 0.004f, fy0 = bev + 0.004f, fy1 = HeadH - bev - 0.004f, fz = -0.16f - 0.0012f;
-                    foreach (var sx in new[] { -1f, 1f })
-                        w.RoundedBox(new Vector3(sx * fx, (fy0 + fy1) / 2, fz), new Vector3(wide, fy1 - fy0 + wide, 0.0018f), 0.0008f, M("head", hs), 1);
-                    foreach (var y in new[] { fy0, fy1 })
-                        w.RoundedBox(new Vector3(0, y, fz), new Vector3(2 * fx + wide, wide, 0.0018f), 0.0008f, M("head", hs), 1);
-                    Emblem(w, "head", headSkin.emblem, new Vector3(0, 0.228f, -0.16f), new Vector3(0, 0, -1), headSkin.emblem == "flame" ? 0.055f : 0.05f, hs);
-                }
-                Done(w, head);
-            }
+            BuildHeadModule(() => HoverHead(head, headSkin));
         }
 
         public override (Transform parent, Vector3 local) CarrySlot(int i, int n)

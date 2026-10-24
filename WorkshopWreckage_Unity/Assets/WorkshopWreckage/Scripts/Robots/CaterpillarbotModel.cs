@@ -199,12 +199,12 @@ namespace WorkshopWreckage
                 Done(b, _boxes[i]);
             }
             foreach (var (arm, s, part, claw) in new[] { (_armL, -1f, "left arm", "left claw"), (_armR, 1f, "right arm", "right claw") })
-                FamilyArm(arm, s, part, new ArmSpec { paint = ToyYellow, paintDeep = ToyYellowDeep, red = ToyRed, clawScale = 1.08f, twist = 20f, clawPart = claw });
-            FamilyHead(head, "head", new HeadSpec
+                BuildArmModule(arm, s, part, new ArmSpec { paint = ToyYellow, paintDeep = ToyYellowDeep, red = ToyRed, clawScale = 1.08f, twist = 20f, clawPart = claw });
+            BuildHeadModule(() => FamilyHead(head, "head", new HeadSpec
             {
                 w = 0.42f, h = 0.28f, d = 0.34f, eyes = 1, eyeScale = 1.55f, eyeY = 0.53f, earY = 0.5f, paint = ToyYellow,
                 beacon = true, antennas = true, mouth = true, eyePart = "optical eye", antennaPart = "antenna pair", beaconPart = "siren light",
-            });
+            }));
         }
 
         /// <summary>The load rides in the front cargo box (the one the arms reach over the head): three

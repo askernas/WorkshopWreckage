@@ -553,6 +553,89 @@ namespace WorkshopWreckage
             yield return g.Capture(Path.Combine(outDir, "20_robots_screen.png"), 5);
             g.hud.BackFromSubScreen();
             g.SetState("play");
+            yield return ModuleChecks();
+        }
+
+        /// <summary>Modify Robot (WORKSHOP_WRECKAGE_MODIFY_ROBOT_MODULAR_COMPONENTS_SPEC §13): the module registry's
+        /// conservation, swaps, propeller rules, incomplete / repaired builds, the build notes and save/load.</summary>
+        IEnumerator ModuleChecks()
+        {
+            var m = g.modules;
+            var built = RobotModules.Chassis.Where(m.Built).ToList();
+            string Where() => string.Join(";", m.all.Select(x => x.id + "@" + x.location));
+            Check("every activated robot carries its own factory modules and the 24-module audit is clean",
+                  built.Count >= 5 && built.All(r => m.Factory(r) && m.Complete(r)) && m.Audit().Count == 0, $"built {string.Join(",", built)}; {string.Join("; ", m.Audit())}");
+            Check("a first build is noted as colour coordinated, in the chassis' own scheme, all originals",
+                  built.All(r => _events.Count(e => e.kind == GameEventKind.RobotBuilt && e.destination == r && (e.count & 15) == 15) == 1),
+                  string.Join(", ", _events.Where(e => e.kind == GameEventKind.RobotBuilt).Select(e => $"{e.destination}:{e.category}/{e.count}")));
+            var hovers = built.Where(RobotModules.IsHover).ToList();
+            Check("a propeller never goes on another chassis", m.CanSwap("retrobot", "hoverbot", ModuleSlot.Prop) != "" && m.CanInstall("prop.hoverbot", "unibot") != "", m.CanSwap("retrobot", "hoverbot", ModuleSlot.Prop));
+            int ev0 = _events.Count;
+            // a head swap between two robots: each keeps the other's head in its own paint
+            bool swapped = m.Swap("retrobot", "hoverbot", ModuleSlot.Head, g.playTime);
+            var retro = g.retrobot; var hov = g.robots.First(r => r.id == "hoverbot");
+            retro.ApplyModules(); hov.ApplyModules();
+            yield return Frames(2);
+            Check("two robots exchange heads in one step; the models draw the other's head",
+                  swapped && m.At("retrobot", ModuleSlot.Head).id == "head.hoverbot" && m.At("hoverbot", ModuleSlot.Head).id == "head.retrobot"
+                  && retro.ModelFroms.h == "hoverbot" && hov.ModelFroms.h == "retrobot" && m.Audit().Count == 0,
+                  $"{m.At("retrobot", ModuleSlot.Head)?.id} / {m.At("hoverbot", ModuleSlot.Head)?.id}; {string.Join("; ", m.Audit())}");
+            Check("the first cross-robot exchange is noted once", _events.Skip(ev0).Count(e => e.kind == GameEventKind.FirstModuleTransfer) == 1 && _events.Skip(ev0).Count(e => e.kind == GameEventKind.ModuleExchanged) == 2, "");
+            if (hovers.Count >= 2)
+            {
+                bool pswap = m.Swap(hovers[0], hovers[1], ModuleSlot.Prop, g.playTime);
+                Check("two Hoverbots exchange propellers", pswap && m.At(hovers[0], ModuleSlot.Prop).origin == hovers[1] && m.Audit().Count == 0, Where());
+            }
+            // remove a head: incomplete; the same head back: repaired, coordinated again
+            int ev1 = _events.Count;
+            var uniHead = m.Remove("unibot", ModuleSlot.Head);
+            Check("removing a module parks it in a spare slot and leaves the robot incomplete",
+                  uniHead != null && uniHead.BenchSlot >= 0 && !m.Complete("unibot") && m.Missing("unibot").Single() == ModuleSlot.Head
+                  && _events.Skip(ev1).Count(e => e.kind == GameEventKind.RobotIncomplete && e.destination == "unibot") == 1 && m.Audit().Count == 0, Where());
+            m.Install(uniHead.id, "unibot", g.playTime);
+            var note = _events.Skip(ev1).LastOrDefault(e => e.kind == GameEventKind.RobotBuilt);
+            Check("refitting completes it again: noted as a repair, colour coordinated, its own scheme",
+                  m.Complete("unibot") && note.destination == "unibot" && (note.count & 1) == 0 && (note.count & 6) == 6 && note.category == "green", $"{note.category}/{note.count}");
+            // a mixed build: the Hoverbot head Retrobot borrowed goes onto Unibot
+            var spare = m.Remove("unibot", ModuleSlot.Head);
+            var borrowed = m.Remove("retrobot", ModuleSlot.Head);   // head.hoverbot
+            int ev2 = _events.Count;
+            m.Install(borrowed.id, "unibot", g.playTime);
+            var mixed = _events.Skip(ev2).LastOrDefault(e => e.kind == GameEventKind.RobotBuilt);
+            Check("a robot finished with another robot's head is noted as not colour coordinated",
+                  mixed.destination == "unibot" && (mixed.count & 2) == 0 && mixed.category == "mixed" && m.Audit().Count == 0, $"{mixed.category}/{mixed.count}");
+            // exchange on install: the occupied slot's module takes the spare's place
+            int benchBefore = m.Spares.Count();
+            m.Install(spare.id, "unibot", g.playTime);
+            Check("installing into an occupied slot exchanges, never discards", m.At("unibot", ModuleSlot.Head).id == "head.unibot" && m.Get("head.hoverbot").BenchSlot >= 0 && m.Spares.Count() == benchBefore && m.Audit().Count == 0, Where());
+            m.Install("head.hoverbot", "retrobot", g.playTime);   // Retrobot keeps Hoverbot's head through the save
+            foreach (var r in g.robots) r.ApplyModules();
+            // save / load keeps every assignment and the notes; loading raises nothing
+            var before = Where();
+            int notes = m.builds.Count;
+            g.SaveGame("autotest_mod");
+            g.StartWorld(g.world.seed, null);
+            int evLoad = _events.Count;
+            g.LoadGame("autotest_mod");
+            g.player.enabled = false;
+            yield return Frames(4);
+            m = g.modules;
+            Check("module assignments, mixed colours and build notes survive save/load without events",
+                  Where() == before && m.builds.Count == notes && m.Audit().Count == 0 && g.retrobot.ModelFroms.h == "hoverbot"
+                  && !_events.Skip(evLoad).Any(e => e.kind is GameEventKind.RobotBuilt or GameEventKind.ModuleFitted or GameEventKind.ModuleExchanged or GameEventKind.ModuleRemoved),
+                  $"{(Where() == before ? "same" : before + "  vs  " + Where())}; notes {notes} -> {m.builds.Count}");
+            // a save from before modules: each operational robot maps to its own factory modules
+            var save = SaveSystem.Read("autotest_mod");
+            save.Remove("modules");
+            SaveSystem.Write("autotest_mod", save);
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_mod");
+            yield return Frames(4);
+            m = g.modules;
+            Check("an old save without modules migrates to each robot's own modules, no duplicates",
+                  RobotModules.Chassis.Where(m.Built).SequenceEqual(RobotModules.Chassis.Where(c => g.robots.First(r => r.id == c).Operational))
+                  && RobotModules.Chassis.Where(m.Built).All(m.Factory) && m.Audit().Count == 0 && g.retrobot.ModelFroms.h == null, Where());
+            File.Delete(SaveSystem.PathOf("autotest_mod"));
         }
 
         /// <summary>Robot specialisation, upgrades and the second Hoverbot
