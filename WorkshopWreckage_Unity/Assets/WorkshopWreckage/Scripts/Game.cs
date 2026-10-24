@@ -131,6 +131,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("itemdebug", out var idm)) Shader.SetGlobalFloat("_WWItemDebug", float.Parse(idm, System.Globalization.CultureInfo.InvariantCulture));
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
             if (args.TryGetValue("robotwatch", out var rwatch)) { SetState("play"); StartCoroutine(RobotWatch(rwatch)); return; }
+            if (args.TryGetValue("catalogue", out var catDir)) { SetState("play"); StartCoroutine(CatalogueExport.Run(this, catDir)); return; }   // QA: component catalogue (read-only)
             if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
