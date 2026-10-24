@@ -1489,7 +1489,7 @@ namespace WorkshopWreckage
         {
             _clawsBusy = true; _clawItem = itemId; _gripW = PartWidth(itemId);
             _clawClose = 1; _clawOpen = 0;
-            float swingT = _pickTime * 0.6f, openT = _pickTime * 0.18f, backT = _pickTime * 0.5f;
+            float swingT = _pickTime * 0.31f, openT = _pickTime * 0.094f, backT = _pickTime * 0.26f;   // about 0.6 s at Caterpillarbot's base pick time
             for (float t = 0; t < swingT; t += Time.deltaTime) { _stow = Mathf.SmoothStep(0, 1, t / swingT); yield return null; }
             _stow = 1;
             // let go: the part drops from the grippers into its slot
@@ -1519,7 +1519,7 @@ namespace WorkshopWreckage
         IEnumerator Unstow(int itemId)
         {
             _clawsBusy = true; _gripW = PartWidth(itemId);
-            float swingT = _depositTime * 0.4f, closeT = _depositTime * 0.14f, backT = _depositTime * 0.36f;
+            float swingT = _depositTime * 0.22f, closeT = _depositTime * 0.078f, backT = _depositTime * 0.2f;   // about 0.6 s at Caterpillarbot's base deposit time
             for (float t = 0; t < swingT; t += Time.deltaTime)
             {
                 float u = Mathf.SmoothStep(0, 1, t / swingT);
