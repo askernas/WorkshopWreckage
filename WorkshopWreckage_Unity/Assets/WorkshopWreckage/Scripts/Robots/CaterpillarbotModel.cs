@@ -137,10 +137,10 @@ namespace WorkshopWreckage
                 b.ChamferBox(new Vector3(0, 0.322f, 0.02f), new Vector3(0.68f, 0.025f, 0.96f), 0.008f, M("chassis", ToyYellowDeep), null, true);
                 // the front block: as wide as the head, the arms on its corners (the sheet)
                 b.ChamferBox(new Vector3(0, 0.41f, -0.39f), new Vector3(0.48f, 0.16f, 0.36f), 0.03f, M("chassis", ToyYellow), null, true);
-                b.ChamferBox(new Vector3(0, 0.41f, -0.573f), new Vector3(0.24f, 0.07f, 0.014f), 0.006f, M("chassis", ToyYellowDeep), null, true);
-                b.ChamferBox(new Vector3(0, 0.41f, -0.581f), new Vector3(0.12f, 0.018f, 0.006f), 0.002f, M("chassis", ToyRed));
-                b.ChamferBox(new Vector3(0, 0.41f, -0.584f), new Vector3(0.1f, 0.008f, 0.004f), 0.001f, M("chassis", Dark));
-                foreach (var px in new[] { -0.1f, 0.1f }) Bolt(b, new Vector3(px, 0.41f, -0.58f), new Vector3(0, 0, -1), 0.0065f, M("chassis", Gunmetal));
+                b.ChamferBox(new Vector3(0, 0.41f, -0.573f), new Vector3(0.15f, 0.07f, 0.014f), 0.006f, M("chassis", ToyYellowDeep), null, true);
+                b.ChamferBox(new Vector3(0, 0.41f, -0.581f), new Vector3(0.1f, 0.018f, 0.006f), 0.002f, M("chassis", ToyRed));
+                b.ChamferBox(new Vector3(0, 0.41f, -0.584f), new Vector3(0.085f, 0.008f, 0.004f), 0.001f, M("chassis", Dark));
+                foreach (var px in new[] { -0.062f, 0.062f }) Bolt(b, new Vector3(px, 0.41f, -0.58f), new Vector3(0, 0, -1), 0.0065f, M("chassis", Gunmetal));
                 PanelFrame(b, "chassis", new Vector3(0, 0.41f, -0.39f), new Vector3(0.48f, 0.16f, 0.36f), new Vector3(0, 0, -1), 0.03f, 0.007f, 0.08f);
                 FramedGrille(b, "chassis", new Vector3(0, 0.2f, -0.501f), 0.16f, 0.08f, 5, false, -1);
                 foreach (var n in new[] { Vector3.left, Vector3.right }) PanelFrame(b, "chassis", new Vector3(0, 0.41f, -0.39f), new Vector3(0.48f, 0.16f, 0.36f), n, 0.042f);
@@ -156,11 +156,18 @@ namespace WorkshopWreckage
                         foreach (var z in new[] { -0.034f, 0.034f })
                             Bolt(b, new Vector3(s * 0.285f, ShoulderY + y, -ShoulderZ + 0.005f + z), X(s), 0.0055f, M("chassis", Gunmetal));
                     GreaseRun(b, "chassis", new Vector3(s * 0.24f, ShoulderY - 0.05f, -ShoulderZ + 0.03f), X(s), 0.06f, 0.012f);
+                    // the "pecs": a bolted housing over each front corner of the block, over the shoulder shaft
+                    // (it turns inside them, out of sight); clear of the shoulder drums and the head above
+                    var pec = new Vector3(s * 0.172f, 0.4175f, -0.588f);
+                    var pecSize = new Vector3(0.18f, 0.125f, 0.06f);
+                    b.ChamferBox(pec, pecSize, 0.02f, M("chassis", ToyYellow), null, true);
+                    b.ChamferBox(pec + new Vector3(0, 0, -0.031f), new Vector3(0.13f, 0.08f, 0.006f), 0.004f, M("chassis", ToyYellowDeep), null, true);
+                    PanelFrame(b, "chassis", pec, pecSize, new Vector3(0, 0, -1), 0.016f, 0.0055f, 0.055f);
+                    GrimeBand(b, "chassis", pec + new Vector3(0, -0.0625f + 0.001f, -0.031f), new Vector3(0, 0, -1), Vector3.right, 0.16f, 0.018f);
                 }
                 b.ChamferBox(new Vector3(0, 0.2f, 0.505f), new Vector3(0.16f, 0.1f, 0.02f), 0.008f, M("battery pack", Gunmetal), null, true);
                 FramedGrille(b, "battery pack", new Vector3(0, 0.2f, 0.516f), 0.12f, 0.06f, 5, false, 1);
                 b.Lathe(new Vector3(-0.08f, 0.26f, 0.38f), Disc(0.045f, 0.16f, 0.008f), M("drive motor", Gunmetal), RightRot, 16);
-                b.Lathe(new Vector3(-ShoulderX + 0.05f, ShoulderY, -ShoulderZ), Disc(0.026f, 2 * ShoulderX - 0.1f, 0.004f), M("chassis", BrightSteel), RightRot, 12);   // shoulder axle across the front
                 for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.488f + k * 0.006f, -0.38f), Disc(0.07f - k * 0.006f, 0.006f, 0.002f), M("chassis", Gunmetal), null, 16);
                 Done(b, _chassis);
             }
