@@ -1255,6 +1255,7 @@ namespace WorkshopWreckage
             if (inst.state == ItemState.InWorld)
             {
                 var from = inst.transform;
+                if (Flies) Debug.Log($"[robotflight] {id} picks {itemId} ({inst.owner}) for {g.world.DefOf(itemId).storageBox}");
                 // how far the claws are from the part at the grip (QA)
                 _gripGlide = 0.35f;
                 if (_model.GripPoint is Vector3 gp) { float gap = (gp - inst.Position).magnitude; maxGripGap = Mathf.Max(maxGripGap, gap); pickCount++; LogHands("pick", gap, inst.Position); _gripGlide = Mathf.Lerp(0.2f, 0.35f, Mathf.InverseLerp(0.01f, ContactMax, gap)); }
@@ -1395,7 +1396,12 @@ namespace WorkshopWreckage
         IEnumerator DepositParts(List<int> here, bool last)
         {
             // stray parts lying in the destination block it: leave the load in its staging zone
-            if (!_destReachable || g.StraysIn(_destBox).Count > 0) { yield return StageBelow(here); yield break; }
+            if (!_destReachable || g.StraysIn(_destBox).Count > 0)
+            {
+                if (Flies) Debug.Log($"[robotflight] {id} stages at {_destBox}: reachable {_destReachable}, strays {g.StraysIn(_destBox).Count}");
+                yield return StageBelow(here);
+                yield break;
+            }
             if (!Flies && _destPoint.y > _maxPickH) yield return ClimbTo(_destPoint);   // climbs up to store it
             // aimed deposit (models with an aim pose): the claws go to the actual drawer or opening
             var aim = DepositAim();
@@ -1433,7 +1439,9 @@ namespace WorkshopWreckage
             }
             foreach (var itemId in here)
             {
-                if (g.storage.Deposit(_destBox, itemId, Owner) != StorageSystem.Result.Ok) continue;
+                var res = g.storage.Deposit(_destBox, itemId, Owner);
+                if (Flies) Debug.Log($"[robotflight] {id} stores {itemId} into {_destBox}: {res}");
+                if (res != StorageSystem.Result.Ok) continue;
                 HideCarried(itemId);
                 carried.Remove(itemId);
                 delivered++;
@@ -1579,10 +1587,13 @@ namespace WorkshopWreckage
         /// the face to the target's height and steps onto the shelf / bench top beside it.</summary>
         IEnumerator ClimbTo(Vector3 target)
         {
-            _climbing = true;
-            _climbFrom = transform.position;
             var dir = Flat(target - transform.position).normalized;
             float topY = Mathf.Max(transform.position.y, target.y - 0.02f);
+            // on top it stands where its claws come down on the target (the contact rule holds up there
+            // too); measured now, while the model is still level
+            float standOff = Grips && _model.GripReach(target.y - topY) is float gr && gr > 0.02f ? gr : _reach * 0.6f;
+            _climbing = true;
+            _climbFrom = transform.position;
             while (transform.position.y < topY - 0.005f)
             {
                 float dt = Time.deltaTime;
@@ -1594,7 +1605,7 @@ namespace WorkshopWreckage
                 _speedNow = _climbSpeed;
                 yield return null;
             }
-            var stand = new Vector3(target.x, topY, target.z) - dir * (_reach * 0.6f);
+            var stand = new Vector3(target.x, topY, target.z) - dir * standOff;
             for (float t = 0; t < 3f && Flat(stand - transform.position).magnitude > 0.02f; t += Time.deltaTime)
             {
                 float dt = Time.deltaTime;
@@ -1747,6 +1758,7 @@ namespace WorkshopWreckage
 
         void DropCarried(string why)
         {
+            if (Flies) Debug.Log($"[robotflight] {id} drops {string.Join(",", carried)}: {why}");
             foreach (var itemId in carried.ToList())
             {
                 var def = g.world.DefOf(itemId);

@@ -583,11 +583,13 @@ namespace WorkshopWreckage
                 var waiting = g.world.instances.Where(i => i.state == ItemState.InWorld && i.owner.StartsWith("stage:")).Select(i => i.id).ToList();
                 bool Done() => waiting.Any(i => g.world.instances[i].state == ItemState.Stored);
                 Time.timeScale = 4;
-                float t1 = Time.realtimeSinceStartup;
-                while (Time.realtimeSinceStartup - t1 < 60 && !Done()) yield return null;
+                float t1 = Time.realtimeSinceStartup, g1 = Time.time;
+                // a game-time budget (finish the current load, fly to a zone, store high), so a slow frame rate on
+                // Large and Massive doesn't fail it
+                while (Time.time - g1 < 200 && Time.realtimeSinceStartup - t1 < 150 && !Done()) yield return null;
                 Time.timeScale = 1;
                 Check("Hoverbot empties the staging zones and stores those parts high up", Done() && hover.delivered > hd,
-                      $"{waiting.Count(i => g.world.instances[i].state == ItemState.Stored)} of {waiting.Count} staged parts stored, {hover.Describe()}");
+                      $"{waiting.Count(i => g.world.instances[i].state == ItemState.Stored)} of {waiting.Count} staged parts stored after {Time.time - g1:0} s game time ({Time.realtimeSinceStartup - t1:0} s real), {hover.Describe()}");
             }
             else Check("Hoverbot empties the staging zones and stores those parts high up", false, "no candidate part");
 
