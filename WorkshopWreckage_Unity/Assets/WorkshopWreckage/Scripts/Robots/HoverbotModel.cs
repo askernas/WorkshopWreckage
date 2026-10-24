@@ -29,6 +29,94 @@ namespace WorkshopWreckage
         const float HeadY = 0.475f, HeadH = 0.31f, HeadTop = HeadY + HeadH, RotorY = 0.935f, RimR = 0.44f;
         protected override Material Skin(Material m) => FamilySkin(m);
         protected override Material BoltSkin(Material m) => FamilyBoltSkin(m);
+
+        /// <summary>The paint of the chassis and of each detachable module (Modify Robot spec §4): set before
+        /// Init. The three Hoverbots share this one model; only these skins differ (ModuleSkin.HoverbotFactory).</summary>
+        public ModuleSkin chassisSkin = ModuleSkin.ClassicRed, headSkin = ModuleSkin.ClassicRed, armLSkin = ModuleSkin.ClassicRed,
+            armRSkin = ModuleSkin.ClassicRed, propSkin = ModuleSkin.ClassicRed;
+        public void PaintFactory(ModuleSkin s) => chassisSkin = headSkin = armLSkin = armRSkin = propSkin = s;
+
+        ModuleSkin SkinOf(string part) => part switch
+        {
+            "head" or "left eye lens" or "right eye lens" or "left antenna" or "right antenna" or "left ear cap" or "right ear cap" => headSkin,
+            "left arm" or "left claw" => armLSkin,
+            "right arm" or "right claw" => armRSkin,
+            "propeller blade a" or "propeller blade b" or "rotor hub" => propSkin,
+            _ => chassisSkin,
+        };
+
+        /// <summary>Each part in its module's skin. The arm segments are built in kit yellow only to tell them
+        /// apart from the red grippers, which stay red in every skin (as do the metals, eyes and wear).</summary>
+        protected override Material SkinPart(string part, Material m)
+        {
+            var s = SkinOf(part);
+            if (s.Factory || part.EndsWith(" claw")) return FamilySkin(m == ToyYellow ? ToyRed : m == ToyYellowDeep ? ToyRedDeep : m);
+            if (m == ToyYellow) return s.Arm;
+            if (m == ToyYellowDeep) return s.ArmDeep;
+            if (m == ToyRed)
+                return part == "rotor hub" ? s.Hub
+                     : part.Contains("antenna") || part.Contains("ear cap") || part.EndsWith(" arm") ? s.Accent
+                     : part.StartsWith("propeller") ? s.Blade : s.Body;
+            if (m == ToyRedDeep) return s.BodyDeep;
+            return FamilySkin(m);
+        }
+
+        static readonly Vector2[] UpperShell = { new(0.436f, 0.316f), new(0.43f, 0.34f), new(0.39f, 0.375f), new(0.33f, 0.405f), new(0.26f, 0.425f) },
+            RimBand = { new(RimR, 0.274f), new(RimR, 0.306f) },
+            LowerShell = { new(0.33f, 0.17f), new(0.38f, 0.2f), new(0.42f, 0.235f), new(0.437f, 0.262f) };
+
+        /// <summary>The radius of a lathed shell profile at height y.</summary>
+        static float ShellR(Vector2[] p, float y)
+        {
+            for (int i = 0; i < p.Length - 1; i++)
+                if (y <= p[i + 1].y) return Mathf.Lerp(p[i].x, p[i + 1].x, Mathf.InverseLerp(p[i].y, p[i + 1].y, y));
+            return p[^1].x;
+        }
+
+        /// <summary>A painted pinstripe round a lathed shell between heights y0 and y1, a hair proud of it.</summary>
+        void Pinstripe(Batch b, string part, Vector2[] shell, float y0, float y1, Material mat)
+        {
+            const float lift = 0.0012f;
+            float r0 = ShellR(shell, y0) + lift, r1 = ShellR(shell, y1) + lift;
+            b.Lathe(Vector3.zero, new[] { new Vector2(r0 - 0.003f, y0 - 0.0004f), new Vector2(r0, y0), new Vector2(r1, y1), new Vector2(r1 - 0.003f, y1 + 0.0004f) }, M(part, mat), null, 48);
+        }
+
+        /// <summary>Emblem linework: tongues grown from a root (across, up, in units of the emblem's size), at an angle
+        /// (deg), with a length and greatest width; drawn in three overlapping segments tapering to a point (flame),
+        /// swelling in the middle (petal) or flat (line).</summary>
+        static readonly (float u, float v, float a, float l, float w, char taper)[] LotusStrokes =
+        {
+            (0, -0.32f, 90, 0.78f, 0.26f, 'p'), (-0.04f, -0.34f, 122, 0.66f, 0.22f, 'p'), (0.04f, -0.34f, 58, 0.66f, 0.22f, 'p'),
+            (-0.08f, -0.36f, 152, 0.5f, 0.18f, 'p'), (0.08f, -0.36f, 28, 0.5f, 0.18f, 'p'), (-0.42f, -0.4f, 0, 0.84f, 0.06f, 'l'),
+        }, FlameStrokes =
+        {
+            (0, -0.5f, 90, 1.05f, 0.22f, 'f'), (-0.06f, -0.48f, 112, 0.82f, 0.17f, 'f'), (0.06f, -0.48f, 68, 0.82f, 0.17f, 'f'),
+            (-0.12f, -0.46f, 136, 0.56f, 0.14f, 'f'), (0.12f, -0.46f, 44, 0.56f, 0.14f, 'f'),
+            (-0.4f, -0.08f, 70, 0.34f, 0.1f, 'f'), (0.4f, -0.08f, 110, 0.34f, 0.1f, 'f'),
+        };
+
+        /// <summary>A painted emblem centred at c on a surface with outward normal n (batch coordinates), upright
+        /// (or upside down) along the surface.</summary>
+        void Emblem(Batch b, string part, string kind, Vector3 c, Vector3 n, float size, Material mat, bool flip = false)
+        {
+            var nU = new Vector3(n.x, n.y, -n.z).normalized;
+            var upU = Vector3.ProjectOnPlane(Vector3.up, nU).normalized * (flip ? -1 : 1);
+            var rot = Quaternion.LookRotation(nU, upU);
+            var rightU = rot * Vector3.right;
+            foreach (var s in kind == "lotus" ? LotusStrokes : FlameStrokes)
+            {
+                var dir = new Vector2(Mathf.Cos(s.a * Mathf.Deg2Rad), Mathf.Sin(s.a * Mathf.Deg2Rad));
+                int segs = s.taper == 'l' ? 1 : 3;
+                for (int i = 0; i < segs; i++)
+                {
+                    float w = s.taper == 'f' ? 1f - 0.32f * i : s.taper == 'p' ? (i == 1 ? 1f : i == 0 ? 0.62f : 0.5f) : 1f;
+                    float t = (i + 0.5f) / segs, len = s.l / segs * (segs > 1 ? 1.25f : 1f);
+                    var q = new Vector2(s.u, s.v) + dir * (s.l * t);
+                    var o = (rightU * q.x + upU * q.y) * size + nU * 0.0012f;
+                    b.RoundedBox(c + new Vector3(o.x, o.y, -o.z), new Vector3(len * size, s.w * w * size, 0.0018f), 0.0008f, M(part, mat), 1, rot * Quaternion.Euler(0, 0, s.a));
+                }
+            }
+        }
         protected override bool HeadTopTaken => true;
         /// <summary>The flier keeps its load in the hold under the saucer (no claw grip in the robot logic).</summary>
         public override Vector3? GripPoint => null;
@@ -120,6 +208,30 @@ namespace WorkshopWreckage
             b.Lathe(new Vector3(0, 0.432f, 0), Disc(0.13f, 0.016f, 0.004f), M("upper saucer shell", Gunmetal), null, 28);
             b.Lathe(new Vector3(0, 0.446f, 0), Disc(0.1f, 0.03f, 0.006f), M("upper saucer shell", Gunmetal), null, 24);   // neck collar
             b.Lathe(new Vector3(0, 0.456f, 0), Ring(0.106f, 0.09f, 0.008f), M("upper saucer shell", Brass), null, 24);
+            // the chassis skin's linework: pink pin lines (White / Pink), a gold band with flames (Red / Yellow)
+            if (chassisSkin.Stripe is Material cs)
+            {
+                if (chassisSkin.emblem == "flame")
+                {
+                    Pinstripe(b, "upper saucer shell", RimBand, 0.2835f, 0.2965f, cs);
+                    Pinstripe(b, "upper saucer shell", UpperShell, 0.328f, 0.334f, cs);
+                    Pinstripe(b, "lower saucer shell", LowerShell, 0.243f, 0.249f, cs);
+                    foreach (var a in new[] { -0.4f, 0.4f, -1.25f, 1.25f })   // big flames either side of the siren and round the front quarters
+                    {
+                        float sa = Mathf.Sin(a), ca = Mathf.Cos(a);
+                        Emblem(b, "upper saucer shell", "flame", new Vector3(sa * ShellR(UpperShell, 0.358f), 0.358f, -ca * ShellR(UpperShell, 0.358f)), new Vector3(sa * 0.66f, 0.75f, -ca * 0.66f), 0.068f, cs);
+                        Emblem(b, "lower saucer shell", "flame", new Vector3(sa * ShellR(LowerShell, 0.222f), 0.222f, -ca * ShellR(LowerShell, 0.222f)), new Vector3(sa * 0.66f, -0.75f, -ca * 0.66f), 0.045f, cs, true);
+                    }
+                }
+                else
+                {
+                    Pinstripe(b, "upper saucer shell", UpperShell, 0.328f, 0.335f, cs);
+                    Pinstripe(b, "upper saucer shell", UpperShell, 0.385f, 0.39f, cs);
+                    Pinstripe(b, "upper saucer shell", RimBand, 0.279f, 0.285f, cs);
+                    Pinstripe(b, "upper saucer shell", RimBand, 0.295f, 0.301f, cs);
+                    Pinstripe(b, "lower saucer shell", LowerShell, 0.243f, 0.25f, cs);
+                }
+            }
             Done(b, _saucer);
             {
                 // rotor mast on the chassis mount (coordinates from the head's top): a bolted foot plate, the
@@ -173,19 +285,35 @@ namespace WorkshopWreckage
                     r.Lathe(new Vector3(s * 0.41f, -0.002f, 0), Disc(0.05f, 0.014f, 0.004f), M(part, ToyRed), twist, 24);              // rounded tip
                     r.RoundedBox(new Vector3(s * 0.26f, 0.005f, 0), new Vector3(0.31f, 0.017f, 0.008f), 0.003f, M(part, Gunmetal), 1, twist);   // spine
                     foreach (var t in new[] { 0.16f, 0.26f, 0.36f }) Bolt(r, new Vector3(s * t, 0.013f, 0.03f), Vector3.up, 0.005f, M(part, Gunmetal));
+                    if (propSkin.Stripe is Material ps)   // two diagonal stripes across each blade towards its tip
+                        foreach (var t in new[] { 0.31f, 0.35f })
+                            r.RoundedBox(new Vector3(s * t, 0.005f, 0), new Vector3(propSkin.emblem == "flame" ? 0.017f : 0.013f, 0.0158f, 0.094f), 0.002f, M(part, ps), 1, twist * Batch.R(Vector3.up, s * 0.45f));
                 }
                 Done(r, _rotor);
             }
             foreach (var (arm, s, part, claw) in new[] { (_armL, -1f, "left arm", "left claw"), (_armR, 1f, "right arm", "right claw") })
             {
                 arm.localScale = Vector3.one * 0.85f;   // short arms out of the rim ports, big grippers (the sheet)
-                FamilyArm(arm, s, part, new ArmSpec { paint = ToyRed, paintDeep = ToyRedDeep, red = ToyRed, clawScale = 1.3f, twist = 0f, clawPart = claw });
+                FamilyArm(arm, s, part, new ArmSpec { paint = ToyYellow, paintDeep = ToyYellowDeep, red = ToyRed, clawScale = 1.3f, twist = 0f, clawPart = claw });   // yellow: the arm's own paint (SkinPart)
             }
             DetailedHead(head, ToyRed, new Vector3(0.44f, HeadH, 0.32f), 2, 0.06f,
                 "head", "left eye lens", "right eye lens", "left antenna", "right antenna", "left ear cap", "right ear cap", null, true, true, familyEars: true);
             {
                 var w = new Batch();   // the loose wire under the head (it is on the sheet)
                 Pipe(w, "head", new[] { new Vector3(0.19f, 0.03f, 0.06f), new Vector3(0.205f, -0.005f, 0.08f), new Vector3(0.212f, -0.03f, 0.07f) }, 0.004f, Rubber, Brass);
+                if (headSkin.Stripe is Material hs)
+                {
+                    // pin lines round the head behind the face and near the back (thin slices of a slightly larger
+                    // head box, so they follow its rounded edges), and the emblem on the forehead between the eyes
+                    // a painted frame on the flat of the face, just inside its rounded edges (the eye rings sit over it)
+                    float bev = Mathf.Min(0.058f, HeadH * 0.19f), wide = headSkin.emblem == "flame" ? 0.007f : 0.0045f;
+                    float fx = 0.22f - bev - 0.004f, fy0 = bev + 0.004f, fy1 = HeadH - bev - 0.004f, fz = -0.16f - 0.0012f;
+                    foreach (var sx in new[] { -1f, 1f })
+                        w.RoundedBox(new Vector3(sx * fx, (fy0 + fy1) / 2, fz), new Vector3(wide, fy1 - fy0 + wide, 0.0018f), 0.0008f, M("head", hs), 1);
+                    foreach (var y in new[] { fy0, fy1 })
+                        w.RoundedBox(new Vector3(0, y, fz), new Vector3(2 * fx + wide, wide, 0.0018f), 0.0008f, M("head", hs), 1);
+                    Emblem(w, "head", headSkin.emblem, new Vector3(0, 0.228f, -0.16f), new Vector3(0, 0, -1), headSkin.emblem == "flame" ? 0.055f : 0.05f, hs);
+                }
                 Done(w, head);
             }
         }

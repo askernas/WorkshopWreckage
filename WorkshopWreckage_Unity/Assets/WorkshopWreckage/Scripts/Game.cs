@@ -766,7 +766,9 @@ namespace WorkshopWreckage
         {
             var r = robots.Find(x => x.id == id);
             if (r == null) return;
-            workbench.ForceInstall(workbench.P(id));
+            var proj = workbench.P(id);
+            if (proj.crafted) workbench.FillRecipe(proj);   // a crafted Hoverbot: its recipe from loose parts
+            else workbench.ForceInstall(proj);
             r.SetOperational();
             r.enabled = false;
             if (r.arm != null) r.arm.enabled = false;

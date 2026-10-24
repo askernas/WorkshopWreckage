@@ -235,6 +235,7 @@ namespace WorkshopWreckage
                 _ => (RobotModel)new GameObject("Model").AddComponent<RetrobotModel>(),
             };
             _model.transform.SetParent(transform, false);
+            if (_model is HoverbotModel hm) hm.PaintFactory(ModuleSkin.HoverbotFactory(id));   // three Hoverbots, one model, three factory skins
             _model.Init();
             _model.transform.localScale = Vector3.one * (_height / _model.ModelHeight);
             if (_model is SortingArmModel sam)
