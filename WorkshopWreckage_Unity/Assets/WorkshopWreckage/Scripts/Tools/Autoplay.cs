@@ -636,6 +636,83 @@ namespace WorkshopWreckage
                   RobotModules.Chassis.Where(m.Built).SequenceEqual(RobotModules.Chassis.Where(c => g.robots.First(r => r.id == c).Operational))
                   && RobotModules.Chassis.Where(m.Built).All(m.Factory) && m.Audit().Count == 0 && g.retrobot.ModelFroms.h == null, Where());
             File.Delete(SaveSystem.PathOf("autotest_mod"));
+            yield return SummonChecks();
+        }
+
+        /// <summary>Modify Robot §6-§8: summoning to the workbench (cargo set down, no reservations left, a
+        /// parking spot each), docking, cancelling, an incomplete robot kept from work, release and save/load.</summary>
+        IEnumerator SummonChecks()
+        {
+            var m = g.modules;
+            Robot R(string id) => g.robots.First(r => r.id == id);
+            var uni = R("unibot"); var hov = R("hoverbot"); var retro = g.retrobot;
+            Time.timeScale = 4;
+            float t0 = Time.realtimeSinceStartup;
+            while (uni.carried.Count == 0 && Time.realtimeSinceStartup - t0 < 30) yield return null;   // summoned with a load
+            int ev0 = _events.Count;
+            bool hadLoad = uni.carried.Count > 0;
+            uni.Summon(); hov.Summon(); retro.Summon();
+            yield return Frames(2);
+            bool cancelled = retro.CancelSummon();
+            yield return Frames(2);
+            Check("a summons taken back before docking sends the robot back to work", cancelled && retro.Active && !retro.AtBench, retro.Describe());
+            float g0 = Time.time;
+            t0 = Time.realtimeSinceStartup;
+            while (!(uni.Docked && hov.Docked) && Time.time - g0 < 120 && Time.realtimeSinceStartup - t0 < 90) yield return null;
+            Time.timeScale = 1;
+            float Off(Robot r) { var (p, _) = g.workbench.ParkSpot(r.id); return new Vector2(r.transform.position.x - p.x, r.transform.position.z - p.z).magnitude; }
+            Check("summoned robots set their loads down, drop their reservations and dock at their own spots",
+                  uni.Docked && hov.Docked && uni.carried.Count == 0 && hov.carried.Count == 0 && Off(uni) < 0.45f && Off(hov) < 0.2f
+                  && !g.world.instances.Any(i => i.owner == uni.Owner || i.owner == hov.Owner) && uni.targetId < 0 && hov.targetId < 0
+                  && _events.Skip(ev0).Count(e => e.kind == GameEventKind.RobotSummoned) == 2,
+                  $"{(hadLoad ? "with" : "without")} a load; {uni.Describe()} ({Off(uni):0.00} m) / {hov.Describe()} ({Off(hov):0.00} m)");
+            // docked robots don't work; a Hoverbot without its propeller sets down and can't be released
+            int d0 = uni.delivered + uni.staged;
+            float y0 = hov.transform.position.y;
+            var prop = m.Remove("hoverbot", ModuleSlot.Prop);
+            hov.ApplyModules();
+            yield return new WaitForSeconds(3);
+            string why = hov.ReleaseFromBench();
+            Check("an incomplete robot stays docked: it lands without its propeller and can't be released",
+                  prop != null && hov.Docked && why != "" && hov.transform.position.y < y0 - 0.1f && uni.delivered + uni.staged == d0, $"'{why}'; height {y0:0.00} -> {hov.transform.position.y:0.00}");
+            yield return ModifyScreenShot("hoverbot", ModuleSlot.Prop, "21_modify_incomplete.png");
+            // save mid-modification: docked, incomplete and on-the-way robots come back as they were
+            var spider = R("spiderbot");
+            spider.Summon();
+            g.SaveGame("autotest_dock");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_dock");
+            g.player.enabled = false;
+            yield return Frames(4);
+            m = g.modules; uni = R("unibot"); hov = R("hoverbot"); spider = R("spiderbot");
+            Check("saved mid-modification: docked robots stay docked at their spots, the incomplete one too, a summoned one resumes",
+                  uni.Docked && hov.Docked && !m.Complete("hoverbot") && Off(uni) < 0.45f && spider.AtBench && m.Audit().Count == 0,
+                  $"{uni.Describe()} / {hov.Describe()} / {spider.Describe()}");
+            m.Install(prop.id, "hoverbot", g.playTime);
+            hov.ApplyModules();
+            // a mixed look at the bench: Unibot's green left arm on the Hoverbot, the Hoverbot's on Unibot
+            m.Swap("hoverbot", "unibot", ModuleSlot.ArmL, g.playTime);
+            hov.ApplyModules(); uni.ApplyModules();
+            yield return ModifyScreenShot("hoverbot", ModuleSlot.ArmL, "22_modify_mixed.png");
+            Check("the Modify Robot screen exchanges arms between docked robots; both models show the other's arm",
+                  hov.ModelFroms.l == "unibot" && uni.ModelFroms.l == "hoverbot" && m.Audit().Count == 0, $"{hov.ModelFroms.l} / {uni.ModelFroms.l}");
+            m.Swap("hoverbot", "unibot", ModuleSlot.ArmL, g.playTime);
+            hov.ApplyModules(); uni.ApplyModules();
+            string r1 = hov.ReleaseFromBench(), r2 = uni.ReleaseFromBench();
+            yield return Frames(2);
+            Check("complete again, docked robots are released back to work", r1 == "" && r2 == "" && hov.Active && uni.Active, $"'{r1}' '{r2}'");
+            spider.CancelSummon(); spider.ReleaseFromBench();
+            File.Delete(SaveSystem.PathOf("autotest_dock"));
+        }
+
+        IEnumerator ModifyScreenShot(string robotId, ModuleSlot slot, string file)
+        {
+            g.hud.SelectModify(robotId, slot);
+            g.SetState("paused");
+            g.hud.OpenScreen("modify");
+            yield return g.Capture(Path.Combine(outDir, file), 5);
+            g.hud.BackFromSubScreen();
+            g.SetState("play");
         }
 
         /// <summary>Robot specialisation, upgrades and the second Hoverbot

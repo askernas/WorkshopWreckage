@@ -80,6 +80,7 @@ namespace WorkshopWreckage
             Stack(_rbUpgrades);
             _rbActions = Row(rs, 46, 10);
             MakeButton(rs, "Back", () => ShowScreenRaw(_backTo));
+            BuildModifyScreen();
         }
 
         // ------------------------------------------------------------------ workbench
@@ -204,6 +205,11 @@ namespace WorkshopWreckage
                 });
                 db.GetComponent<LayoutElement>().preferredWidth = 240;
                 db.GetComponentInChildren<Text>().color = new Color(1f, 0.55f, 0.35f);
+            }
+            if (_g.modules != null && RobotModules.Chassis.Any(_g.modules.Built))
+            {
+                var mb = MakeButton(_wbActions, "Modify robots", () => ShowScreenRaw("modify"));
+                mb.GetComponent<LayoutElement>().preferredWidth = 240;
             }
             var cb = MakeButton(_wbActions, "Close", () => _g.SetState("play"));
             cb.GetComponent<LayoutElement>().preferredWidth = 200;

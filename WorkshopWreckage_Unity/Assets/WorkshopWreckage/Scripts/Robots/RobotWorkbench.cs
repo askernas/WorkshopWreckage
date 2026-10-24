@@ -445,6 +445,17 @@ namespace WorkshopWreckage
 
         public Vector3 Front => Vector3.ProjectOnPlane(transform.TransformDirection(Batch.G(0, 0, 1)), Vector3.up).normalized;
 
+        /// <summary>Where a robot summoned for Modify Robot parks (floor, world), facing the bench: two rows beyond
+        /// the charging mats, 4 + 3 spots, one per chassis, so summoned robots never crowd or intersect.</summary>
+        public (Vector3 pos, Quaternion rot) ParkSpot(string robotId)
+        {
+            int i = Mathf.Max(0, System.Array.IndexOf(RobotModules.Chassis, robotId));
+            int row = i < 4 ? 0 : 1, n = row == 0 ? 4 : 3, col = row == 0 ? i : i - 4;
+            float x = (Bench.x - 0.4f) * ((col + 0.5f) / n - 0.5f);
+            var p = transform.TransformPoint(Batch.G(x, 0, 1.9f + row * 0.6f));
+            return (new Vector3(p.x, 0, p.z), Quaternion.LookRotation(-Front));
+        }
+
         void BuildBench()
         {
             var b = new Batch();

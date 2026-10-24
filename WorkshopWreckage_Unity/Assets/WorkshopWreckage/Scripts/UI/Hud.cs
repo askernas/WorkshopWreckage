@@ -398,6 +398,7 @@ namespace WorkshopWreckage
             if (name == "skills") RefreshSkills();
             if (name == "robots") RefreshRobots();
             if (name == "workbench") RefreshWorkbench();
+            else if (name == "modify") RefreshModify();
             else if (_previewCam != null) PreviewCamera(false);
             if (name == "inventory") RefreshLog();
             if (name == "main") _continue.interactable = LatestSlot() != "";
@@ -406,6 +407,7 @@ namespace WorkshopWreckage
         public bool BackFromSubScreen()
         {
             if (_screen == "save" || _screen == "load" || _screen == "settings" || _screen == "skills" || _screen == "robots") { ShowScreenRaw(_backTo); return true; }
+            if (_screen == "modify") { ShowScreenRaw("workbench"); return true; }
             return false;
         }
 
@@ -554,6 +556,7 @@ namespace WorkshopWreckage
         {
             if (_screen == "robots" && (_robotRefreshT -= Time.unscaledDeltaTime) <= 0) { _robotRefreshT = 1; RefreshRobots(); }
             if (_screen == "workbench" && (_wbRefreshT -= Time.unscaledDeltaTime) <= 0) { _wbRefreshT = 1; RefreshWorkbench(); }
+            if (_screen == "modify" && (_mdRefreshT -= Time.unscaledDeltaTime) <= 0) { _mdRefreshT = 0.5f; RefreshModify(); }
             if (_feedbackT > 0)
             {
                 _feedbackT -= Time.deltaTime;

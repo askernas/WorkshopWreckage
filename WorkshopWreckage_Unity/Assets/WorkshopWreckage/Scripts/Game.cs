@@ -273,6 +273,8 @@ namespace WorkshopWreckage
             modules.Load(save != null ? Json.Obj(save.GetValueOrDefault("modules")) : null, robots);
             foreach (var e in modules.Audit()) Debug.LogError("[modules] " + e);
             foreach (var r in robots) r.ApplyModules();
+            // an incomplete robot can't work: wherever it was saved, it is parked at the workbench
+            foreach (var r in robots) if (r.Operational && !r.Docked && !modules.Complete(r.id)) r.DockAtSpot();
             foreach (var r in robots) r.RefreshAssembly();   // which crafted Hoverbot is on the bench depends on the others
             workbench.Refresh();
             progress.Milestone += (key, text) => { hud.Toast(text, key.StartsWith("zone") || key == "first_pickup"); Sfx.Play("milestone", null, -6); };

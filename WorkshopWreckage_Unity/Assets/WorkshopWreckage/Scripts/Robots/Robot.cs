@@ -23,7 +23,9 @@ namespace WorkshopWreckage
     /// that kind next; T — nearest robot: work / follow me.</summary>
     public class Robot : MonoBehaviour
     {
-        public enum Mode { Assembling, Activating, Working, Following }
+        /// <summary>Summoned: on its way to the workbench (Modify Robot); Docked: parked there, safe to modify
+        /// (an incomplete robot stays docked until it is whole again).</summary>
+        public enum Mode { Assembling, Activating, Working, Following, Summoned, Docked }
         enum Step { Choose, ToItem, Picking, ToDest, Depositing, ToPlayer, ToCharge, Charging, Gesture }
 
         /// <summary>id: this instance ("hoverbot_2"); type: its robots.json entry ("hoverbot").</summary>
@@ -507,6 +509,7 @@ namespace WorkshopWreckage
             autoAssigned = auto;
             _unreachable.Clear();
             _completeT = 0;
+            if (AtBench) return $"{displayName}: noted — after the workbench";
             if (targetId >= 0 && g.world.instances[targetId].defId != defId) { Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; }
             mode = Mode.Working;
             if (auto) return "";
@@ -522,6 +525,7 @@ namespace WorkshopWreckage
                 ["operational"] = Operational || mode == Mode.Activating, ["paused"] = paused,
                 ["assigned"] = (double)assignedDef, ["auto_assigned"] = autoAssigned,
                 ["following"] = mode == Mode.Following, ["battery"] = (double)Battery,
+                ["summon"] = mode == Mode.Docked ? "docked" : mode == Mode.Summoned || _summonPending ? "summoned" : "",
                 ["delivered"] = (double)delivered, ["staged"] = (double)staged,
                 ["pos"] = new List<object> { (double)transform.position.x, (double)transform.position.y, (double)transform.position.z },
                 ["yaw"] = (double)transform.eulerAngles.y,
@@ -549,6 +553,155 @@ namespace WorkshopWreckage
             if (p.Count == 3) transform.SetPositionAndRotation(new Vector3(Json.F(p[0]), Json.F(p[1]), Json.F(p[2])), Quaternion.Euler(0, (float)Json.Num(d, "yaw"), 0));
             if (Json.Bool(d, "following")) mode = Mode.Following;
             _path = null;
+            // Modify Robot: a robot on its way resumes the summons (its cargo was saved with the items and is
+            // set down again); a docked one is parked at its spot again
+            switch (Json.Str(d, "summon"))
+            {
+                case "summoned": Summon(); break;
+                case "docked": DockAtSpot(); break;
+            }
+        }
+
+        // ---------------------------------------------------------------- Modify Robot: summons and docking
+
+        /// <summary>Summoned or docked: the robot is the workbench's (no tasks; the player modifies it there).</summary>
+        public bool AtBench => mode == Mode.Summoned || mode == Mode.Docked;
+        /// <summary>Moves about the floor under its own power (feet on the ground, eases apart from the others).</summary>
+        public bool Roams => Active || AtBench;
+        public bool Docked => mode == Mode.Docked;
+        public bool SummonPending => _summonPending;
+        /// <summary>Why a summoned robot is not on its way yet (e.g. no path), shown on its status line.</summary>
+        public string summonStatus = "";
+        bool _summonPending;
+        float _summonRetryT, _summonT;
+
+        /// <summary>Calls the robot to its parking spot at the workbench. It finishes a pick-up or delivery
+        /// in progress (never half a grip), sets its cargo down, then walks or flies over and docks.</summary>
+        public string Summon()
+        {
+            if (Stationary || arm != null) return $"{displayName} stays where it is";
+            if (!Operational) return $"{displayName} isn't assembled yet";
+            if (AtBench) return mode == Mode.Docked ? $"{displayName} is already docked" : $"{displayName} is already on its way";
+            _summonPending = true;
+            summonStatus = "";
+            if (_step != Step.Picking && _step != Step.Depositing && !_climbing) BeginReturn();
+            return $"{displayName}: coming to the workbench";
+        }
+
+        /// <summary>Takes back a summons before the robot docks: it goes back to work.</summary>
+        public bool CancelSummon()
+        {
+            if (mode == Mode.Docked) return false;
+            if (_summonPending) { _summonPending = false; return true; }
+            if (mode != Mode.Summoned) return false;
+            mode = Mode.Working;
+            _step = Step.Choose;
+            _path = null;
+            summonStatus = "";
+            return true;
+        }
+
+        /// <summary>Sends a docked robot back to work. An incomplete robot (a required module missing) stays
+        /// docked: the reason comes back.</summary>
+        public string ReleaseFromBench()
+        {
+            if (mode == Mode.Summoned) return CancelSummon() ? "" : $"{displayName} isn't at the workbench";
+            if (mode != Mode.Docked) return $"{displayName} isn't at the workbench";
+            if (g.modules != null && !g.modules.Complete(id))
+                return $"{displayName} is incomplete: fit a {string.Join(" and a ", g.modules.Missing(id).Select(RobotModules.SlotName))} first";
+            mode = Mode.Working;
+            _step = Step.Choose;
+            _path = null;
+            _idleT = 0.3f;
+            Sfx.Play("servo", transform.position + Vector3.up * 0.3f, -6);
+            return "";
+        }
+
+        /// <summary>The summons takes over now: reservations and plans are dropped, a pending handover is
+        /// forgotten. A walker sets its cargo down where it is; a flier first comes down (UpdateSummoned).</summary>
+        void BeginReturn()
+        {
+            _summonPending = false;
+            Release();
+            if (_planner != null) { StopCoroutine(_planner); _planner = null; }
+            _planReady = false;
+            _plannedId = -1;
+            handoverPending = false;
+            if (_step == Step.Charging) _model.SetBeacon(false);
+            if (carried.Count > 0 && !Flies) DropCarried("");
+            mode = Mode.Summoned;
+            _step = Step.Choose;
+            _path = null;
+            _summonRetryT = 0;
+            _summonT = 0;
+            summonStatus = "";
+        }
+
+        void UpdateSummoned(float dt)
+        {
+            _summonT += dt;
+            var (spot, rot) = g.workbench.ParkSpot(id);
+            if (Flies)
+            {
+                if (carried.Count > 0)
+                {
+                    // a flier never drops parts from the air: it comes down first
+                    Brake(dt);
+                    HoverHold(dt, _height * 0.5f + 0.15f);
+                    if (_altitude < _height * 0.5f + 0.25f) DropCarried("");
+                    return;
+                }
+                if (FlyTo(spot + Vector3.up * 0.45f, dt, true)) Dock(rot);
+                return;
+            }
+            if (_path == null)
+            {
+                _summonRetryT -= dt;
+                if (_summonRetryT > 0) { Brake(dt); return; }
+                var goal = _nav.NearestFree(spot, 0.35f);
+                _path = goal.HasValue ? _nav.Path(transform.position, goal.Value) : null;
+                _pathIdx = 0;
+                // no way through right now (blocked by heaps): it says so and tries again
+                if (_path == null) { summonStatus = "can't reach the workbench — trying again"; _summonRetryT = 2f; Brake(dt); return; }
+                summonStatus = "";
+            }
+            if (Steer(dt) || (_summonT > 45f && Flat(spot - transform.position).magnitude < 0.6f)) Dock(rot);
+            else if (_summonT > 60f) { _path = null; _summonT = 0; }   // stuck on the way: plan again
+        }
+
+        void Dock(Quaternion rot, bool announce = true)
+        {
+            mode = Mode.Docked;
+            _path = null;
+            summonStatus = "";
+            _dockRot = rot;
+            if (!announce) return;   // loading never raises events
+            GameEvents.Raise(GameEventKind.RobotSummoned, Owner, type, destination: id);
+            Sfx.Play("servo", transform.position + Vector3.up * 0.3f, -8);
+        }
+
+        Quaternion _dockRot = Quaternion.identity;
+
+        void UpdateDocked(float dt)
+        {
+            Brake(dt);
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, _dockRot, _turn * dt);   // faces the bench
+            // a Hoverbot without its propeller can't hover: it sets down on its base
+            if (Flies) HoverHold(dt, g.modules != null && g.modules.At(id, ModuleSlot.Prop) == null ? _height * 0.5f : 0.45f);
+            Battery = Mathf.Min(1, Battery + 0.25f * dt / (_chargeMinutes * 60f));   // trickle-charges while it waits
+        }
+
+        /// <summary>Load / QA: parks the robot at its spot at once, docked (silently).</summary>
+        public void DockAtSpot()
+        {
+            if (Stationary || arm != null || !Operational) return;
+            Release();
+            var (spot, rot) = g.workbench.ParkSpot(id);
+            transform.SetPositionAndRotation(spot + Vector3.up * (Flies ? 0.45f : 0), rot);
+            _summonPending = false;
+            _step = Step.Choose;
+            _path = null;
+            Dock(rot, false);
         }
 
         /// <summary>Automatic Storage Delivery: the robot comes over, takes what the
@@ -608,7 +761,7 @@ namespace WorkshopWreckage
                 _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
                 _path = null;
             }
-            mode = Mode.Working;
+            if (!AtBench) mode = Mode.Working;
         }
 
         public void ToggleFollow()
@@ -657,11 +810,14 @@ namespace WorkshopWreckage
             _time += dt;
             if (Stationary) return;   // SortingArm drives the arm
             var fwd0 = transform.forward;
+            if (_summonPending && Active && _step != Step.Picking && _step != Step.Depositing && !_climbing) BeginReturn();
             if (mode == Mode.Working) UpdateWork(dt);
             else if (mode == Mode.Following) UpdateFollow(dt);
+            else if (mode == Mode.Summoned) UpdateSummoned(dt);
+            else if (mode == Mode.Docked) UpdateDocked(dt);
             else Brake(dt);
             _turnRate = Vector3.SignedAngle(fwd0, transform.forward, Vector3.up) / Mathf.Max(dt, 1e-4f);   // + = turning right
-            if (!Flies && Active && !_climbing)
+            if (!Flies && Roams && !_climbing)
             {
                 // feet (wheels, tracks) on top of whatever small parts are underfoot
                 var p = transform.position;
@@ -669,7 +825,7 @@ namespace WorkshopWreckage
                 p.y = ground > p.y ? Mathf.MoveTowards(p.y, ground, dt * 1.2f) : Mathf.MoveTowards(p.y, ground, dt * 2.5f);
                 transform.position = p;
             }
-            if (Active && !Flies && !_climbing) Separate(dt);
+            if (Roams && !Flies && !_climbing) Separate(dt);
             Animate(dt);
         }
 
@@ -679,7 +835,7 @@ namespace WorkshopWreckage
         {
             foreach (var o in g.robots)
             {
-                if (o == this || !o.Active || o.Flies || o.Stationary) continue;
+                if (o == this || !o.Roams || o.Flies || o.Stationary) continue;
                 var d = Flat(transform.position - o.transform.position);
                 float min = _radius + o._radius + 0.04f, dist = d.magnitude;
                 if (dist >= min) continue;
@@ -2253,7 +2409,12 @@ namespace WorkshopWreckage
                 case Mode.Assembling: return $"{displayName}: {status}";
                 case Mode.Activating: return $"{displayName}: starting up…";
                 case Mode.Following: return carried.Count > 0 ? $"{displayName}: delivering, then following" : $"{displayName}: following you";
+                case Mode.Summoned: return $"{displayName}: {(summonStatus != "" ? summonStatus : "coming to the workbench")}";
+                case Mode.Docked: return g.modules != null && !g.modules.Complete(id)
+                    ? $"{displayName}: incomplete — parked at the workbench (missing {string.Join(", ", g.modules.Missing(id).Select(RobotModules.SlotName))})"
+                    : $"{displayName}: docked at the workbench";
             }
+            if (_summonPending) return $"{displayName}: finishing up, then coming to the workbench";
             if (paused && carried.Count == 0) return $"{displayName}: paused";
             if (_climbing) return $"{displayName}: climbing";
             if (strategy == "assigned_definition" && carried.Count == 0 && _step == Step.Choose)
