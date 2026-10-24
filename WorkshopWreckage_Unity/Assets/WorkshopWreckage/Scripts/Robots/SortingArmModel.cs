@@ -19,7 +19,7 @@ namespace WorkshopWreckage
         const float UX = 0.2f, FX = 0.07f;   // the upper arm runs beside the turret, the forearm inside it (the reference)
         Transform _shoulder, _upper, _elbow, _wrist, _fingerL, _fingerR;
         public override float ModelHeight => 2.0f;
-        protected override Material Skin(Material m) => FamilySkin(m);
+        protected override Material Skin(Material m) => FamilySkin(m, FamilyOrange);   // industrial orange
         protected override Material BoltSkin(Material m) => FamilyBoltSkin(m);
 
         protected override void CreatePivots()

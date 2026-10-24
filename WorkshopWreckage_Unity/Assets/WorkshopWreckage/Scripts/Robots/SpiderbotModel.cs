@@ -32,7 +32,7 @@ namespace WorkshopWreckage
         /// <summary>The ankle's height above the sole (the puck foot).</summary>
         const float SoleDrop = 0.04f;
 
-        protected override Material Skin(Material m) => FamilySkin(m);
+        protected override Material Skin(Material m) => FamilySkin(m, FamilyViolet);   // muted violet
         protected override Material BoltSkin(Material m) => FamilyBoltSkin(m);
 
         protected override void CreatePivots()

@@ -40,14 +40,14 @@ namespace WorkshopWreckage
         public static bool LegacyLook;
 
         /// <summary>The family finish (RobotFamilyKit.FamilySkin); the legacy look keeps the kit materials.</summary>
-        protected override Material Skin(Material m) => LegacyLook ? m : FamilySkin(m);
+        protected override Material Skin(Material m) => LegacyLook ? m : FamilySkin(m, FamilyBlue);   // industrial blue
 
         protected override Material BoltSkin(Material m) => LegacyLook ? m : FamilyBoltSkin(m);
 
-        static Color YellowC => FamilyYellow;
+        static Color BodyC => FamilyBlue;
         static Color RedC => FamilyRed;
         /// <summary>The boots and heel caps: the most worn paint on the robot (scuffed, chipped, dirty).</summary>
-        static Material FootPaint => LegacyLook ? Yellow : RobotFinish.Paint(YellowC, 1f, 0.85f, 0.75f, 1f, 0.45f, 0.45f, 0.1f);
+        static Material FootPaint => LegacyLook ? Yellow : RobotFinish.Paint(BodyC, 1f, 0.85f, 0.75f, 1f, 0.45f, 0.45f, 0.1f);
         static Material HeelPaint => LegacyLook ? ToyRed : RobotFinish.Paint(RedC, 1f, 0.8f, 0.7f, 1f, 0.7f, 0.2f, 0.08f);
         protected override Material GreaseMat => LegacyLook ? StainMat : RobotFinish.Grease;
         protected override Material BrightSteel => Shaft;

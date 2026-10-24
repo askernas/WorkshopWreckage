@@ -18,6 +18,9 @@ namespace WorkshopWreckage
         public static readonly Color FamilyRedDeep = new(0.55f, 0.08f, 0.05f);
         /// <summary>Variant body paint (Unibot's olive), same finish and wear.</summary>
         public static readonly Color FamilyGreen = new(0.33f, 0.38f, 0.18f), FamilyGreenDeep = new(0.26f, 0.3f, 0.14f);
+        /// <summary>Body paints of the robots that don't wear the kit's yellow or olive (FamilySkin(m, paint)):
+        /// Retrobot's industrial blue #326A9B, Spiderbot's muted violet #76529B, the Sorting Arm's orange #D97724.</summary>
+        public static readonly Color FamilyBlue = new(0.196f, 0.416f, 0.608f), FamilyViolet = new(0.51f, 0.35f, 0.6f), FamilyOrange = new(0.85f, 0.36f, 0.04f);
         static Dictionary<Material, Material> _familySkin;
 
         /// <summary>The family finish (RobotFinish on WWRobot.shader): the kit's paints and metals mapped to
@@ -42,6 +45,21 @@ namespace WorkshopWreckage
             };
             return _familySkin.TryGetValue(m, out var s) ? s : m;
         }
+
+        /// <summary>The family finish in a robot's own body colour: the kit's body paints (yellow, olive) come
+        /// out in `paint` and their deep trim tones in a darker shade of it; red, metals and wear stay the
+        /// family's. Shared components (FamilyArm, FamilyHead) are built from the kit paints, so the same arm
+        /// is blue on Retrobot and violet on Spiderbot without a material of its own. A model opts in with
+        /// `protected override Material Skin(Material m) => FamilySkin(m, FamilyBlue);`.</summary>
+        protected static Material FamilySkin(Material m, Color paint)
+        {
+            if (m == ToyYellow || m == ToyGreen) return RobotFinish.Paint(paint, 1f, 0.55f, 0.55f, 0.85f, 0.18f, 0.45f, 0.1f);
+            if (m == ToyYellowDeep || m == ToyGreenDeep) return RobotFinish.Paint(DeepTone(paint), 1f, 0.55f, 0.55f, 0.85f, 0.25f, 0.35f, 0.1f);
+            return FamilySkin(m);
+        }
+
+        /// <summary>The darker trim tone of a body paint (as the family's deep yellow is to its yellow).</summary>
+        public static Color DeepTone(Color c) => new(c.r * 0.82f, c.g * 0.8f, c.b * 0.78f);
 
         /// <summary>True when the chassis owns the mount on top of the head (Hoverbot's propeller): any head
         /// fitted to it leaves its own top accessory (beacon, lamp) off, so the two never overlap.</summary>
