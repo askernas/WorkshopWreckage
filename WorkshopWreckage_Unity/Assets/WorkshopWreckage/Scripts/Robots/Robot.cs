@@ -139,6 +139,11 @@ namespace WorkshopWreckage
         /// <summary>Gripper models: can the claws get to a part from the standing spot the path would end at?
         /// A part lying inside a pile (the nearest free spot is further than the claws reach) is skipped
         /// when choosing, instead of walking there and deferring it.</summary>
+        /// <summary>Where it stands to take a part from the sorting tray: the nearest free floor beside the part
+        /// (further out if the tray's surroundings are crowded). A tray part is always within reach from there,
+        /// however far the arms really are (a game rule: the player's tray is always emptied).</summary>
+        Vector3? TrayGoal(ItemInstance inst) => _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, 0.65f) ?? _nav.NearestFree(inst.Position, 1.5f);
+
         bool InGripRange(ItemInstance inst, Vector3 goal)
         {
             if (!Grips) return true;
@@ -837,6 +842,7 @@ namespace WorkshopWreckage
             System.Func<ItemInstance, float> score = i => (i.Position - me).sqrMagnitude;
             specialistState = "";
             _stagedNow = StagedCounts();   // the staging cap holds for every robot (never waits on a full zone)
+            List<ItemInstance> tray = null;
             if (strategy == "assigned_definition")
             {
                 if (!ChooseAssigned(ref pool, me)) { if (carried.Count > 0) { _step = Step.ToDest; _path = null; } else _idleT = 1.5f; return; }
@@ -845,7 +851,7 @@ namespace WorkshopWreckage
             {
                 // parts the player put in the sorting tray come first (a Hoverbot empties the staging
                 // zones before them: nobody else can, while any robot can take the tray)
-                var tray = g.index.QuerySphere(g.TrayCenter, 1f).Select(i => g.world.instances[i]).Where(i => g.InTray(i.Position) && Pickable(i)).ToList();
+                tray = g.index.QuerySphere(g.TrayCenter, 1f).Select(i => g.world.instances[i]).Where(i => g.InTray(i.Position) && Pickable(i)).ToList();
                 if (tray.Count > 0 && preferDef < 0 && strategy != "staging_first") pool = tray;
                 if (preferDef >= 0)
                 {
@@ -893,15 +899,35 @@ namespace WorkshopWreckage
                     };
                 }
             }
-            int tries = 0, maxTries = 6 + 3 * _searchRank;
-            int coveredSkips = 0;
+            int tries = 0, coveredSkips = 0;
             var prof = System.Diagnostics.Stopwatch.StartNew();
             var ordered = pool.Where(Pickable).OrderBy(score).ToList();
             _tSort = prof.Elapsed.TotalMilliseconds;
+            if (TryTargets(ordered, me, types, ref tries, ref coveredSkips)) return;
+            // nothing in the tray it can get at (covered, or no free spot beside it): the rest of the floor
+            // instead of waiting on the tray for ever
+            if (pool == tray && carried.Count == 0)
+            {
+                pool = g.world.instances;
+                ordered = pool.Where(Pickable).OrderBy(score).ToList();
+                tries = coveredSkips = 0;
+                if (TryTargets(ordered, me, types, ref tries, ref coveredSkips)) return;
+            }
+            if (carried.Count > 0) { _step = Step.ToDest; _path = null; return; }
+            _idleT = 0.5f;
+            if (tries == 0) status = "nothing left it can reach";
+        }
+
+        /// <summary>Takes the first of these candidates it can walk to and grip (a bounded number of tries per
+        /// frame); false if none.</summary>
+        bool TryTargets(List<ItemInstance> ordered, Vector3 me, HashSet<int> types, ref int tries, ref int coveredSkips)
+        {
+            int maxTries = 6 + 3 * _searchRank;
             foreach (var inst in ordered)
             {
                 if (carried.Count > 0 && ((inst.Position - me).magnitude > _gather || (!types.Contains(inst.defId) && types.Count >= _types) || SlotsUsed + SlotsOf(inst.id) > _capacity)) break;
-                if (!Flies && g.Covered(inst.id)) { if (++coveredSkips > 40) break; continue; }   // under other parts: wait until it is uncovered
+                bool inTray = g.InTray(inst.Position);   // anything in the sorting tray can always be taken (TrayGoal)
+                if (!Flies && !inTray && g.Covered(inst.id)) { if (++coveredSkips > 40) break; continue; }   // under other parts: wait until it is uncovered
                 if (++tries > maxTries) break;   // keep the frame cheap; continue next frame
                 if (Flies)
                 {
@@ -910,8 +936,8 @@ namespace WorkshopWreckage
                 else
                 {
                     bool high = inst.Position.y > _maxPickH;
-                    var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : g.InTray(inst.Position) ? 0.65f : _reach);
-                    if (goal.HasValue && !high && !InGripRange(inst, goal.Value)) continue;   // a climber closes in on a high part on top (ClimbTo)
+                    var goal = inTray ? TrayGoal(inst) : _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : _reach);
+                    if (goal.HasValue && !high && !inTray && !InGripRange(inst, goal.Value)) continue;   // a climber closes in on a high part on top (ClimbTo)
                     var path = goal.HasValue ? _nav.Path(me, goal.Value) : null;
                     if (path == null) { _unreachable.Add(inst.id); continue; }
                     _path = path;
@@ -921,11 +947,9 @@ namespace WorkshopWreckage
                 g.robotReserved.Add(inst.id);
                 _step = Step.ToItem;
                 if (strategy == "assigned_definition") specialistState = carried.Count == 0 && Flat(inst.Position - me).magnitude > _scan ? "SEARCHING" : "WORKING";
-                return;
+                return true;
             }
-            if (carried.Count > 0) { _step = Step.ToDest; _path = null; return; }
-            _idleT = 0.5f;
-            if (tries == 0) status = "nothing left it can reach";
+            return false;
         }
 
         // ---------------------------------------------------------------- planning ahead (robots.json plan_ahead)
@@ -967,12 +991,13 @@ namespace WorkshopWreckage
             {
                 var inst = g.world.instances[id];
                 if (!Pickable(inst)) continue;
-                if (g.Covered(id)) { if (++coveredSkips > 40) break; continue; }
+                bool inTray = g.InTray(inst.Position);
+                if (!inTray && g.Covered(id)) { if (++coveredSkips > 40) break; continue; }
                 if (++tries > maxTries) break;
                 yield return null;   // one path per frame
                 bool high = inst.Position.y > _maxPickH;
-                var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : g.InTray(inst.Position) ? 0.65f : _reach);
-                if (goal.HasValue && InGripRange(inst, goal.Value) && _nav.Path(from, goal.Value) != null) { _plannedId = id; break; }
+                var goal = inTray ? TrayGoal(inst) : _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : _reach);
+                if (goal.HasValue && (inTray || InGripRange(inst, goal.Value)) && _nav.Path(from, goal.Value) != null) { _plannedId = id; break; }
             }
             _planList.Clear();
             _planReady = true;
@@ -1219,7 +1244,8 @@ namespace WorkshopWreckage
             }
             if (raise) _aimW = 1;
             var inst = g.world.instances[itemId];
-            if (claws && inst.state == ItemState.InWorld && _model.GripPoint is Vector3 cp && (cp - inst.Position).magnitude > ContactMax)
+            bool fromTray = g.InTray(inst.Position);
+            if (claws && !fromTray && inst.state == ItemState.InWorld && _model.GripPoint is Vector3 cp && (cp - inst.Position).magnitude > ContactMax)
             {
                 // the claws can't get to it (in a pile, past the arms' range): leave it for later, choose another
                 LogHands("pick deferred", (cp - inst.Position).magnitude, inst.Position);
@@ -1261,7 +1287,14 @@ namespace WorkshopWreckage
                 if (Flies) Debug.Log($"[robotflight] {id} picks {itemId} ({inst.owner}) for {g.world.DefOf(itemId).storageBox}");
                 // how far the claws are from the part at the grip (QA)
                 _gripGlide = 0.35f;
-                if (_model.GripPoint is Vector3 gp) { float gap = (gp - inst.Position).magnitude; maxGripGap = Mathf.Max(maxGripGap, gap); pickCount++; LogHands("pick", gap, inst.Position); _gripGlide = Mathf.Lerp(0.2f, 0.35f, Mathf.InverseLerp(0.01f, ContactMax, gap)); }
+                if (_model.GripPoint is Vector3 gp)
+                {
+                    float gap = (gp - inst.Position).magnitude;
+                    pickCount++;
+                    if (fromTray) LogHands("tray pick", gap, inst.Position);   // always allowed: not held to the floor's 5 cm
+                    else { maxGripGap = Mathf.Max(maxGripGap, gap); LogHands("pick", gap, inst.Position); }
+                    _gripGlide = Mathf.Lerp(0.2f, 0.35f, Mathf.InverseLerp(0.01f, ContactMax, gap));
+                }
                 // the carried model takes over exactly where the part lies, then glides into the claws
                 _gripItem = itemId;
                 _gripFromPos = inst.Position;
