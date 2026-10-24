@@ -552,7 +552,8 @@ namespace WorkshopWreckage
                 if (k == 7) bb.SetMinMax(bb.min, new Vector3(bb.max.x, bb.min.y + bb.size.y * 0.55f, bb.max.z));   // the claw end
                 if (k == 6) bb.SetMinMax(new Vector3(bb.min.x, bb.max.y - bb.size.y * 0.55f, bb.min.z), bb.max);    // shoulder to forearm
             }
-            float radius = Mathf.Max(bb.extents.y, Mathf.Max(bb.extents.x, bb.extents.z)) * (rs.Length > 0 ? 1.25f : 1.12f);
+            float radius = Mathf.Max(bb.extents.y, Mathf.Max(bb.extents.x, bb.extents.z)) * (rs.Length > 0 ? 1.25f : 1.12f)
+                * (args.TryGetValue("studiozoom", out var sz) ? float.Parse(sz, System.Globalization.CultureInfo.InvariantCulture) : 1f);   // --studiozoom: more room around the robot (hero shots)
             float dist = radius / Mathf.Tan(player.cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
             var target = bb.center;
             var camPos = target + dir * dist + Vector3.up * dist * (rs.Length > 0 ? 0.25f : 0.06f);
@@ -1344,7 +1345,9 @@ namespace WorkshopWreckage
                 urp.msaaSampleCount = ss > 1 ? 1 : 8;
             }
             var cam = player.cam;
-            var rt = new RenderTexture(w * ss, h * ss, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB) { antiAliasing = ss > 1 ? 1 : 8 };
+            // a half-float target: URP renders its intermediate buffers in the target's format, and an 8-bit one
+            // would mean LDR rendering (no bloom on the emissive eyes and lamps)
+            var rt = new RenderTexture(w * ss, h * ss, 24, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear) { antiAliasing = ss > 1 ? 1 : w * h > 9000000 ? 2 : 8 };   // 8K: MSAA 2 keeps it in GPU memory
             var prev = cam.targetTexture;
             cam.targetTexture = rt;
             cam.ResetAspect();
@@ -1354,11 +1357,15 @@ namespace WorkshopWreckage
             var cur = rt;
             while (cur.width > w)   // exact 2x2 box filter per halving (bilinear taps at texel corners)
             {
-                var half = new RenderTexture(cur.width / 2, cur.height / 2, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                var half = new RenderTexture(cur.width / 2, cur.height / 2, 0, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear);
                 Graphics.Blit(cur, half);
                 if (cur != rt) cur.Release();
                 cur = half;
             }
+            var ldr = new RenderTexture(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);   // linear -> sRGB bytes
+            Graphics.Blit(cur, ldr);
+            if (cur != rt) cur.Release();
+            cur = ldr;
             var was = RenderTexture.active;
             RenderTexture.active = cur;
             var tex = new Texture2D(w, h, TextureFormat.RGB24, false);
