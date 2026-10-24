@@ -35,6 +35,7 @@ namespace WorkshopWreckage
         public float lookAheadWeight;
         public Vector3 focus;      // the part or destination being worked on (pick-up, deposit, staging)
         public float focusWeight;
+        public float stow;         // 0..1 the arms swing a part up and back over the cargo hold (stowing models)
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and
@@ -111,6 +112,14 @@ namespace WorkshopWreckage
 
         /// <summary>World point between the claws (where a part is gripped), or null.</summary>
         public virtual Vector3? GripPoint => FamilyGripPoint;
+
+        /// <summary>True for a model whose load rides in a cargo hold (Caterpillarbot's boxes) rather than in
+        /// its grippers: the arms stow each gripped part (RobotAnim.stow) and take it out again to deliver.</summary>
+        public virtual bool StowsCargo => false;
+
+        /// <summary>Stowing models: where the part rides while the loader gripper alone carries it over to the
+        /// hold (RobotAnim.stow > 0), or null (the normal grip point).</summary>
+        public virtual Vector3? StowGripPoint => null;
 
         /// <summary>How far in front of the robot (world, flat) the claws come down when it bends to
         /// pick something up at the given height, or null (no such pose).</summary>

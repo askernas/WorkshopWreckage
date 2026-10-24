@@ -40,6 +40,8 @@ namespace WorkshopWreckage
         public int preferDef = -1;
         public string status = "";
         public int delivered, staged, lastStagedId = -1;
+        /// <summary>QA: parts a stowing robot put into / took out of its hold with the grippers.</summary>
+        public int stows, unstows;
         public Vector3 home;
         public Vector3? zoneCenter;                    // assigned work zone (Task Coordination skill)
         public float zoneRadius = 3f;
@@ -93,6 +95,24 @@ namespace WorkshopWreckage
         public float SpeedQA => _speedNow;
         public float TurnRateQA => _turnRate;
         bool Grips => _model != null && _model.GripPoint.HasValue;
+        /// <summary>The load rides in a cargo hold, loaded and unloaded by the grippers (Caterpillarbot).</summary>
+        bool Stows => Grips && _model.StowsCargo;
+        // stowing robots: the hold slot each carried part rides in (stable while others come and go), the
+        // part currently in the grippers (-1: none), the arms' swing over the hold, the parts of this trip
+        readonly Dictionary<int, int> _slotOf = new();
+        int _clawItem = -1, _tripParts;
+        float _stow;
+
+        int SlotFor(int itemId)
+        {
+            if (!_slotOf.TryGetValue(itemId, out var slot))
+            {
+                slot = 0;
+                while (_slotOf.ContainsValue(slot)) slot++;
+                _slotOf[itemId] = slot;
+            }
+            return slot;
+        }
         float _extend;   // telescopic forearms out (world m), for models without an aim solve
         float BaseReach => BaseStat("reach_height", 0.35);
         /// <summary>The reach upgrade's telescopic forearms: how far they may extend, a little more than the
@@ -385,6 +405,7 @@ namespace WorkshopWreckage
                 arm.ToBench();
                 Sfx.Play("complete", transform.position + Vector3.up * 0.3f, -2);
                 g.progression?.OnRobotRepaired(id);
+                GameEvents.Raise(GameEventKind.RobotActivated, Owner, type);
                 g.hud.Toast($"{displayName} is ready — carry it to a socket on a drawer cabinet", true);
                 g.workbench?.Refresh();
                 foreach (var r in g.robots) if (r != this && r.mode == Mode.Assembling) r.RefreshAssembly();
@@ -411,6 +432,7 @@ namespace WorkshopWreckage
             mode = Mode.Working;
             _step = Step.Choose;
             g.progression?.OnRobotRepaired(id);
+            GameEvents.Raise(GameEventKind.RobotActivated, Owner, type);
             g.hud.Toast($"{displayName} is online and starts sorting!", true);
             g.workbench?.Refresh();
             foreach (var r in g.robots) if (r != this && r.mode == Mode.Assembling) r.RefreshAssembly();   // the next Hoverbot may take the mat
@@ -1245,9 +1267,12 @@ namespace WorkshopWreckage
                 g.world.SetState(itemId, ItemState.Carried, Owner);
                 g.interaction.SettleNeighbours(from, g.world.DefOf(itemId));
                 carried.Add(itemId);
+                if (Stows) _clawItem = itemId;   // in the grippers until it is stowed
                 ShowCarried(itemId);
                 PlaceCarried();
                 Sfx.Play("pickup", ip, -4);
+                var pdef = g.world.DefOf(itemId);
+                GameEvents.Raise(GameEventKind.PartPickedUp, Owner, type, pdef.id, pdef.CategoryName);
             }
             float b0 = _bend;
             float w0 = _aimW, r0 = _armReach, x0 = _extend;
@@ -1264,6 +1289,7 @@ namespace WorkshopWreckage
             _aimW = 0; _extend = 0;
             _gripItem = -1; _gripBlend = 1;
             _bend = 0; _armReach = 0; _reachY = 0;
+            if (Stows && _clawItem == itemId) yield return Stow(itemId);
             _clawsBusy = false;
             if (_climbing) yield return ClimbDown();
             _path = null;
@@ -1352,6 +1378,22 @@ namespace WorkshopWreckage
         IEnumerator Deposit()
         {
             var here = carried.Where(c => g.world.DefOf(c).storageBox == _destBox).ToList();
+            if (!Stows || here.Count == 0) { yield return DepositParts(here, true); yield break; }
+            // a stowing robot takes each part out of its hold with the grippers and delivers it on its own
+            for (int k = 0; k < here.Count; k++)
+            {
+                int id = here[k];
+                if (!carried.Contains(id)) continue;
+                yield return Unstow(id);
+                yield return DepositParts(new List<int> { id }, k == here.Count - 1);
+                if (carried.Contains(id) && _clawItem == id) yield return Stow(id);   // not taken (full): back into the hold
+            }
+        }
+
+        /// <summary>Puts `here` (parts for the current destination) away: into the destination, or into its
+        /// staging zone when it can't be reached or is blocked. `last`: the final batch of this stop.</summary>
+        IEnumerator DepositParts(List<int> here, bool last)
+        {
             // stray parts lying in the destination block it: leave the load in its staging zone
             if (!_destReachable || g.StraysIn(_destBox).Count > 0) { yield return StageBelow(here); yield break; }
             if (!Flies && _destPoint.y > _maxPickH) yield return ClimbTo(_destPoint);   // climbs up to store it
@@ -1395,6 +1437,7 @@ namespace WorkshopWreckage
                 HideCarried(itemId);
                 carried.Remove(itemId);
                 delivered++;
+                _tripParts++;
                 Sfx.Play("drop_drawer", _destPoint, -5);
                 if (here.Count > 1) yield return new WaitForSeconds(0.12f);
             }
@@ -1414,10 +1457,79 @@ namespace WorkshopWreckage
             if (claws) { _clawOpen = 0; _clawsBusy = false; }
             if (_climbing) yield return ClimbDown();
             _path = null;
+            if (!last) yield break;
             if (carried.Any(c => g.world.DefOf(c).storageBox == _destBox)) DropCarried($"{displayName}: that destination is full");
             _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
             _idleT = carried.Count > 0 ? 0.15f : _decidePause;
+            TripCheck();
             MaybeGesture();
+        }
+
+        /// <summary>A trip ends when the robot has put its whole load down (stored and/or staged).</summary>
+        void TripCheck()
+        {
+            if (carried.Count > 0 || _tripParts == 0) return;
+            GameEvents.Raise(GameEventKind.RobotTripCompleted, Owner, type, count: _tripParts);
+            _tripParts = 0;
+        }
+
+        /// <summary>Stowing robots: the grippers swing the part they hold up and back over the hold and let it
+        /// drop into its slot, then the arms come back down.</summary>
+        IEnumerator Stow(int itemId)
+        {
+            _clawsBusy = true; _clawItem = itemId; _gripW = PartWidth(itemId);
+            _clawClose = 1; _clawOpen = 0;
+            float swingT = _pickTime * 0.6f, openT = _pickTime * 0.18f, backT = _pickTime * 0.5f;
+            for (float t = 0; t < swingT; t += Time.deltaTime) { _stow = Mathf.SmoothStep(0, 1, t / swingT); yield return null; }
+            _stow = 1;
+            // let go: the part drops from the grippers into its slot
+            if (_carryModels.TryGetValue(itemId, out var go)) { _gripItem = itemId; _gripFromPos = go.transform.position; _gripFromRot = go.transform.rotation; _gripBlend = 0; }
+            _clawItem = -1;
+            for (float t = 0; t < openT; t += Time.deltaTime)
+            {
+                float u = Mathf.SmoothStep(0, 1, t / openT);
+                _clawClose = 1 - u; _clawOpen = u; _gripBlend = u;
+                yield return null;
+            }
+            _gripItem = -1; _gripBlend = 1; _clawClose = 0; _clawOpen = 1;
+            Sfx.Play("drop_floor", transform.position + Vector3.up * _height, -10);
+            for (float t = 0; t < backT; t += Time.deltaTime)
+            {
+                float u = Mathf.SmoothStep(0, 1, t / backT);
+                _stow = 1 - u; _clawOpen = 1 - u;
+                yield return null;
+            }
+            _stow = 0; _clawOpen = 0;
+            _clawsBusy = false;
+            stows++;
+        }
+
+        /// <summary>Stowing robots: the grippers reach back into the hold, close on the part and bring it
+        /// forward into the carry pose (ready to deliver).</summary>
+        IEnumerator Unstow(int itemId)
+        {
+            _clawsBusy = true; _gripW = PartWidth(itemId);
+            float swingT = _depositTime * 0.4f, closeT = _depositTime * 0.14f, backT = _depositTime * 0.36f;
+            for (float t = 0; t < swingT; t += Time.deltaTime)
+            {
+                float u = Mathf.SmoothStep(0, 1, t / swingT);
+                _stow = u; _clawOpen = Mathf.SmoothStep(0, 1, Mathf.Clamp01(t / swingT * 1.5f)); _clawClose = 0;
+                yield return null;
+            }
+            _stow = 1; _clawOpen = 1;
+            if (_carryModels.TryGetValue(itemId, out var go)) { _gripItem = itemId; _gripFromPos = go.transform.position; _gripFromRot = go.transform.rotation; _gripBlend = 0; }
+            _clawItem = itemId;
+            for (float t = 0; t < closeT; t += Time.deltaTime)
+            {
+                float u = Mathf.SmoothStep(0, 1, t / closeT);
+                _clawOpen = 1 - u; _clawClose = u; _gripBlend = u;
+                yield return null;
+            }
+            _gripItem = -1; _gripBlend = 1; _clawOpen = 0; _clawClose = 1;
+            for (float t = 0; t < backT; t += Time.deltaTime) { _stow = 1 - Mathf.SmoothStep(0, 1, t / backT); yield return null; }
+            _stow = 0;
+            _clawsBusy = false;
+            unstows++;
         }
 
         /// <summary>Where the claws put a part into its destination: over the open tray of a drawer
@@ -1610,8 +1722,10 @@ namespace WorkshopWreckage
                 g.world.SetState(itemId, ItemState.InWorld, "stage:" + _destBox);   // the destination's staging zone (still UNSORTED)
                 g.index.Insert(itemId);
                 staged++;
+                _tripParts++;
                 lastStagedId = itemId;
                 Sfx.Play("drop_floor", spot, -6);
+                GameEvents.Raise(GameEventKind.PartStaged, Owner, type, def.id, def.CategoryName, _destBox);
             }
             float sb0 = _bend, sr0 = _armReach, sw0 = _aimW, recoverT = _depositTime * (claws ? 0.38f : 0.5f);
             for (float t = 0; t < recoverT; t += Time.deltaTime)
@@ -1628,6 +1742,7 @@ namespace WorkshopWreckage
             _path = null;
             _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
             _idleT = carried.Count > 0 ? 0.15f : _decidePause;
+            TripCheck();
         }
 
         void DropCarried(string why)
@@ -1737,14 +1852,14 @@ namespace WorkshopWreckage
             _gait = Mathf.MoveTowards(_gait, moving > 0.05f ? Mathf.Max(0.45f, moving) : 0, dt * 3f);
             _phase += dt * _model.StepRate(Mathf.Clamp01(moving), _speedNow) * (_gait > 0 ? 1 : 0);
             if (_gait == 0) _phase = Mathf.MoveTowards(_phase, Mathf.Round(_phase / Mathf.PI) * Mathf.PI, dt * 6);   // finish the step: legs come to rest together
-            _armHold = Mathf.MoveTowards(_armHold, carried.Count > 0 ? 1 : 0, dt * 3f);
+            bool inHands = Stows ? _clawItem >= 0 : carried.Count > 0;   // a stowing robot's load rides in its hold
+            _armHold = Mathf.MoveTowards(_armHold, inHands ? 1 : 0, dt * 3f);
             if (!_clawsBusy)
             {
                 // holding a load: grippers closed on it; otherwise they ease back to their rest
-                bool hold = carried.Count > 0;
-                _clawClose = Mathf.MoveTowards(_clawClose, hold ? 1 : 0, dt * 4f);
+                _clawClose = Mathf.MoveTowards(_clawClose, inHands ? 1 : 0, dt * 4f);
                 _clawOpen = Mathf.MoveTowards(_clawOpen, 0, dt * 4f);
-                _gripW = hold ? PartWidth(carried[0]) : 0;
+                _gripW = inHands ? PartWidth(Stows ? _clawItem : carried[0]) : 0;
             }
             Sounds(moving);
             bool idle = _gait < 0.05f && _armReach == 0 && _armLift == 0 && _aimW == 0;
@@ -1753,12 +1868,13 @@ namespace WorkshopWreckage
                 dt = dt, speed01 = _speedNow / _walk, speed = _speedNow, gait = _gait, phase = _phase, turnRate = _turnRate, bend = _bend,
                 armReach = _armReach, armHold = _armHold, armLift = _armLift, altitude = _altitude, active = true, time = _time, reachHeight = _reachY,
                 aim = _aimPoint, aimWeight = _aimW, clawOpen = _clawOpen, clawClose = _clawClose, gripWidth = _gripW,
-                armExtend = _extend, focus = qaTarget, focusWeight = _clawsBusy ? 1 : 0, lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
+                armExtend = _extend, stow = _stow, focus = qaTarget, focusWeight = _clawsBusy ? 1 : 0, lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
                 lookAt = g.player.transform.position, lookWeight = idle ? 1 : 0,
                 gesture = _step == Step.Gesture ? Mathf.Clamp01(_gestureT / GestureTime) : 0,
             });
             PlaceCarried();
-            if (carried.Count > 0 && _armHold > 0.99f && _gripBlend >= 1 && _model.GripPoint is Vector3 gp && _carryModels.TryGetValue(carried[0], out var cm))
+            int held = Stows ? _clawItem : carried.Count > 0 ? carried[0] : -1;
+            if (held >= 0 && _armHold > 0.99f && _gripBlend >= 1 && _model.GripPoint is Vector3 gp && _carryModels.TryGetValue(held, out var cm))
                 carrySyncMax = Mathf.Max(carrySyncMax, (cm.transform.position - gp).magnitude);   // QA: the load stays in the grippers
         }
 
@@ -1789,7 +1905,7 @@ namespace WorkshopWreckage
             int k = 0;
             var grip = _model.GripPoint;
             foreach (var itemId in carried)
-                if (_carryModels.TryGetValue(itemId, out var go)) PlaceCarriedModel(go, k++, carried.Count, grip, itemId);
+                if (_carryModels.TryGetValue(itemId, out var go)) PlaceCarriedModel(go, Stows ? SlotFor(itemId) : k++, Stows ? _capacity : carried.Count, grip, itemId);
         }
 
         /// <summary>One carried model: in its carry slot; with the claws while they reach down or are
@@ -1801,12 +1917,20 @@ namespace WorkshopWreckage
             if (go.transform.parent != parent) go.transform.SetParent(parent, false);
             go.transform.localPosition = local + new Vector3(0, 0.05f * _armLift, 0.06f * _armLift);
             go.transform.localRotation = itemId >= 0 && g.world.DefOf(itemId).restMode == RestMode.Long ? Quaternion.Euler(0, 0, 90) : Quaternion.identity;
-            // models with grippers hold the load between them all the time (it moves with the hands)
+            // models with grippers hold the load between them all the time (it moves with the hands); a
+            // stowing model only the part in its grippers (the rest ride in the hold)
             float w = Mathf.Max(Mathf.SmoothStep(0, 1, _armReach), Mathf.Max(Mathf.SmoothStep(0, 1, _aimW), _armHold));
+            if (Stows)
+            {
+                bool inClaws = itemId >= 0 ? itemId == _clawItem : _qaInClaws;
+                w = inClaws ? 1 : 0;
+                // during the swing over the hold only the loader gripper holds it (the other lets go)
+                if (inClaws && grip.HasValue && _model.StowGripPoint is Vector3 sg) grip = Vector3.Lerp(grip.Value, sg, Mathf.SmoothStep(0, 1, Mathf.Clamp01(_stowQA ?? _stow) * 4f));
+            }
             if (grip.HasValue && w > 0)
             {
                 var (_, l0) = _model.CarrySlot(0, n);
-                go.transform.position = Vector3.Lerp(go.transform.position, grip.Value + parent.TransformVector(local - l0), w);
+                go.transform.position = Vector3.Lerp(go.transform.position, grip.Value + (Stows ? Vector3.zero : parent.TransformVector(local - l0)), w);
             }
             if (itemId >= 0 && itemId == _gripItem && _gripBlend < 1)
             {
@@ -1816,6 +1940,8 @@ namespace WorkshopWreckage
         }
 
         GameObject _qaPart;
+        bool _qaInClaws = true;
+        float? _stowQA;
         Quaternion? _qaYaw0;
         /// <summary>QA (--robotpose / --robotseq, studio renders): poses the real model through its own
         /// Animate, with a part in its claws where the pose carries one. name: idle, walk (t = stride
@@ -1824,6 +1950,7 @@ namespace WorkshopWreckage
         {
             var a = new RobotAnim { dt = 1 };
             bool part = false, onFloor = false, simulated = false;
+            _qaInClaws = true; _stowQA = null;
             float S(float x) => Mathf.SmoothStep(0, 1, Mathf.Clamp01(x));
             switch (name)
             {
@@ -1889,6 +2016,17 @@ namespace WorkshopWreckage
                     // models without an aim solve: arms lifted, sleeves out t of the way
                     a.armHold = 1; a.armLift = 1; a.armExtend = (0.62f - BaseReach) * 1.35f * t; part = true;
                     break;
+                case "stow":
+                    // stowing models: the part comes up in the grippers, swings back over the hold and drops in
+                    part = true; a.gripWidth = 0.05f;
+                    if (t < 0.6f) { a.armHold = 1; a.clawClose = 1; a.stow = S(t / 0.6f); }
+                    else if (t < 0.72f) { float u = S((t - 0.6f) / 0.12f); a.stow = 1; a.clawClose = 1 - u; a.clawOpen = u; _qaInClaws = u < 0.5f; }
+                    else { float u = S((t - 0.72f) / 0.28f); a.stow = 1 - u; a.clawOpen = 1 - u; _qaInClaws = false; }
+                    break;
+                case "hold":
+                    // stowing models: travelling with a load in the hold, arms at rest
+                    part = true; _qaInClaws = false; a.gait = 1; a.speed = _walk; a.speed01 = 1; a.phase = t * Mathf.PI * 2;
+                    break;
                 case "clawsopen": a.clawOpen = 1; break;
                 case "clawsclosed": a.clawClose = 1; break;
                 case "pickup":
@@ -1915,6 +2053,7 @@ namespace WorkshopWreckage
                     break;
             }
             if (part || a.armHold > 0) a.gripWidth = 0.05f;
+            if (a.stow > 0) _stowQA = a.stow;
             if (!simulated)
             {
                 _armReach = a.armReach; _armLift = a.armLift; _armHold = a.armHold; _aimW = a.aimWeight; _aimPoint = a.aim; _extend = a.armExtend;
@@ -1976,6 +2115,8 @@ namespace WorkshopWreckage
 
         void HideCarried(int itemId)
         {
+            _slotOf.Remove(itemId);
+            if (_clawItem == itemId) _clawItem = -1;
             if (_carryModels.TryGetValue(itemId, out var go)) { Destroy(go); _carryModels.Remove(itemId); }
         }
 

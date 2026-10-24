@@ -975,11 +975,16 @@ namespace WorkshopWreckage
 
         public Progression progression;
         public Telemetry telemetry;
+        /// <summary>Durable gameplay counters (GameEvents), saved as "game_stats".</summary>
+        public GameStats stats;
         public double playTime;
         string _activity = "collecting";
         string _telemetryFile;
         Dictionary<string, object> _progressionCfg;
         public const int BaseInventory = 10;
+
+        /// <summary>The chassis type of an actor ("robot:&lt;owner&gt;" as robots deposit), or "".</summary>
+        public string RobotTypeOf(string actor) => actor.StartsWith("robot") ? robots.FirstOrDefault(r => r.Owner == actor)?.type ?? "" : "";
 
         void StartProgression(int seed, Dictionary<string, object> save)
         {
@@ -994,9 +999,17 @@ namespace WorkshopWreckage
                 progression.Load(Json.Obj(save.GetValueOrDefault("progression")));
                 playTime = Json.Num(save, "play_time_s");
             }
+            // gameplay counters: from the save, or (a save from before they existed) seeded from what it shows
+            stats = save == null ? new GameStats()
+                : save.ContainsKey("game_stats") ? GameStats.FromDict(Json.Obj(save["game_stats"]))
+                : GameStats.SeedFromLegacy(storage.contents.Values.Sum(l => l.Count), progression.level);
+            GameEvents.stats = stats;
             ApplySkills();
             progression.LeveledUp += lv => workbench.CheckBlueprints(true);
             progression.RobotUpgraded += type => { foreach (var r in robots) if (r.type == type) r.ApplyUpgrades(); };
+            progression.RobotUpgraded += type => GameEvents.Raise(GameEventKind.RobotUpgraded, "player", type);
+            progression.LeveledUp += lv => GameEvents.Raise(GameEventKind.LevelReached, "player", count: lv);
+            progress.Discovered += id => GameEvents.Raise(GameEventKind.PartDiscovered, "player", "", id, db.Get(id).CategoryName);
             progression.LeveledUp += lv =>
             {
                 hud.Toast($"Level {lv}!  Skill point earned (Esc → Skills)", true);
@@ -1007,6 +1020,8 @@ namespace WorkshopWreckage
             storage.Deposited += (box, id) =>
             {
                 bool robot = storage.lastDepositor.StartsWith("robot");
+                var def = world.DefOf(id);
+                GameEvents.Raise(GameEventKind.PartSorted, storage.lastDepositor, RobotTypeOf(storage.lastDepositor), def.id, def.CategoryName, box);
                 progression.OnSorted(id, robot);
                 telemetry.Sorted(robot, playTime, progress.sortedTotal);
             };

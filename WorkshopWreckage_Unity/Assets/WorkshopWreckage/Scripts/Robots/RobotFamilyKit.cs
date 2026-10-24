@@ -161,6 +161,8 @@ namespace WorkshopWreckage
             public float eyeScale;
             /// <summary>Assembly parts of the eye(s) and the antennas (null = the head's part).</summary>
             public string eyePart, antennaPart;
+            /// <summary>Assembly part of the beacon lamp (null = the head's part).</summary>
+            public string beaconPart;
         }
 
         /// <summary>The family head (around its pivot at the bottom centre): a rounded pressed-steel shell
@@ -191,10 +193,11 @@ namespace WorkshopWreckage
             if (s.mouth) FramedGrille(b, P, new Vector3(0, 0.04f, z0), 0.104f, 0.04f, 7, true, -1);
             float earY = H * s.earY;
             FamilyEarsAndAntennas(b, P, AP, AP, W, H, earY, s.antennas);
+            string BP = s.beaconPart ?? P;
             if (s.beacon)
             {
-                b.Lathe(new Vector3(0, H - 0.004f, 0), Disc(0.064f, 0.026f, 0.005f), M(P, Gunmetal), null, 28);
-                b.Lathe(new Vector3(0, H + 0.022f, 0), Disc(0.055f, 0.008f, 0.002f), M(P, BrightSteel), null, 28);
+                b.Lathe(new Vector3(0, H - 0.004f, 0), Disc(0.064f, 0.026f, 0.005f), M(BP, Gunmetal), null, 28);
+                b.Lathe(new Vector3(0, H + 0.022f, 0), Disc(0.055f, 0.008f, 0.002f), M(BP, BrightSteel), null, 28);
             }
             FramedGrille(b, P, new Vector3(0, H * 0.56f, -front + 0.001f), 0.2f, 0.095f, 7, false, 1);
             var hc = new Vector3(0, H / 2, 0);
@@ -204,7 +207,7 @@ namespace WorkshopWreckage
             if (Has(EP))
                 foreach (var x in eyeXs)
                     eyes.Add(Separate(pivot, "G_eye", lb => lb.Lathe(new Vector3(x, eyeY, z0 - 0.002f), Dome(0.027f * es, 0.012f * es, 8), EyeOffMat, FwdRot, 24)));
-            if (Has(P))
+            if (Has(BP))
             {
                 if (s.beacon) beacons.Add(Separate(pivot, "G_beacon", lb => lb.Lathe(new Vector3(0, H + 0.03f, 0), BeaconLamp(0.05f, 0.07f, 0.02f), BeaconOffMat, null, 28)));
             }
@@ -298,6 +301,8 @@ namespace WorkshopWreckage
         {
             public Material paint, paintDeep, red;
             public float clawScale, twist;
+            /// <summary>Assembly part of the gripper (palm, hinges, fingers; null = the arm's part).</summary>
+            public string clawPart;
         }
 
         /// <summary>Marker transforms between each gripper's finger tips (no geometry): the grip point,
@@ -360,19 +365,20 @@ namespace WorkshopWreckage
             hb.Lathe(wrist - X(0.038f), Disc(0.028f, 0.076f, 0.004f), M(P, Gunmetal), RightRot, 18);
             foreach (var px in new[] { -1f, 1f }) Hub(hb, P, wrist + X(px * 0.038f), px, 0.02f, 0);
             // the gripper, twisted round the forearm and scaled about the wrist
+            string CP = spec.clawPart ?? P;
             float cs = spec.clawScale;
             var tw = Quaternion.AngleAxis(s * spec.twist, Vector3.up);       // Godot-space points
             var twU = Quaternion.AngleAxis(-s * spec.twist, Vector3.up);     // the same twist for Unity-space rotations
             Vector3 C(float x, float y, float z) => wrist + tw * (new Vector3(x, y, z) * cs);
             Vector3 side = tw * Vector3.right;
-            hb.ChamferBox(C(0, -0.032f, 0), new Vector3(0.094f, 0.034f, 0.062f) * cs, 0.009f * cs, M(P, Gunmetal), twU);   // palm
+            hb.ChamferBox(C(0, -0.032f, 0), new Vector3(0.094f, 0.034f, 0.062f) * cs, 0.009f * cs, M(CP, Gunmetal), twU);   // palm
             var path = new[] { new Vector2(0.034f, -0.044f), new Vector2(0.074f, -0.078f), new Vector2(0.094f, -0.128f), new Vector2(0.08f, -0.174f), new Vector2(0.04f, -0.2f) };
             float[] wd = { 0.044f, 0.04f, 0.035f, 0.028f, 0.019f }, dp = { 0.056f, 0.054f, 0.049f, 0.043f, 0.036f };
             void HingeHub(Batch hb, Vector3 p, float r, Vector3 o)
             {
-                hb.Lathe(p - o + tw * new Vector3(0, 0, -0.033f * cs), Disc(r * cs, 0.066f * cs, 0.003f), M(P, BrightSteel), twU * BackRot, 18);
+                hb.Lathe(p - o + tw * new Vector3(0, 0, -0.033f * cs), Disc(r * cs, 0.066f * cs, 0.003f), M(CP, BrightSteel), twU * BackRot, 18);
                 foreach (var zs in new[] { -1f, 1f })
-                    hb.Lathe(p - o + tw * new Vector3(0, 0, zs * 0.033f * cs), Dome(r * 0.45f * cs, 0.006f * cs), M(P, Brass), twU * (zs < 0 ? FwdRot : BackRot), 10);
+                    hb.Lathe(p - o + tw * new Vector3(0, 0, zs * 0.033f * cs), Dome(r * 0.45f * cs, 0.006f * cs), M(CP, Brass), twU * (zs < 0 ? FwdRot : BackRot), 10);
             }
             foreach (var fs in new[] { -1f, 1f })
             {
@@ -393,7 +399,7 @@ namespace WorkshopWreckage
                     var d = (path[i + 1] - path[i]).normalized;
                     var a0 = i >= 2 ? path[i] - d * (wd[i] * 0.35f) : path[i];
                     var a1 = i >= 1 && i < path.Length - 2 ? path[i + 1] + d * (wd[i + 1] * 0.35f) : path[i + 1];
-                    fb.Loft(V3(a0) - root, V3(a1) - root, new Vector2(wd[i], dp[i]) * cs, new Vector2(wd[i + 1], dp[i + 1]) * cs, 0.011f * cs, (i == path.Length - 2 ? 0.006f : 0.01f) * cs, M(P, spec.red), side);
+                    fb.Loft(V3(a0) - root, V3(a1) - root, new Vector2(wd[i], dp[i]) * cs, new Vector2(wd[i + 1], dp[i + 1]) * cs, 0.011f * cs, (i == path.Length - 2 ? 0.006f : 0.01f) * cs, M(CP, spec.red), side);
                 }
                 for (int i = 1; i < path.Length - 1; i++)
                 {
@@ -403,7 +409,7 @@ namespace WorkshopWreckage
                     if (Vector2.Dot(inward, new Vector2(-fs, -0.3f)) < 0) inward = -inward;
                     var a2 = a + inward * (wd[i] / 2 + 0.0008f) + (i == 1 ? dir * 0.01f : Vector2.zero);
                     var c2 = c + inward * (wd[i + 1] / 2 + 0.0008f) - (i == path.Length - 2 ? dir * 0.008f : Vector2.zero);
-                    fb.Loft(C(a2.x, a2.y, 0) - root, C(c2.x, c2.y, 0) - root, new Vector2(0.0035f, dp[i] * 0.62f) * cs, new Vector2(0.0035f, dp[i + 1] * 0.62f) * cs, 0.0008f, 0.0008f, M(P, Rubber), side);
+                    fb.Loft(C(a2.x, a2.y, 0) - root, C(c2.x, c2.y, 0) - root, new Vector2(0.0035f, dp[i] * 0.62f) * cs, new Vector2(0.0035f, dp[i + 1] * 0.62f) * cs, 0.0008f, 0.0008f, M(CP, Rubber), side);
                 }
                 HingeHub(fb, V3(path[1]), 0.019f, root);   // the knuckle hinge moves with the finger
                 Done(fb, fp);

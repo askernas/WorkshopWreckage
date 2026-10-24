@@ -487,6 +487,7 @@ namespace WorkshopWreckage
                 ["items"] = items, ["item_defs"] = itemDefs, ["storage"] = storage,
                 ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),
+                ["game_stats"] = g.stats?.ToDict(),
                 ["player"] = new Dictionary<string, object> { ["pos"] = new List<object> { (double)p.position.x, (double)p.position.y, (double)p.position.z }, ["yaw"] = (double)g.player.Yaw, ["pitch"] = (double)g.player.Pitch },
                 ["stats"] = new Dictionary<string, object> { ["sorted"] = (double)g.progress.sortedTotal, ["percent"] = (double)g.progress.OverallPercent, ["level"] = (double)g.progression.level },
             };

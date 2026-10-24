@@ -20,6 +20,7 @@ namespace WorkshopWreckage
             g = game;
             outDir = dir;
             Directory.CreateDirectory(outDir);
+            GameEvents.Raised += e => _events.Add(e);   // every gameplay event of the run (roadmap 3A checks)
             var ic = g.interaction;
             var w = g.world;
             g.SetState("menu");
@@ -132,11 +133,15 @@ namespace WorkshopWreckage
                 if (ic.targetType == "dest" && ic.targetDest == cand) { wrong = cand; break; }
             }
             int before = g.inventory.Count;
+            int evWrong = _events.Count;
             ic.Primary();
+            Check("a refused deposit raises no gameplay event", _events.Count == evWrong, $"{_events.Count - evWrong} events");
             Check("wrong destination refused, nothing lost", ic.targetDest == wrong && g.inventory.Count == before && w.instances[held].state == ItemState.Carried, "target " + (ic.targetDest ?? ic.targetType));
 
             // 4. store everything by aiming at the right destinations
             int stored = 0, viaAim = 0, shots = 0;
+            int evStore = _events.Count;
+            long sortedStat0 = g.stats.Get("PartSorted");
             var tries = new Dictionary<int, int>();
             int cleared = 0, gaveUp = 0;
             while (g.inventory.Count > 0)
@@ -166,16 +171,30 @@ namespace WorkshopWreckage
             }
             Check("all carried items stored in their own destinations", stored == picked && gaveUp == 0 && g.storage.Stored(heldDef.storageBox).Contains(held), $"{stored} stored, {viaAim} via crosshair aim, {cleared} strays moved out of the way, {gaveUp} given up");
             Check("progress counts sorted items", g.progress.sortedTotal == stored, $"{g.progress.sortedTotal} sorted");
+            var sortedEv = _events.Skip(evStore).Where(e => e.kind == GameEventKind.PartSorted).ToList();
+            Check("every accepted deposit raises exactly one PartSorted event, with its part, category and destination",
+                  sortedEv.Count == stored && sortedEv.All(e => e.actor == "player" && e.partDef >= 0 && e.category != "" && e.destination != "") && sortedEv.Select(e => e.opId).Distinct().Count() == sortedEv.Count
+                  && g.stats.Get("PartSorted") - sortedStat0 == stored,
+                  $"{sortedEv.Count} events for {stored} stored; counter +{g.stats.Get("PartSorted") - sortedStat0}");
 
             // 5. save / load round trip
             var snap = Snapshot();
+            var statsBefore = Json.Write(g.stats.ToDict());
+            string lvBefore = $"level {g.progression.level} xp {g.progression.xp}";
             g.SaveGame("autotest");
             g.StartWorld(g.world.seed, null);
             Check("new world is reset", g.progress.sortedTotal == 0, "");
+            int evLoad = _events.Count, lvSaved = g.progression.level;
             g.LoadGame("autotest");
+            bool statsSame = Json.Write(g.stats.ToDict()) == statsBefore;   // straight after loading, before any frame
             g.player.enabled = false;
             yield return Frames(5);
             var after = Snapshot();
+            // loading itself raises nothing; the frames after it may legitimately finish pending objectives
+            // (a first level-up), but never repeat a level, a sort or an activation from before the save
+            bool repeats = _events.Skip(evLoad).Any(e => e.kind is GameEventKind.PartSorted or GameEventKind.RobotActivated or GameEventKind.PartStaged || (e.kind == GameEventKind.LevelReached && e.count <= lvSaved));
+            Check("gameplay counters survive save/load and loading repeats no event", statsSame && !repeats,
+                  $"stats identical after load {statsSame}; after it: {string.Join(", ", _events.Skip(evLoad).Select(e => e.kind + (e.kind == GameEventKind.LevelReached ? " " + e.count : "")))} ({lvBefore} -> level {g.progression.level} xp {g.progression.xp})");
             Check("save/load restores identical state", snap == after, $"{snap.GetHashCode()} vs {after.GetHashCode()}");
             File.Delete(SaveSystem.PathOf("autotest"));
 
@@ -245,6 +264,9 @@ namespace WorkshopWreckage
             Debug.Log($"[autoplay] {passed} passed, {failed} failed");
             Application.Quit(failed == 0 ? 0 : 1);
         }
+
+        readonly List<GameEvent> _events = new();
+        int EventsSince(int from, GameEventKind k, System.Func<GameEvent, bool> where = null) => _events.Skip(from).Count(e => e.kind == k && (where == null || where(e)));
 
         IEnumerator Frames(int n) { for (int i = 0; i < n; i++) yield return null; }
 
@@ -420,6 +442,8 @@ namespace WorkshopWreckage
             foreach (var r in others) wb.Activate(wb.P(r.id));
             float t0 = Time.realtimeSinceStartup;
             while (others.Any(r => !r.Active) && Time.realtimeSinceStartup - t0 < 15) yield return null;
+            Check("activating a robot raises one RobotActivated event for it", others.All(r => _events.Count(e => e.kind == GameEventKind.RobotActivated && e.actor == r.Owner) == 1),
+                  string.Join(", ", others.Select(r => $"{r.id} {_events.Count(e => e.kind == GameEventKind.RobotActivated && e.actor == r.Owner)}")));
             Check("all robots start work once activated", others.All(r => r.Active), string.Join(", ", others.Select(r => r.Describe())));
             var mid = (g.robots[0].home + g.robots[4].home) * 0.5f;
             // size line-up: everyone at the repair bay, seen from eye height
@@ -452,6 +476,8 @@ namespace WorkshopWreckage
                 catBot.CommandFocus(catDef.id);
             }
             var before = g.robots.ToDictionary(r => r.id, r => (r.delivered, r.staged));
+            var catPick0 = (catBot.stows, catBot.unstows, catBot.pickCount, catBot.delivered + catBot.staged);
+            int evRobots = _events.Count;
             Time.timeScale = 4;
             bool[] shot = new bool[5];
             bool doubleHeld = false;
@@ -491,6 +517,16 @@ namespace WorkshopWreckage
             Check("Unibot never stores directly: everything goes to staging zones (still unsorted)", uni.delivered == uniStored0 && uni.staged > before["unibot"].staged
                   && g.world.instances.Where(i => i.owner.StartsWith("stage:")).All(i => i.state == ItemState.InWorld), $"{uni.staged - before["unibot"].staged} staged, {uni.delivered - uniStored0} stored");
             Check("Caterpillarbot collects several parts before a delivery run", catMax >= 2, $"up to {catMax} on board");
+            int catPicked = catBot.pickCount - catPick0.pickCount, catPut = catBot.delivered + catBot.staged - catPick0.Item4;
+            Check("Caterpillarbot stows each part it grips into its front box and takes each out again with the grippers to put it away",
+                  catPicked >= 2 && catBot.stows - catPick0.stows == catPicked && catBot.unstows - catPick0.unstows >= catPut,
+                  $"{catPicked} gripped, {catBot.stows - catPick0.stows} stowed; {catPut} put away, {catBot.unstows - catPick0.unstows} taken out");
+            Check("Caterpillarbot never draws a part in from afar: every grip within 5 cm, the rest deferred", catBot.pickCount >= 1 && catBot.maxGripGap <= 0.05f, $"largest grip gap {catBot.maxGripGap * 100:0.0} cm, {catBot.deferred} deferred");
+            int robSorted = g.robots.Sum(r => r.delivered - before[r.id].delivered), robStaged = g.robots.Sum(r => r.staged - before[r.id].staged);
+            int evSorted = EventsSince(evRobots, GameEventKind.PartSorted, e => e.actor.StartsWith("robot:")), evStaged = EventsSince(evRobots, GameEventKind.PartStaged);
+            Check("robot deliveries and stagings raise exactly one event each, with the robot's type",
+                  evSorted == robSorted && evStaged == robStaged && _events.Skip(evRobots).Where(e => e.kind is GameEventKind.PartSorted or GameEventKind.PartStaged && e.actor.StartsWith("robot:")).All(e => e.robotType != ""),
+                  $"{evSorted} sorted events / {robSorted} stored, {evStaged} staged events / {robStaged} staged; {EventsSince(evRobots, GameEventKind.RobotTripCompleted)} trips");
             Check("Unibot's grippers open at contact, close before the lift and open to let go", uni.pickCount >= 1 && uni.minOpenAtContact >= 0.95f && uni.minClosedAtAttach >= 0.99f && (uni.releases == 0 || uni.minOpenAtRelease >= 0.99f),
                   $"{uni.pickCount} pick-ups, {uni.releases} releases; lowest opening at contact {uni.minOpenAtContact:0.00}, closure {uni.minClosedAtAttach:0.00}, opening at release {uni.minOpenAtRelease:0.00}");
             Check("Unibot holds its load in the grippers while it rolls and turns", uni.carrySyncMax <= 0.01f, $"largest gap {uni.carrySyncMax * 100:0.0} cm");
