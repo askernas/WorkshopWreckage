@@ -842,9 +842,10 @@ namespace WorkshopWreckage
             }
             else
             {
-                // parts the player put in the sorting tray come first
+                // parts the player put in the sorting tray come first (a Hoverbot empties the staging
+                // zones before them: nobody else can, while any robot can take the tray)
                 var tray = g.index.QuerySphere(g.TrayCenter, 1f).Select(i => g.world.instances[i]).Where(i => g.InTray(i.Position) && Pickable(i)).ToList();
-                if (tray.Count > 0 && preferDef < 0) pool = tray;
+                if (tray.Count > 0 && preferDef < 0 && strategy != "staging_first") pool = tray;
                 if (preferDef >= 0)
                 {
                     var pref = g.world.IdsOf(preferDef).Select(i => g.world.instances[i]).Where(Pickable).ToList();
@@ -872,6 +873,7 @@ namespace WorkshopWreckage
                         }
                     }
                 }
+                if (pool == null && tray.Count > 0 && preferDef < 0) pool = tray;
                 pool ??= g.world.instances;
                 if (strategy == "opportunistic")
                     // parts it can store itself first (a part for a high destination is worth 1.5 m of
@@ -908,7 +910,7 @@ namespace WorkshopWreckage
                 {
                     bool high = inst.Position.y > _maxPickH;
                     var goal = _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : g.InTray(inst.Position) ? 0.65f : _reach);
-                    if (goal.HasValue && !InGripRange(inst, goal.Value)) continue;
+                    if (goal.HasValue && !high && !InGripRange(inst, goal.Value)) continue;   // a climber closes in on a high part on top (ClimbTo)
                     var path = goal.HasValue ? _nav.Path(me, goal.Value) : null;
                     if (path == null) { _unreachable.Add(inst.id); continue; }
                     _path = path;
@@ -1592,12 +1594,34 @@ namespace WorkshopWreckage
             // on top it stands where its claws come down on the target (the contact rule holds up there
             // too); measured now, while the model is still level
             float standOff = Grips && _model.GripReach(target.y - topY) is float gr && gr > 0.02f ? gr : _reach * 0.6f;
+            // the floor approach stands back by its reach: first walk up to the unit's face, so the
+            // climb starts with the feet against it instead of in mid-air in front of it
+            var unit = g.UnitAt(target);
+            if (unit != null)
+            {
+                var front = UnitFront(unit);
+                float gap = Vector3.Dot(Flat(transform.position - unit.transform.position), front) - unit.size.z * 0.5f - 0.03f;
+                var face = transform.position - front * Mathf.Max(0, gap);
+                for (float t = 0; t < 3f && Flat(face - transform.position).magnitude > 0.01f; t += Time.deltaTime)
+                {
+                    float dt = Time.deltaTime;
+                    FaceTowards(face - front, dt);
+                    transform.position = Vector3.MoveTowards(transform.position, face, dt * _walk * 0.6f);
+                    _speedNow = _walk * 0.6f;
+                    yield return null;
+                }
+                _speedNow = 0;
+                dir = -front;
+                Debug.Log($"[robotclimb] {id} climbs {unit.name} from {(Vector3.Dot(Flat(transform.position - unit.transform.position), front) - unit.size.z * 0.5f) * 100:0.0} cm off its face to {topY:0.00} m");
+            }
+            qaTarget = target;
+            QAMoment?.Invoke(this, "climb");
             _climbing = true;
             _climbFrom = transform.position;
             while (transform.position.y < topY - 0.005f)
             {
                 float dt = Time.deltaTime;
-                FaceTowards(target, dt);
+                FaceTowards(transform.position + dir, dt);
                 _climbPitch = Mathf.MoveTowards(_climbPitch, 75, dt * 240);
                 var p = transform.position;
                 p.y = Mathf.MoveTowards(p.y, topY, dt * _climbSpeed * (_climbPitch / 75f));

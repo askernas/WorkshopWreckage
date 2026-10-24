@@ -609,6 +609,9 @@ namespace WorkshopWreckage
             // staging, walking and turning with a load
             var left = new Dictionary<string, int> { ["pick"] = 1, ["pickpile"] = 1, ["drawer"] = 1, ["store"] = 1, ["stage"] = 1, ["carrywalk"] = 1, ["carryturn"] = 1 };
             if (!r.CanDirectStore) { left.Remove("drawer"); left.Remove("store"); left["stage"] = 2; }   // a courier only stages
+            if (r.CanClimb) left["climb"] = 1;
+            if (args.TryGetValue("watchonly", out var only))   // --watchonly=climb,store: just these moments
+                foreach (var k in left.Keys.ToList()) if (!only.Split(',').Contains(k)) left.Remove(k);
             string pending = null;
             Robot.QAMoment = (rb, what) => { if (rb == r && pending == null && left.TryGetValue(what, out var n) && n > 0) pending = what; };
             var cam = player.cam.transform;
@@ -651,8 +654,8 @@ namespace WorkshopWreckage
                 if (pending == null && r.carried.Count > 0)
                 {
                     carryT += Time.unscaledDeltaTime;
-                    if (carryT > 0.3f && left["carryturn"] > 0 && Mathf.Abs(r.TurnRateQA) > 60f) pending = "carryturn";
-                    else if (carryT > 0.6f && left["carrywalk"] > 0 && r.SpeedQA > 0.3f) pending = "carrywalk";
+                    if (carryT > 0.3f && left.GetValueOrDefault("carryturn") > 0 && Mathf.Abs(r.TurnRateQA) > 60f) pending = "carryturn";
+                    else if (carryT > 0.6f && left.GetValueOrDefault("carrywalk") > 0 && r.SpeedQA > 0.3f) pending = "carrywalk";
                 }
                 else carryT = 0;
                 if (pending != null)
@@ -672,7 +675,18 @@ namespace WorkshopWreckage
                             if (again.HasValue && spot.HasValue) reframes++;
                             spot = again ?? spot;
                         }
-                        if (spot.HasValue) cam.SetPositionAndRotation(spot.Value, Quaternion.LookRotation(Focus(what) - spot.Value));
+                        if (what == "climb")
+                        {
+                            // a climb: from the side and a step back from the face, so the face and the
+                            // robot's feet on it are both seen (the obstacle checks would fail here)
+                            var t = r.transform;
+                            var fwd = t.forward; fwd.y = 0; fwd.Normalize();
+                            var at = t.position + Vector3.up * 0.15f;
+                            var side = Vector3.Cross(Vector3.up, fwd);
+                            var from = new Vector3(at.x, 0, at.z) - fwd * 0.35f + side * 1.2f + Vector3.up * 0.75f;
+                            cam.SetPositionAndRotation(from, Quaternion.LookRotation(at - from));
+                        }
+                        else if (spot.HasValue) cam.SetPositionAndRotation(spot.Value, Quaternion.LookRotation(Focus(what) - spot.Value));
                         else Follow();
                         yield return Capture(Path.Combine(dir, $"{what}_{k:00}.png"), 1);
                         yield return new WaitForSeconds(what.StartsWith("carry") ? 0.04f : 0.05f);
