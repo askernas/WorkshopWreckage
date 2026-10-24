@@ -611,6 +611,7 @@ namespace WorkshopWreckage
             var left = new Dictionary<string, int> { ["pick"] = 1, ["pickpile"] = 1, ["drawer"] = 1, ["store"] = 1, ["stage"] = 1, ["carrywalk"] = 1, ["carryturn"] = 1 };
             if (!r.CanDirectStore) { left.Remove("drawer"); left.Remove("store"); left["stage"] = 2; }   // a courier only stages
             if (r.CanClimb) left["climb"] = 1;
+            if (r.GetComponentInChildren<RobotModel>()?.StowsCargo == true) left["stow"] = 1;   // the throw into the hold
             if (args.TryGetValue("watchonly", out var only))   // --watchonly=climb,store: just these moments
                 foreach (var k in left.Keys.ToList()) if (!only.Split(',').Contains(k)) left.Remove(k);
             string pending = null;
@@ -676,7 +677,16 @@ namespace WorkshopWreckage
                             if (again.HasValue && spot.HasValue) reframes++;
                             spot = again ?? spot;
                         }
-                        if (what == "climb")
+                        if (what == "stow")
+                        {
+                            // the throw: from the side and well back, so the flight over the head into the hold is in frame
+                            var t = r.transform;
+                            var fwd = t.forward; fwd.y = 0; fwd.Normalize();
+                            var at = t.position + Vector3.up * 0.3f;
+                            var from = at + Vector3.Cross(Vector3.up, fwd) * 1.4f + Vector3.up * 0.35f;
+                            cam.SetPositionAndRotation(from, Quaternion.LookRotation(at - from));
+                        }
+                        else if (what == "climb")
                         {
                             // a climb: from the side and a step back from the face, so the face and the
                             // robot's feet on it are both seen (the obstacle checks would fail here)

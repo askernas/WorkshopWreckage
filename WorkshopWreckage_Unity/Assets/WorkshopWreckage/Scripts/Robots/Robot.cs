@@ -101,7 +101,8 @@ namespace WorkshopWreckage
         // part currently in the grippers (-1: none), the arms' swing over the hold, the parts of this trip
         readonly Dictionary<int, int> _slotOf = new();
         int _clawItem = -1, _tripParts;
-        float _stow;
+        float _stow, _toss;
+        float _gripArc;   // > 0: the part flies (thrown into the hold): arc height over the straight line (world m)
 
         int SlotFor(int itemId)
         {
@@ -1483,33 +1484,30 @@ namespace WorkshopWreckage
             _tripParts = 0;
         }
 
-        /// <summary>Stowing robots: the grippers swing the part they hold up and back over the hold and let it
-        /// drop into its slot, then the arms come back down.</summary>
+        /// <summary>Stowing robots: the loader arm flicks the part up overhead and lets go at the top; the part
+        /// tumbles over the head in a high arc and lands in its slot in the hold, while the arm comes back down.</summary>
         IEnumerator Stow(int itemId)
         {
             _clawsBusy = true; _clawItem = itemId; _gripW = PartWidth(itemId);
             _clawClose = 1; _clawOpen = 0;
-            float swingT = _pickTime * 0.31f, openT = _pickTime * 0.094f, backT = _pickTime * 0.26f;   // about 0.6 s at Caterpillarbot's base pick time
-            for (float t = 0; t < swingT; t += Time.deltaTime) { _stow = Mathf.SmoothStep(0, 1, t / swingT); yield return null; }
-            _stow = 1;
-            // let go: the part drops from the grippers into its slot
-            if (_carryModels.TryGetValue(itemId, out var go)) { _gripItem = itemId; _gripFromPos = go.transform.position; _gripFromRot = go.transform.rotation; _gripBlend = 0; }
+            QAMoment?.Invoke(this, "stow");
+            float flickT = _pickTime * 0.3f, flightT = _pickTime * 0.37f, backT = _pickTime * 0.26f;   // about 0.6 s at Caterpillarbot's base pick time
+            Sfx.Play("servo", transform.position + Vector3.up * _height, -12);
+            for (float t = 0; t < flickT; t += Time.deltaTime) { float u = t / flickT; _toss = u * u * (2 - u); yield return null; }   // fastest at the release
+            _toss = 1;
+            // let go at the top: the part flies from the gripper into its slot
+            if (_carryModels.TryGetValue(itemId, out var go)) { _gripItem = itemId; _gripFromPos = go.transform.position; _gripFromRot = go.transform.rotation; _gripBlend = 0; _gripArc = 0.6f * _height; }
             _clawItem = -1;
-            for (float t = 0; t < openT; t += Time.deltaTime)
+            for (float t = 0; t < flightT; t += Time.deltaTime)
             {
-                float u = Mathf.SmoothStep(0, 1, t / openT);
-                _clawClose = 1 - u; _clawOpen = u; _gripBlend = u;
+                _gripBlend = t / flightT;
+                float open = Mathf.Clamp01(t / 0.06f), back = Mathf.SmoothStep(0, 1, t / backT);
+                _clawClose = 1 - open; _clawOpen = open * (1 - back); _toss = 1 - back;
                 yield return null;
             }
-            _gripItem = -1; _gripBlend = 1; _clawClose = 0; _clawOpen = 1;
-            Sfx.Play("drop_floor", transform.position + Vector3.up * _height, -10);
-            for (float t = 0; t < backT; t += Time.deltaTime)
-            {
-                float u = Mathf.SmoothStep(0, 1, t / backT);
-                _stow = 1 - u; _clawOpen = 1 - u;
-                yield return null;
-            }
-            _stow = 0; _clawOpen = 0;
+            _gripItem = -1; _gripBlend = 1; _gripArc = 0;
+            _toss = 0; _clawClose = 0; _clawOpen = 0;
+            Sfx.Play("drop_drawer", transform.position + Vector3.up * _height * 0.5f, -8);   // it lands in the box
             _clawsBusy = false;
             stows++;
         }
@@ -1916,7 +1914,7 @@ namespace WorkshopWreckage
                 dt = dt, speed01 = _speedNow / _walk, speed = _speedNow, gait = _gait, phase = _phase, turnRate = _turnRate, bend = _bend,
                 armReach = _armReach, armHold = _armHold, armLift = _armLift, altitude = _altitude, active = true, time = _time, reachHeight = _reachY,
                 aim = _aimPoint, aimWeight = _aimW, clawOpen = _clawOpen, clawClose = _clawClose, gripWidth = _gripW,
-                armExtend = _extend, stow = _stow, focus = qaTarget, focusWeight = _clawsBusy ? 1 : 0, lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
+                armExtend = _extend, stow = _stow, toss = _toss, focus = qaTarget, focusWeight = _clawsBusy ? 1 : 0, lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
                 lookAt = g.player.transform.position, lookWeight = idle ? 1 : 0,
                 gesture = _step == Step.Gesture ? Mathf.Clamp01(_gestureT / GestureTime) : 0,
             });
@@ -1973,14 +1971,21 @@ namespace WorkshopWreckage
                 bool inClaws = itemId >= 0 ? itemId == _clawItem : _qaInClaws;
                 w = inClaws ? 1 : 0;
                 // during the swing over the hold only the loader gripper holds it (the other lets go)
-                if (inClaws && grip.HasValue && _model.StowGripPoint is Vector3 sg) grip = Vector3.Lerp(grip.Value, sg, Mathf.SmoothStep(0, 1, Mathf.Clamp01(_stowQA ?? _stow) * 4f));
+                if (inClaws && grip.HasValue && _model.StowGripPoint is Vector3 sg) grip = Vector3.Lerp(grip.Value, sg, Mathf.SmoothStep(0, 1, Mathf.Clamp01(Mathf.Max(_stowQA ?? _stow, _tossQA ?? _toss)) * 4f));
             }
             if (grip.HasValue && w > 0)
             {
                 var (_, l0) = _model.CarrySlot(0, n);
                 go.transform.position = Vector3.Lerp(go.transform.position, grip.Value + (Stows ? Vector3.zero : parent.TransformVector(local - l0)), w);
             }
-            if (itemId >= 0 && itemId == _gripItem && _gripBlend < 1)
+            if (itemId == _gripItem && _gripBlend < 1 && _gripArc > 0)
+            {
+                // thrown: a ballistic arc (even across, parabolic up), tumbling end over end twice
+                float u = _gripBlend;
+                go.transform.SetPositionAndRotation(Vector3.Lerp(_gripFromPos, go.transform.position, u) + Vector3.up * (_gripArc * 4 * u * (1 - u)),
+                    Quaternion.AngleAxis(-720 * u, transform.right) * Quaternion.Slerp(_gripFromRot, go.transform.rotation, u));
+            }
+            else if (itemId >= 0 && itemId == _gripItem && _gripBlend < 1)
             {
                 float b = Mathf.SmoothStep(0, 1, _gripBlend);
                 go.transform.SetPositionAndRotation(Vector3.Lerp(_gripFromPos, go.transform.position, b), Quaternion.Slerp(_gripFromRot, go.transform.rotation, b));
@@ -1989,7 +1994,7 @@ namespace WorkshopWreckage
 
         GameObject _qaPart;
         bool _qaInClaws = true;
-        float? _stowQA;
+        float? _stowQA, _tossQA;
         Quaternion? _qaYaw0;
         /// <summary>QA (--robotpose / --robotseq, studio renders): poses the real model through its own
         /// Animate, with a part in its claws where the pose carries one. name: idle, walk (t = stride
@@ -1998,7 +2003,7 @@ namespace WorkshopWreckage
         {
             var a = new RobotAnim { dt = 1 };
             bool part = false, onFloor = false, simulated = false;
-            _qaInClaws = true; _stowQA = null;
+            _qaInClaws = true; _stowQA = null; _tossQA = null; _gripArc = 0; _gripBlend = 1;
             float S(float x) => Mathf.SmoothStep(0, 1, Mathf.Clamp01(x));
             switch (name)
             {
@@ -2071,6 +2076,17 @@ namespace WorkshopWreckage
                     else if (t < 0.72f) { float u = S((t - 0.6f) / 0.12f); a.stow = 1; a.clawClose = 1 - u; a.clawOpen = u; _qaInClaws = u < 0.5f; }
                     else { float u = S((t - 0.72f) / 0.28f); a.stow = 1 - u; a.clawOpen = 1 - u; _qaInClaws = false; }
                     break;
+                case "toss":
+                    // stowing models: the flick overhead, the release and the part's flight into the hold
+                    part = true; a.gripWidth = 0.05f;
+                    if (t < 0.45f) { float u = t / 0.45f; a.armHold = 1; a.clawClose = 1; a.toss = u * u * (2 - u); }
+                    else
+                    {
+                        float f = (t - 0.45f) / 0.55f, back = S(Mathf.Clamp01(f / 0.7f));
+                        a.toss = 1 - back; a.clawOpen = 1 - back; _qaInClaws = false;
+                        if (_model.TossReleasePoint() is Vector3 rp) { _gripItem = -1; _gripFromPos = rp; _gripFromRot = transform.rotation; _gripBlend = Mathf.Min(f, 0.999f); _gripArc = 0.6f * _height; }
+                    }
+                    break;
                 case "hold":
                     // stowing models: travelling with a load in the hold, arms at rest
                     part = true; _qaInClaws = false; a.gait = 1; a.speed = _walk; a.speed01 = 1; a.phase = t * Mathf.PI * 2;
@@ -2102,6 +2118,7 @@ namespace WorkshopWreckage
             }
             if (part || a.armHold > 0) a.gripWidth = 0.05f;
             if (a.stow > 0) _stowQA = a.stow;
+            if (a.toss > 0) _tossQA = a.toss;
             if (!simulated)
             {
                 _armReach = a.armReach; _armLift = a.armLift; _armHold = a.armHold; _aimW = a.aimWeight; _aimPoint = a.aim; _extend = a.armExtend;

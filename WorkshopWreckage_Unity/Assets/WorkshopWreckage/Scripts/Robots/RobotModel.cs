@@ -36,6 +36,7 @@ namespace WorkshopWreckage
         public Vector3 focus;      // the part or destination being worked on (pick-up, deposit, staging)
         public float focusWeight;
         public float stow;         // 0..1 the arms swing a part up and back over the cargo hold (stowing models)
+        public float toss;         // 0..1 stowing models: the loader arm flicks up overhead to throw the part into the hold
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and
@@ -120,6 +121,8 @@ namespace WorkshopWreckage
         /// <summary>Stowing models: where the part rides while the loader gripper alone carries it over to the
         /// hold (RobotAnim.stow > 0), or null (the normal grip point).</summary>
         public virtual Vector3? StowGripPoint => null;
+        /// <summary>Stowing models that throw: where the part leaves the loader gripper at the top of the flick.</summary>
+        public virtual Vector3? TossReleasePoint() => null;
 
         /// <summary>How far in front of the robot (world, flat) the claws come down when it bends to
         /// pick something up at the given height, or null (no such pose).</summary>

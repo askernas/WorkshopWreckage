@@ -274,6 +274,22 @@ namespace WorkshopWreckage
             return _stowPitch;
         }
 
+        /// <summary>The loader arm's pitch (deg) at the top of the throw: up, just short of the vertical, the
+        /// arm straight (the part leaves the gripper above the shoulder and sails back over the head).</summary>
+        const float TossPitch = -168f;
+
+        public override Vector3? TossReleasePoint()
+        {
+            if (!HasGrippers) return null;
+            SnapshotPose();
+            PoseTelescopes(0);
+            _armR.localRotation = Quaternion.Euler(TossPitch, 0, 0);
+            var el = _armR.Find("Elbow"); if (el != null) el.localRotation = Quaternion.identity;
+            var p = clawTipR.position;
+            RestorePose();
+            return p;
+        }
+
         public override void Animate(RobotAnim a)
         {
             float s = Mathf.Max(1e-4f, transform.lossyScale.x);
@@ -317,6 +333,14 @@ namespace WorkshopWreckage
                 _armL.localRotation = Quaternion.Slerp(_armL.localRotation, Quaternion.Euler(rest, 0, RestInward), Mathf.Clamp01(_stowNow * 2));
                 var elL = _armL.Find("Elbow"); if (elL != null) elL.localRotation = Quaternion.Euler(-34f * Mathf.Clamp01(_stowNow * 2), 0, 0);   // it keeps its ready bend
             }
+            if (a.toss > 0)
+            {
+                // the throw: the loader arm swings up straight to above the shoulder; the left arm settles
+                float rest = ArmPitch(0, 0, 0);
+                _armR.localRotation = Quaternion.Slerp(_armR.localRotation, Quaternion.Euler(TossPitch, 0, 0), a.toss);
+                var elR = _armR.Find("Elbow"); if (elR != null) elR.localRotation = Quaternion.Slerp(elR.localRotation, Quaternion.identity, a.toss);
+                _armL.localRotation = Quaternion.Slerp(_armL.localRotation, Quaternion.Euler(rest, 0, RestInward), Mathf.Clamp01(a.toss * 2));
+            }
             if (a.gesture > 0)
             {
                 float w = Mathf.Sin(a.gesture * Mathf.PI);
@@ -329,6 +353,7 @@ namespace WorkshopWreckage
             _headLook = head.localRotation;
             // while the loader arm passes beside it the head turns to watch the part go into the box
             if (_stowNow > 0) head.localRotation = Quaternion.Slerp(head.localRotation, Quaternion.Euler(-8f, 90f, 0), Ease(Mathf.Clamp01(_stowNow * 1.6f)));
+            if (a.toss > 0) head.localRotation = Quaternion.Slerp(head.localRotation, Quaternion.Euler(-14f, 0, 0), Ease(a.toss));   // it looks up at the throw
         }
     }
 }
