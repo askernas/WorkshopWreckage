@@ -126,10 +126,10 @@ namespace WorkshopWreckage
             Block(new Vector2(repairBayPos.x, repairBayPos.z), new Vector2(3.55f, 1.0f));
             // sorting tray in front of the repair bay: drop any parts here and the robots sort them
             // against the south wall beside the door: out of the way of the workbench and the walkways
-            // a metre out from the wall so robots reach it from both long sides; 0.6 m deep so every
-            // part is within arm's reach over the low rim. Its rim is solid (a floor blocker) and
+            // its long side against the wall (the sign hangs on the wall above it); 0.3 m deep so every
+            // part is within arm's reach over the front rim. Its rim is solid (a floor blocker) and
             // its bottom is a surface parts rest on.
-            trayRect = new Rect(doorX + 1.25f, south - 1.6f, 1.4f, 0.6f);
+            trayRect = new Rect(doorX + 1.25f, south - 0.34f, 2.2f, 0.3f);
             Block(trayRect.center, trayRect.size);
             decks.Add((trayRect, TrayFloor));
             F("sorting_tray", new Vector3(trayRect.center.x, 0, trayRect.center.y), new Vector3(trayRect.width, 0.12f, trayRect.height));

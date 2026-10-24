@@ -326,6 +326,7 @@ namespace WorkshopWreckage
                 b.Lathe(basePos + new Vector3(0, 0.02f, 0), Disc(0.0065f, rodH, 0.001f), M(ant, Gunmetal), null, 8);
                 b.Lathe(basePos + new Vector3(0, 0.015f + rodH, 0), Ball(0.027f), M(ant, ToyRed), null, 16);
             }
+            if (HeadTopTaken) beacon = null;   // the chassis owns the head-top mount (Hoverbot's propeller)
             if (beacon != null) b.Lathe(new Vector3(0, H - 0.002f, 0), Disc(0.055f, 0.02f, 0.005f), M(beacon, Gunmetal), null, 22);
             // back vent and slot
             Grille(b, shell, new Vector3(0, H * 0.56f, -front + 0.001f), W * 0.53f, H * 0.34f, 7, false, 1);

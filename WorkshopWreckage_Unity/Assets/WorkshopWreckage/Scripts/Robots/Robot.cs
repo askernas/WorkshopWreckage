@@ -1844,7 +1844,7 @@ namespace WorkshopWreckage
             float ground = Ground(p);
             target.y = Mathf.Max(target.y, Ground(target) + _height * 0.5f);   // never below what it can hover over
             float wantY = dist > 0.8f ? Mathf.Max(_cruise, target.y) : target.y;
-            float climb = Mathf.MoveTowards(p.y, wantY, dt * 1.1f);
+            float climb = Climb(p.y, wantY, dt, 1.1f);
             bool high = Mathf.Abs(p.y - wantY) < 0.25f || dist < 0.8f;
             float target01 = high ? Mathf.Clamp01(dist * 1.5f) : 0.15f;
             _speedNow = Mathf.MoveTowards(_speedNow, Walk * target01, dt * 2f);
@@ -1863,9 +1863,21 @@ namespace WorkshopWreckage
         {
             var p = transform.position;
             float ground = Ground(p);
-            p.y = Mathf.MoveTowards(p.y, ground + alt, dt * 0.8f);
+            p.y = Climb(p.y, ground + alt, dt, 0.8f);
             transform.position = p;
             _altitude = p.y - ground;
+        }
+
+        float _vy;
+        /// <summary>A flier's height change: the vertical speed eases in and out (limited acceleration,
+        /// slowing down on the way in) instead of starting and stopping at full rate.</summary>
+        float Climb(float y, float want, float dt, float vmax)
+        {
+            float desired = Mathf.Clamp((want - y) * 2.2f, -vmax, vmax);
+            _vy = Mathf.MoveTowards(_vy, desired, dt * 2.5f);
+            float ny = y + _vy * dt;
+            if ((want - y) * (want - ny) <= 0) { ny = want; _vy = 0; }   // arrived: no overshoot
+            return ny;
         }
 
         void Brake(float dt) => _speedNow = Mathf.MoveTowards(_speedNow, 0, dt * 3f);

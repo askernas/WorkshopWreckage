@@ -168,10 +168,11 @@ namespace WorkshopWreckage
                     b.Box(new Vector3(0, WorkshopLayout.TrayFloor / 2, 0), new Vector3(size.x, WorkshopLayout.TrayFloor, size.z), dark, true);
                     foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(sx * size.x / 2, size.y / 2, 0), new Vector3(0.04f, size.y, size.z + 0.04f), wood, true);
                     foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(0, size.y / 2, sz * size.z / 2), new Vector3(size.x, size.y, 0.04f), wood, true);
-                    b.Box(new Vector3(-size.x / 2 + 0.05f, 0.45f, size.z / 2 + 0.03f), new Vector3(0.04f, 0.9f, 0.04f), dark);   // sign post
+                    // the sign hangs on the wall behind it (the tray's back rim is 4 cm off the wall)
                     var sign = TextAtlas.RenderSingle("SORTING TRAY", 512, 128, new Color(0.3f, 0.2f, 0.13f), new Color(0.95f, 0.8f, 0.4f), 60, true);
-                    b.Box(new Vector3(-size.x / 2 + 0.3f, 0.82f, size.z / 2 + 0.03f), new Vector3(0.52f, 0.14f, 0.02f), dark);
-                    b.Quad(new Vector3(-size.x / 2 + 0.3f, 0.82f, size.z / 2 + 0.015f), new Vector2(0.5f, 0.125f), EnvMaterials.Atlas(sign), new Rect(0, 0, 1, 1), R(Vector3.up, Mathf.PI));
+                    float wall = size.z / 2 + 0.04f;
+                    b.Box(new Vector3(0, 1.15f, wall - 0.012f), new Vector3(0.84f, 0.23f, 0.024f), dark);
+                    b.Quad(new Vector3(0, 1.15f, wall - 0.026f), new Vector2(0.8f, 0.2f), EnvMaterials.Atlas(sign), new Rect(0, 0, 1, 1), R(Vector3.up, Mathf.PI));
                     break;
                 }
                 case "door": Door(g, b, size); break;

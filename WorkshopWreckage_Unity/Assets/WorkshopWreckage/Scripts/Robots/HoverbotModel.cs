@@ -9,23 +9,37 @@ namespace WorkshopWreckage
     /// bezel eyes, red ear caps, antennas and a mouth grille; a stacked dark gear mast
     /// with the rotor motor; a comical two-blade paddle propeller with riveted rounded
     /// tips and a red dome hub; two gripping arms hanging from the rim.
-    /// It bobs, tilts into its flight direction and spins the rotor.
+    /// Family standard (docs/ROBOT_FAMILY_PHASE4_HOVERBOT.md): the family finish, the canonical cone ears
+    /// and antennas, family arms with articulated grippers. A flight controller banks it into turns from
+    /// the real lateral acceleration (speed x turn rate), noses it down to accelerate and up to brake, and
+    /// settles it level on a damped spring; no idle sway. The propeller and its mast belong to the chassis:
+    /// they sit on a mount at the head's top (HeadTopTaken), never on the head itself.
     /// Parts: head, left/right eye lens, left/right antenna, siren light, upper/lower
     /// saucer shell, rim light 1-4, thruster ring, thruster glow plate, propeller blade
     /// A/B, rotor hub, rotor mast, rotor motor, left/right arm, left/right claw,
     /// gyroscope, flight controller, battery pack, left/right ear cap.</summary>
     public class HoverbotModel : RobotModel
     {
-        Transform _saucer, _rotor, _armL, _armR;
-        float _rotorAngle, _tilt;
+        Transform _saucer, _mast, _rotor, _armL, _armR;
+        float _rotorAngle, _rotorRate;
+        // flight controller state: roll and pitch (deg) with their rates, the speed last frame, the
+        // filtered fore-aft acceleration, the last altitude and the filtered climb rate
+        float _roll, _rollV, _pitch, _pitchV, _vPrev, _acc, _altPrev = -1, _climb;
         public override float ModelHeight => 0.98f;
-        const float HeadY = 0.475f, RotorY = 0.935f, RimR = 0.44f;
+        const float HeadY = 0.475f, HeadH = 0.31f, HeadTop = HeadY + HeadH, RotorY = 0.935f, RimR = 0.44f;
+        protected override Material Skin(Material m) => FamilySkin(m);
+        protected override Material BoltSkin(Material m) => FamilyBoltSkin(m);
+        protected override bool HeadTopTaken => true;
+        /// <summary>The flier keeps its load in the hold under the saucer (no claw grip in the robot logic).</summary>
+        public override Vector3? GripPoint => null;
 
         protected override void CreatePivots()
         {
             _saucer = Pivot("Saucer", body, Vector3.zero);
             head = Pivot("Head", _saucer, new Vector3(0, HeadY, 0));
-            _rotor = Pivot("Rotor", _saucer, new Vector3(0, RotorY, 0));
+            // the chassis-owned propeller mount, at the top of whatever head is fitted
+            _mast = Pivot("Mast", _saucer, new Vector3(0, HeadTop, 0));
+            _rotor = Pivot("Rotor", _mast, new Vector3(0, RotorY - HeadTop, 0));
             _armL = Pivot("ArmL", _saucer, new Vector3(-RimR - 0.06f, 0.3f, 0));
             _armR = Pivot("ArmR", _saucer, new Vector3(RimR + 0.06f, 0.3f, 0));
             carry = Pivot("Carry", _saucer, new Vector3(0, 0.05f, 0.05f));   // held under the saucer
@@ -106,19 +120,31 @@ namespace WorkshopWreckage
             b.Lathe(new Vector3(0, 0.432f, 0), Disc(0.13f, 0.016f, 0.004f), M("upper saucer shell", Gunmetal), null, 28);
             b.Lathe(new Vector3(0, 0.446f, 0), Disc(0.1f, 0.03f, 0.006f), M("upper saucer shell", Gunmetal), null, 24);   // neck collar
             b.Lathe(new Vector3(0, 0.456f, 0), Ring(0.106f, 0.09f, 0.008f), M("upper saucer shell", Brass), null, 24);
-            // rotor mast: from the top of the head, stacked dark gears with a brass one and the motor
-            b.Lathe(new Vector3(0, 0.79f, 0), Disc(0.026f, 0.13f, 0.004f), M("rotor mast", Gunmetal), null, 12);
-            for (int k = 0; k < 3; k++)
-            {
-                float y = 0.81f + k * 0.032f, r = 0.06f - k * 0.009f;
-                b.Lathe(new Vector3(0, y, 0), Disc(r, 0.018f, 0.004f), M("rotor motor", k == 1 ? Brass : Gunmetal), null, 20);
-                for (int t = 0; t < 12; t++)
-                {
-                    float a = t * Mathf.PI / 6;
-                    b.Box(new Vector3(Mathf.Sin(a) * r, y + 0.009f, Mathf.Cos(a) * r), new Vector3(0.011f, 0.015f, 0.011f), M("rotor motor", Gunmetal), false, Batch.R(Vector3.up, a));
-                }
-            }
             Done(b, _saucer);
+            {
+                // rotor mast on the chassis mount (coordinates from the head's top): a bolted foot plate, the
+                // shaft, stacked dark gears with a brass one, and the motor
+                var m = new Batch();
+                m.Lathe(new Vector3(0, -0.002f, 0), Disc(0.07f, 0.012f, 0.003f), M("rotor mast", Gunmetal), null, 24);
+                for (int k = 0; k < 6; k++)
+                {
+                    float a = k * Mathf.PI / 3 + 0.3f;
+                    Bolt(m, new Vector3(Mathf.Sin(a) * 0.055f, 0.01f, Mathf.Cos(a) * 0.055f), Vector3.up, 0.005f, M("rotor mast", Gunmetal));
+                }
+                m.Lathe(new Vector3(0, 0.005f, 0), Disc(0.026f, 0.13f, 0.004f), M("rotor mast", Gunmetal), null, 12);
+                for (int k = 0; k < 3; k++)
+                {
+                    float y = 0.025f + k * 0.032f, r = 0.06f - k * 0.009f;
+                    m.Lathe(new Vector3(0, y, 0), Disc(r, 0.018f, 0.004f), M("rotor motor", k == 1 ? Brass : Gunmetal), null, 20);
+                    for (int t = 0; t < 12; t++)
+                    {
+                        float a = t * Mathf.PI / 6;
+                        m.Box(new Vector3(Mathf.Sin(a) * r, y + 0.009f, Mathf.Cos(a) * r), new Vector3(0.011f, 0.015f, 0.011f), M("rotor motor", Gunmetal), false, Batch.R(Vector3.up, a));
+                    }
+                }
+                GreaseRun(m, "rotor motor", new Vector3(0.05f, 0.03f, -0.02f), X(1), 0.03f, 0.01f);
+                Done(m, _mast);
+            }
             // rim lights and the siren glow
             var rims = new[] { "rim light 1", "rim light 2", "rim light 3", "rim light 4" };
             for (int k = 0; k < 4; k++)
@@ -152,10 +178,11 @@ namespace WorkshopWreckage
             }
             foreach (var (arm, s, part, claw) in new[] { (_armL, -1f, "left arm", "left claw"), (_armR, 1f, "right arm", "right claw") })
             {
-                DetailedArm(arm, s, part, claw, ToyRed, ToyRedDeep, ToyRed, 0.72f, 2.4f);   // a short arm, a big claw (the sheet)
+                arm.localScale = Vector3.one * 0.85f;   // short arms out of the rim ports, big grippers (the sheet)
+                FamilyArm(arm, s, part, new ArmSpec { paint = ToyRed, paintDeep = ToyRedDeep, red = ToyRed, clawScale = 1.3f, twist = 0f, clawPart = claw });
             }
-            DetailedHead(head, ToyRed, new Vector3(0.44f, 0.31f, 0.32f), 2, 0.06f,
-                "head", "left eye lens", "right eye lens", "left antenna", "right antenna", "left ear cap", "right ear cap", null, true, true);
+            DetailedHead(head, ToyRed, new Vector3(0.44f, HeadH, 0.32f), 2, 0.06f,
+                "head", "left eye lens", "right eye lens", "left antenna", "right antenna", "left ear cap", "right ear cap", null, true, true, familyEars: true);
             {
                 var w = new Batch();   // the loose wire under the head (it is on the sheet)
                 Pipe(w, "head", new[] { new Vector3(0.19f, 0.03f, 0.06f), new Vector3(0.205f, -0.005f, 0.08f), new Vector3(0.212f, -0.03f, 0.07f) }, 0.004f, Rubber, Brass);
@@ -169,20 +196,101 @@ namespace WorkshopWreckage
             return (carry, new Vector3(Mathf.Sin(a) * 0.1f * Mathf.Min(1, i), -(i / 4) * 0.05f, Mathf.Cos(a) * 0.1f * Mathf.Min(1, i)));
         }
 
+        /// <summary>Where a carried part rides (saucer space): in the grippers in front of the saucer, below the
+        /// rim; and, before the arms have closed on it, the old spot under the saucer.</summary>
+        static readonly Vector3 HoldPoint = new(0, 0.1f, 0.68f), HoldUnder = new(0, 0.05f, 0.05f);
+
+        /// <summary>The carry pose, blended over the empty one by w: each upper arm swings forward (a little out
+        /// and down, clear of the rim), the forearm turns in and its telescope runs out until the gripper sits
+        /// on its side of the load at `hold` (saucer space), `halfGap` off the centre.</summary>
+        void HoldArms(float w, Vector3 hold, float halfGap)
+        {
+            if (w <= 0.001f || !HasGrippers) return;
+            float ext = 0;
+            foreach (var (arm, tip, s) in new[] { (_armL, clawTipL, -1f), (_armR, clawTipR, 1f) })
+            {
+                var elbow = arm.Find("Elbow");
+                var restA = arm.localRotation;
+                var restE = elbow.localRotation;
+                var upper = Quaternion.FromToRotation(Vector3.down, new Vector3(s * 0.3f, -0.35f, 1f).normalized);
+                arm.localRotation = upper;
+                elbow.localRotation = Quaternion.identity;
+                // in the elbow's frame: the tip with the forearm home, and the gripper's spot at the load
+                var tipE = elbow.InverseTransformPoint(tip.position);
+                var toE = elbow.InverseTransformPoint(_saucer.TransformPoint(hold + new Vector3(s * halfGap, 0, 0)));
+                // the telescope runs out along the forearm (-Y) until the tip is as far from the elbow as the spot
+                float side2 = tipE.x * tipE.x + tipE.z * tipE.z;
+                float e = Mathf.Clamp(Mathf.Sqrt(Mathf.Max(0, toE.sqrMagnitude - side2)) + tipE.y, 0, 0.6f);
+                ext = Mathf.Max(ext, e);
+                var turn = Quaternion.FromToRotation(tipE + Vector3.down * e, toE);
+                arm.localRotation = Quaternion.Slerp(restA, upper, w);
+                elbow.localRotation = Quaternion.Slerp(restE, turn, w);
+            }
+            PoseTelescopes(ext * w);
+        }
+
+        /// <summary>A damped spring step (semi-implicit, sub-stepped for long frames).</summary>
+        static void Spring(ref float x, ref float v, float target, float dt, float omega, float zeta)
+        {
+            int n = Mathf.CeilToInt(dt / 0.02f);
+            float h = dt / n;
+            for (int i = 0; i < n; i++)
+            {
+                v += (omega * omega * (target - x) - 2 * zeta * omega * v) * h;
+                x += v * h;
+            }
+        }
+
         public override void Animate(RobotAnim a)
         {
-            _rotorAngle += a.dt * (a.active ? 1500f : 0);
-            _rotor.localRotation = Quaternion.Euler(0, _rotorAngle, 0);
-            float bob = Mathf.Sin(a.time * 2.2f) * 0.012f + Mathf.Sin(a.time * 5.3f) * 0.004f;
+            float dt = a.dt;
+            bool live = dt > 0 && dt < 0.25f;   // a running robot; studio and QA poses snap (dt 0 or 1)
+            // ---- flight controller: what the saucer would do, driven by the real motion
+            float latAcc = a.speed * a.turnRate * Mathf.Deg2Rad;                 // m/s^2 towards the inside of the turn
+            if (live) _acc = Mathf.Lerp(_acc, (a.speed - _vPrev) / dt, 1 - Mathf.Exp(-dt * 8));
+            else _acc = 0;
+            _vPrev = a.speed;
+            if (live && _altPrev >= 0) _climb = Mathf.Lerp(_climb, (a.altitude - _altPrev) / dt, 1 - Mathf.Exp(-dt * 6));
+            else _climb = 0;
+            _altPrev = a.altitude;
+            // bank into the turn (right turn: right side down), nose down to cruise and to speed up, up to brake
+            float rollT = -Mathf.Clamp(Mathf.Atan2(latAcc, 9.81f) * Mathf.Rad2Deg * 1.2f, -22f, 22f);
+            float pitchT = Mathf.Clamp(a.speed01 * 7f + Mathf.Atan2(_acc, 9.81f) * Mathf.Rad2Deg * 2.2f, -16f, 22f);
+            if (live)
+            {
+                Spring(ref _roll, ref _rollV, rollT, dt, 6.5f, 0.72f);    // a small overshoot as it levels out
+                Spring(ref _pitch, ref _pitchV, pitchT, dt, 6f, 0.8f);
+            }
+            else { _roll = rollT; _pitch = pitchT; _rollV = _pitchV = 0; }
+            // a gentle hover bob (vertical only: no idle sway); it settles while flying fast
+            float calm = 1 - 0.6f * Mathf.Clamp01(a.speed01);
+            float bob = (Mathf.Sin(a.time * 2.2f) * 0.01f + Mathf.Sin(a.time * 5.3f) * 0.003f) * calm;
             _saucer.localPosition = new Vector3(0, bob, 0);
-            _tilt = Mathf.Lerp(_tilt, a.speed01 * 12f, a.dt * 3f);
-            _saucer.localRotation = Quaternion.Euler(_tilt, 0, -a.turnRate * 0.05f + Mathf.Sin(a.time * 1.7f) * 2f);
-            float pitch = -20 * a.armHold - 50 * a.armReach - 60 * a.armLift;
-            float wiggle = Mathf.Sin(a.time * 3.3f) * 6 * (1 - a.armHold);
+            _saucer.localRotation = Quaternion.Euler(_pitch, 0, _roll);
+            // the rotor: idles when active, works harder climbing, accelerating and banking
+            float load = Mathf.Clamp01(Mathf.Abs(_climb) * 0.8f + Mathf.Abs(_acc) * 0.3f + Mathf.Abs(_roll) / 40f);
+            float rateT = a.active ? 1300f + 900f * load : 0f;
+            _rotorRate = live ? Mathf.MoveTowards(_rotorRate, rateT, dt * 2400f) : rateT;
+            _rotorAngle += dt * _rotorRate * (live ? 1 : 0);
+            _rotor.localRotation = Quaternion.Euler(0, _rotorAngle, 0);
+            // the load in the hold hangs level (the hold is gimballed against the saucer's tilt)
+            carry.localRotation = Quaternion.Inverse(_saucer.localRotation);
+            // ---- arms: held out of the rim ports with the grippers hanging; they swing towards plumb in a bank
+            float pitch = -20 * a.armHold - 50 * a.armReach - 60 * a.armLift - 0.6f * _pitch;
             float empty = 1 - Mathf.Max(a.armHold, a.armReach);
-            _armL.localRotation = Quaternion.Euler(pitch - 4 * empty + wiggle, 0, -65 * empty + 6 * a.armHold);   // held out sideways from the port...   // out of the side ports, claws beside the shell
-            _armR.localRotation = Quaternion.Euler(pitch - 4 * empty - wiggle, 0, 65 * empty - 6 * a.armHold);
-            PoseElbows(a, 14, 62);   // ...and the claw hanging beside the shell
+            float hang = -0.6f * _roll * empty;
+            _armL.localRotation = Quaternion.Euler(pitch - 4 * empty, 0, -65 * empty + 6 * a.armHold + hang);
+            _armR.localRotation = Quaternion.Euler(pitch - 4 * empty, 0, 65 * empty - 6 * a.armHold + hang);
+            PoseElbows(a, 14, 62);
+            PoseTelescopes(0);
+            // carrying: the grippers hold the load out in front of the saucer (raised and pushed forward to deposit)
+            float hw = Ease(a.armHold);
+            var hold = HoldPoint + new Vector3(0, 0.08f, 0.1f) * a.armLift;
+            float halfGap = 0.45f * (a.gripWidth > 0 ? a.gripWidth : 0.05f) / Mathf.Max(1e-4f, _saucer.lossyScale.x);
+            HoldArms(hw, hold, halfGap);
+            carry.localPosition = Vector3.Lerp(HoldUnder, hold, hw);
+            // grippers: open reaching for a part, close on it as it is lifted and carried, relaxed otherwise
+            PoseClaws(ClawOpenDeg * Mathf.Max(a.clawOpen, a.armReach * (1 - a.armHold)) - ClawCloseDeg * Mathf.Max(a.clawClose, a.armLift));
             LookHead(a, 70);
             if (a.gesture > 0)
             {

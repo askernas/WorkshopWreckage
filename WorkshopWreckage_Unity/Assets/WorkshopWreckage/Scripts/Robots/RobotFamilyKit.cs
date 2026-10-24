@@ -14,6 +14,8 @@ namespace WorkshopWreckage
         // ------------------------------------------------------------ finish
 
         public static readonly Color FamilyYellow = new(0.8f, 0.55f, 0.12f), FamilyYellowDeep = new(0.68f, 0.45f, 0.09f), FamilyRed = new(0.68f, 0.1f, 0.06f);
+        /// <summary>Deep red of the family paint (Hoverbot's lower panels, arm plates).</summary>
+        public static readonly Color FamilyRedDeep = new(0.55f, 0.08f, 0.05f);
         /// <summary>Variant body paint (Unibot's olive), same finish and wear.</summary>
         public static readonly Color FamilyGreen = new(0.33f, 0.38f, 0.18f), FamilyGreenDeep = new(0.26f, 0.3f, 0.14f);
         static Dictionary<Material, Material> _familySkin;
@@ -29,6 +31,7 @@ namespace WorkshopWreckage
                 [ToyYellow] = RobotFinish.Paint(FamilyYellow, 1f, 0.55f, 0.55f, 0.85f, 0.18f, 0.45f, 0.1f),
                 [ToyYellowDeep] = RobotFinish.Paint(FamilyYellowDeep, 1f, 0.55f, 0.55f, 0.85f, 0.25f, 0.35f, 0.1f),
                 [ToyRed] = RobotFinish.Paint(FamilyRed, 1f, 0.5f, 0.5f, 0.8f, 0.2f, 0.2f, 0.08f),
+                [ToyRedDeep] = RobotFinish.Paint(FamilyRedDeep, 1f, 0.5f, 0.5f, 0.8f, 0.25f, 0.2f, 0.08f),
                 [ToyGreen] = RobotFinish.Paint(FamilyGreen, 1f, 0.55f, 0.55f, 0.85f, 0.18f, 0.4f, 0.1f),
                 [ToyGreenDeep] = RobotFinish.Paint(FamilyGreenDeep, 1f, 0.55f, 0.55f, 0.85f, 0.25f, 0.35f, 0.1f),
                 [Gunmetal] = RobotFinish.JointSteel,
@@ -39,6 +42,10 @@ namespace WorkshopWreckage
             };
             return _familySkin.TryGetValue(m, out var s) ? s : m;
         }
+
+        /// <summary>True when the chassis owns the mount on top of the head (Hoverbot's propeller): any head
+        /// fitted to it leaves its own top accessory (beacon, lamp) off, so the two never overlap.</summary>
+        protected virtual bool HeadTopTaken => false;
 
         /// <summary>Bright steel of the kit (shafts, hub faces, grille slats, hinge pins).</summary>
         protected virtual Material BrightSteel => RobotFinish.ShaftSteel;
@@ -194,6 +201,7 @@ namespace WorkshopWreckage
             float earY = H * s.earY;
             FamilyEarsAndAntennas(b, P, AP, AP, W, H, earY, s.antennas);
             string BP = s.beaconPart ?? P;
+            if (HeadTopTaken) s.beacon = false;   // the chassis owns the head-top mount (Hoverbot's propeller)
             if (s.beacon)
             {
                 b.Lathe(new Vector3(0, H - 0.004f, 0), Disc(0.064f, 0.026f, 0.005f), M(BP, Gunmetal), null, 28);

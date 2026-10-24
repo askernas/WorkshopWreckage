@@ -1323,15 +1323,60 @@ namespace WorkshopWreckage
         {
             for (int i = 0; i < frames; i++) yield return null;
             yield return new WaitForEndOfFrame();
+            if (args.TryGetValue("res", out var res)) { CaptureStill(path, res); yield break; }
             var tex = ScreenCapture.CaptureScreenshotAsTexture();
             File.WriteAllBytes(path, tex.EncodeToPNG());
             Destroy(tex);
+        }
+
+        /// <summary>Key art / posters (--res=WxH [--ss=1|2|4]): renders the current camera off-screen at any size,
+        /// independent of the window, with still-frame quality (8K shadow map, MSAA); --ss renders it that many
+        /// times larger and box-filters it down for clean edges and fine detail.</summary>
+        void CaptureStill(string path, string res)
+        {
+            var wh = res.ToLowerInvariant().Split('x');
+            int w = int.Parse(wh[0]), h = int.Parse(wh[1]);
+            int ss = args.TryGetValue("ss", out var s) ? Mathf.ClosestPowerOfTwo(Mathf.Clamp(int.Parse(s), 1, 4)) : 1;
+            if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urp)
+            {
+                urp.mainLightShadowmapResolution = 8192;
+                urp.renderScale = 1;
+                urp.msaaSampleCount = ss > 1 ? 1 : 8;
+            }
+            var cam = player.cam;
+            var rt = new RenderTexture(w * ss, h * ss, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB) { antiAliasing = ss > 1 ? 1 : 8 };
+            var prev = cam.targetTexture;
+            cam.targetTexture = rt;
+            cam.ResetAspect();
+            cam.Render();
+            cam.targetTexture = prev;
+            cam.ResetAspect();
+            var cur = rt;
+            while (cur.width > w)   // exact 2x2 box filter per halving (bilinear taps at texel corners)
+            {
+                var half = new RenderTexture(cur.width / 2, cur.height / 2, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                Graphics.Blit(cur, half);
+                if (cur != rt) cur.Release();
+                cur = half;
+            }
+            var was = RenderTexture.active;
+            RenderTexture.active = cur;
+            var tex = new Texture2D(w, h, TextureFormat.RGB24, false);
+            tex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+            tex.Apply();
+            RenderTexture.active = was;
+            File.WriteAllBytes(path, tex.EncodeToPNG());
+            Destroy(tex);
+            if (cur != rt) cur.Release();
+            rt.Release();
+            Debug.Log($"[still] {path}: {w}x{h}, supersampled x{ss}");
         }
 
         IEnumerator TakeShots()
         {
             player.enabled = false;
             hud.SetHudVisible(args.ContainsKey("hud"));
+            if (args.TryGetValue("toast", out var toast)) foreach (var line in toast.Split('|')) hud.Toast(line, true);   // QA: --hud --toast=a|b
             var outs = args["shot"].Split(';');
             var cams = (args.TryGetValue("cam", out var c) ? c : "0.6,1.65,3.6,0,-18").Split(';');
             yield return null;
@@ -1346,7 +1391,7 @@ namespace WorkshopWreckage
                     _studio = (_studio.Value.robot, RendererBounds(qr, qr.transform.position));   // frame the pose as it is (raised arms, telescopes)
                     StudioCamera(args.TryGetValue("seqcam", out var sc) ? int.Parse(sc) : 3);
                 }
-                else if (_studio != null) StudioCamera(i);   // --robotview frames the robot itself
+                else if (_studio != null) StudioCamera(args.TryGetValue("studiocam", out var scam) ? int.Parse(scam) : i);   // --robotview frames the robot itself (--studiocam: one fixed view)
                 else PlaceCamera(cams[Mathf.Min(i, cams.Length - 1)]);
                 yield return Capture(outs[i]);
                 Debug.Log("saved " + outs[i]);

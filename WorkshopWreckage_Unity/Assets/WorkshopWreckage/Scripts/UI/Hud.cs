@@ -505,9 +505,12 @@ namespace WorkshopWreckage
         public void Toast(string text, bool big = false)
         {
             var r = Rect("Toast", _toasts, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            r.sizeDelta = new Vector2(600, big ? 44 : 36);
             Panel(r, new Color(0.16f, 0.11f, 0.06f, 0.92f), Brass);
-            Fill(r, "t", big ? 24 : 19, big ? Brass : Cream, TextAnchor.MiddleCenter).text = text;
+            var t = Fill(r, "t", big ? 24 : 19, big ? Brass : Cream, TextAnchor.MiddleCenter);
+            t.text = text;
+            // a long message wraps: the box grows to hold every line instead of letting them spill out
+            float lines = t.cachedTextGeneratorForLayout.GetPreferredHeight(text, t.GetGenerationSettings(new Vector2(600 - 28, 0))) / t.pixelsPerUnit;
+            r.sizeDelta = new Vector2(600, Mathf.Max(big ? 44 : 36, lines + 20));
             Destroy(r.gameObject, 4f);
             while (_toasts.childCount > 4) DestroyImmediate(_toasts.GetChild(0).gameObject);
         }
