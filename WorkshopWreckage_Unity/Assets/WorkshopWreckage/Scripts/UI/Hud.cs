@@ -152,6 +152,62 @@ namespace WorkshopWreckage
             dbg.gameObject.SetActive(false);
         }
 
+        // ---- screens that refresh on a timer (workbench, robots, modify) rebuild their rows,
+        // but the old rows stay on screen when nothing changed: a rebuilt button under the
+        // mouse would lose its highlight, and old + new rows laid out together flash
+        readonly Dictionary<Transform, List<GameObject>> _oldRows = new();
+
+        /// <summary>Takes a container's rows out of the layout before it is rebuilt; at the end
+        /// of the frame (CommitRows) the old rows come back if the new ones look the same.</summary>
+        void ClearChildren(Transform t)
+        {
+            if (_oldRows.TryGetValue(t, out var old))
+            {
+                // rebuilt twice in one frame: the first rebuild goes, the old rows are kept for the compare
+                foreach (Transform c in t) if (!old.Contains(c.gameObject)) { c.gameObject.SetActive(false); Destroy(c.gameObject); }
+                return;
+            }
+            old = new List<GameObject>();
+            foreach (Transform c in t) { c.gameObject.SetActive(false); old.Add(c.gameObject); }
+            _oldRows[t] = old;
+        }
+
+        static string RowLook(IEnumerable<GameObject> rows)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var r in rows)
+            {
+                sb.Append('|');
+                foreach (var g in r.GetComponentsInChildren<Graphic>(true))
+                {
+                    if (g is Text t) sb.Append(t.text).Append(t.fontSize).Append(t.color);
+                    var le = g.GetComponent<LayoutElement>();
+                    if (le != null) sb.Append(le.preferredWidth).Append(le.preferredHeight);
+                    if (g.GetComponent<Selectable>() is Selectable s) sb.Append(s.interactable);
+                }
+            }
+            return sb.ToString();
+        }
+
+        void CommitRows()
+        {
+            foreach (var (t, old) in _oldRows)
+            {
+                if (t == null) continue;
+                var fresh = new List<GameObject>();
+                foreach (Transform c in t) if (!old.Contains(c.gameObject)) fresh.Add(c.gameObject);
+                bool same = RowLook(old) == RowLook(fresh);
+                foreach (var g in same ? fresh : old) Destroy(g);
+                if (same) { foreach (var g in fresh) g.SetActive(false); foreach (var g in old) g.SetActive(true); }
+            }
+            _oldRows.Clear();
+        }
+
+        void LateUpdate()
+        {
+            if (_oldRows.Count > 0) CommitRows();
+        }
+
         Button MakeButton(Transform parent, string text, System.Action cb)
         {
             var go = DefaultControls.CreateButton(new DefaultControls.Resources());

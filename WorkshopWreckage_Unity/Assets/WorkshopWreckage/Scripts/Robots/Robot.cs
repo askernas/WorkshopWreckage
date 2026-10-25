@@ -2051,6 +2051,7 @@ namespace WorkshopWreckage
                 g.world.SetTransform(itemId, Matrix4x4.TRS(at, rot, Vector3.one * def.worldScale));
                 g.world.SetState(itemId, ItemState.InWorld, "stage:" + _destBox);   // the destination's staging zone (still UNSORTED)
                 g.index.Insert(itemId);
+                g.piles.Drop(itemId);   // let go: it settles into the staging pile
                 staged++;
                 _tripParts++;
                 lastStagedId = itemId;
@@ -2085,9 +2086,9 @@ namespace WorkshopWreckage
             var m = Matrix4x4.TRS(new Vector3(p.x, p.y + Mathf.Min(b.x, b.y, b.z) * 0.5f, p.z), Quaternion.Euler(0, Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
             HideCarried(itemId);
             g.world.SetTransform(itemId, m);
-            g.interaction.RestOnPile(itemId, transform.position);
             g.world.SetState(itemId, ItemState.InWorld, "world");
             g.index.Insert(itemId);
+            g.piles.Drop(itemId, transform.forward * 0.05f, 0.04f);
             _unreachable.Add(itemId);
         }
 

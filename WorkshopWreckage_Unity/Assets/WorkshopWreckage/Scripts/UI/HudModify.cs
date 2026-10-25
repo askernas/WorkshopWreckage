@@ -82,11 +82,11 @@ namespace WorkshopWreckage
             var mods = _g.modules;
             if (mods == null || _g.world == null) return;
             var robots = RobotModules.Chassis.Where(mods.Built).Select(id => _g.robots.First(r => r.id == id)).ToList();
-            foreach (Transform c in _mdTabs) Destroy(c.gameObject);
-            foreach (Transform c in _mdSlots) Destroy(c.gameObject);
-            foreach (Transform c in _mdOptions) Destroy(c.gameObject);
-            foreach (Transform c in _mdSummon) Destroy(c.gameObject);
-            foreach (Transform c in _mdActions) Destroy(c.gameObject);
+            ClearChildren(_mdTabs);
+            ClearChildren(_mdSlots);
+            ClearChildren(_mdOptions);
+            ClearChildren(_mdSummon);
+            ClearChildren(_mdActions);
             if (robots.Count == 0)
             {
                 _mdHeader.text = "No robots built yet.";

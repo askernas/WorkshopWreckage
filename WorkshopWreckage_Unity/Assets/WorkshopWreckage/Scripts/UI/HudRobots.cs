@@ -101,6 +101,9 @@ namespace WorkshopWreckage
             _previewCam.enabled = on;
         }
 
+        /// <summary>QA: the workbench screen's buttons now on screen (unchanged ones must survive a refresh).</summary>
+        public List<GameObject> WorkbenchButtons() => _wbTabs.Cast<Transform>().Concat(_wbActions.Cast<Transform>()).Where(t => t.gameObject.activeSelf).Select(t => t.gameObject).ToList();
+
         void RefreshWorkbench()
         {
             var wb = _g.workbench;
@@ -115,7 +118,7 @@ namespace WorkshopWreckage
             _previewCam.transform.position = at + front * 0.95f + Vector3.up * 0.3f + Vector3.Cross(Vector3.up, front) * 0.25f;
             _previewCam.transform.LookAt(at);
 
-            foreach (Transform c in _wbTabs) Destroy(c.gameObject);
+            ClearChildren(_wbTabs);
             foreach (var q in wb.projects.Where(q => !q.crafted || wb.Operational(wb.P(q.after)) || wb.Operational(q)))
             {
                 var s = wb.StatusOf(q);
@@ -171,7 +174,7 @@ namespace WorkshopWreckage
             _wbPartsA.text = string.Join("\n", lines.Take(half));
             _wbPartsB.text = string.Join("\n", lines.Skip(half));
 
-            foreach (Transform c in _wbActions) Destroy(c.gameObject);
+            ClearChildren(_wbActions);
             int installable = p.crafted ? 0 : wb.DeliveredIds(p).Count(id => wb.CanInstall(p, id) == "");
             var ib = MakeButton(_wbActions, installable > 0 ? $"Install delivered parts ({installable})" : "Install delivered parts", () =>
             {
@@ -251,9 +254,9 @@ namespace WorkshopWreckage
         void RefreshRobots()
         {
             var types = _g.robots.Where(r => r.Operational).Select(r => r.type).Distinct().ToList();
-            foreach (Transform c in _rbTabs) Destroy(c.gameObject);
-            foreach (Transform c in _rbUpgrades) Destroy(c.gameObject);
-            foreach (Transform c in _rbActions) Destroy(c.gameObject);
+            ClearChildren(_rbTabs);
+            ClearChildren(_rbUpgrades);
+            ClearChildren(_rbActions);
             if (types.Count == 0)
             {
                 _rbHeader.text = "";

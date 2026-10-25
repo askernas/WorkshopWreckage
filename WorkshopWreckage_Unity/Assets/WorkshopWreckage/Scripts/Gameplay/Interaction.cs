@@ -546,15 +546,24 @@ namespace WorkshopWreckage
             var rot = Quaternion.Euler(0, UnityEngine.Random.value * 360, 0);
             float halfH = b.y / 2;
             if (def.restMode == RestMode.Long) { rot *= Quaternion.Euler(0, 0, 90); halfH = b.x / 2; }
-            var m = Matrix4x4.TRS(p + Vector3.up * halfH, rot, Vector3.one * def.worldScale);
+            // let go just above whatever already lies there; it falls and tumbles onto the pile (PileSim)
+            float top = Mathf.Max(p.y, game.piles.TopAt(p, Mathf.Max(b.x, b.z) * 0.5f));
+            rot = Quaternion.Euler(UnityEngine.Random.Range(-20f, 20f), 0, UnityEngine.Random.Range(-20f, 20f)) * rot;
+            var m = Matrix4x4.TRS(new Vector3(p.x, top + Mathf.Max(b.x, b.y, b.z) * 0.5f + 0.02f, p.z), rot, Vector3.one * def.worldScale);
             Inv.Remove(id);
             World.SetTransform(id, m);
-            m = RestOnPile(id, game.player.transform.position);
             World.SetState(id, ItemState.InWorld, "world");
             game.index.Insert(id);
             game.renderer.SetHidden(id, true);
             busy.Add(id);
-            StartCoroutine(Fly(def, game.held.HandWorld(), m, 0.25f, () => { busy.Remove(id); game.renderer.SetHidden(id, false); Sfx.Play("drop_floor", p, -4); }));
+            var push = new Vector3(dir.x, 0, dir.z).normalized * 0.06f;
+            StartCoroutine(Fly(def, game.held.HandWorld(), m, 0.25f, () =>
+            {
+                busy.Remove(id);
+                game.renderer.SetHidden(id, false);
+                Sfx.Play("drop_floor", p, -4);
+                if (World.instances[id].state == ItemState.InWorld) game.piles.Drop(id, push);
+            }));
         }
 
         // ---------------------------------------------------------------- inspection
@@ -640,49 +649,10 @@ namespace WorkshopWreckage
             done?.Invoke();
         }
 
-        /// <summary>Nothing floats: after a part is taken away, every part that rested on it
-        /// falls until it rests on the highest real support under its footprint (another
-        /// part, a shelf deck, bench, pallet or the floor); parts on those fall in turn.</summary>
-        public void SettleNeighbours(Matrix4x4 removed, ItemDefinition removedDef)
-        {
-            var ro = (Vector3)removed.GetColumn(3);
-            float r = HeldView.Radius(removedDef);
-            var queue = new Queue<(int id, int depth)>();
-            var drops = new Dictionary<int, float>();
-            foreach (var nid in game.index.QuerySphere(ro, r + 0.3f))
-                if (World.instances[nid].Position.y > ro.y - 0.01f) queue.Enqueue((nid, 0));
-            // 1. final drops, to a fixed point: a part is checked again whenever something under it
-            //    falls further (a part resting on two others must follow the lower one down)
-            var depthOf = new Dictionary<int, int>();
-            int considered = 0;
-            for (int guard = 0; queue.Count > 0 && guard < 1500 && drops.Count < 120; guard++)
-            {
-                var (id, depth) = queue.Dequeue();
-                if (busy.Contains(id)) continue;
-                var inst = World.instances[id];
-                if (inst.state != ItemState.InWorld) continue;
-                var b = game.index.WorldBounds(id);   // where it lies now (drops are measured from here)
-                float dy = b.min.y - SupportUnder(id, b, drops);
-                considered++;
-                if (dy - drops.GetValueOrDefault(id) < 0.012f) continue;
-                drops[id] = dy;
-                depthOf[id] = Mathf.Max(depthOf.GetValueOrDefault(id), depth);
-                // whatever rested on this part comes down after it
-                foreach (var m in game.index.QuerySphere(b.center + Vector3.up * b.extents.y, Mathf.Max(b.extents.x, b.extents.z) + 0.2f))
-                    if (m != id && World.instances[m].Position.y > inst.Position.y) queue.Enqueue((m, depth + 1));
-            }
-            // 2. every part falls once, straight to its final support
-            foreach (var (id, dy) in drops)
-            {
-                var inst = World.instances[id];
-                busy.Add(id);
-                StartCoroutine(Settle(id, inst.transform, inst.Position.y - dy, Mathf.Clamp(Mathf.Sqrt(dy) * 0.45f, 0.12f, 0.45f), depthOf[id] * 0.05f));
-            }
-            if (drops.Count > 0) Sfx.Play("settle", ro, -10);
-            lastSettleInfo = $"{considered} checked, {drops.Count} fell";
-        }
-
-        public string lastSettleInfo = "";
+        /// <summary>Nothing floats: after a part is taken away, what rested on or against it
+        /// tumbles down onto real support (PileSim); parts on those follow.</summary>
+        public void SettleNeighbours(Matrix4x4 removed, ItemDefinition removedDef) =>
+            game.piles.Disturb(removed.GetColumn(3), HeldView.Radius(removedDef));
 
         /// <summary>Height the part would rest on: the furniture surface or floor below it,
         /// or the top of a part under its footprint (parts already falling count at their
@@ -702,83 +672,6 @@ namespace WorkshopWreckage
                 s = Mathf.Max(s, Mathf.Min(mb.max.y, b.min.y));
             }
             return s;
-        }
-
-        /// <summary>Parts pile up instead of sharing space: a part just set down (bottom on the
-        /// floor or a deck, not yet in the index) is lifted onto the highest part under its
-        /// footprint. Perched on top of a pile it rolls down the side to a clearly lower spot
-        /// close by (open floor towards `from`), so repeated drops build a heap, not a tower.</summary>
-        public Matrix4x4 RestOnPile(int id, Vector3 from)
-        {
-            var m = World.instances[id].transform;
-            var b0 = game.index.WorldBounds(id);
-            var b = b0;
-            float r = Mathf.Max(b.extents.x, b.extents.z);
-            float best = PileTop(id, b);
-            if (best - b.min.y > b.size.y * 0.5f)
-                for (int k = 0; k < 6; k++)
-                {
-                    var off = Quaternion.Euler(0, k * 60 + UnityEngine.Random.Range(0, 40f), 0) * Vector3.forward * (r + 0.04f) * 1.6f;
-                    var q = game.SafeDropPoint(b.center + off, from);
-                    var cb = new Bounds(new Vector3(q.x, q.y + b0.extents.y, q.z), b0.size);
-                    float top = PileTop(id, cb);
-                    if (top >= best - b0.size.y * 0.5f) continue;
-                    best = top;
-                    b = cb;   // later rolls are measured from the lower spot
-                }
-            m.m03 += b.center.x - b0.center.x;
-            m.m23 += b.center.z - b0.center.z;
-            m.m13 += best - b0.min.y;
-            World.SetTransform(id, m);
-            return m;
-        }
-
-        /// <summary>Footprints of two parts that touch enough for one to rest on the other
-        /// (both trimmed to 80 %, so a graze at the edge doesn't count; a long part lying
-        /// across a small one rests on it just as a small one on a long one).</summary>
-        public static bool FootprintsMeet(Bounds a, Bounds b)
-        {
-            static Rect Core(Bounds x) => new(x.center.x - x.extents.x * 0.8f, x.center.z - x.extents.z * 0.8f, x.extents.x * 1.6f, x.extents.z * 1.6f);
-            return Core(a).Overlaps(Core(b));
-        }
-
-        /// <summary>Where the bottom of a part at `b` comes to rest: on its deck, or on the
-        /// highest part under its footprint.</summary>
-        float PileTop(int id, Bounds b)
-        {
-            float s = b.min.y;
-            float r = Mathf.Max(b.extents.x, b.extents.z) + 0.3f;
-            for (int k = 0; k < 6; k++)   // a tall pile is searched upwards in steps
-            {
-                float before = s;
-                foreach (var o in game.index.QuerySphere(new Vector3(b.center.x, s + b.extents.y, b.center.z), r))
-                {
-                    if (o == id || World.instances[o].state != ItemState.InWorld) continue;
-                    var ob = game.index.WorldBounds(o);
-                    if (ob.max.y <= s + 0.003f || ob.min.y >= s + b.size.y) continue;   // under the rest point or clear above
-                    if (!FootprintsMeet(b, ob)) continue;
-                    s = ob.max.y;
-                }
-                if (s - before < 0.003f) break;
-            }
-            return s;
-        }
-
-        IEnumerator Settle(int id, Matrix4x4 start, float targetY, float dur, float delay = 0)
-        {
-            if (delay > 0) yield return new WaitForSeconds(delay);
-            float t = 0;
-            float y0 = start.m13;
-            while (t < 1)
-            {
-                t = Mathf.Min(1, t + Time.deltaTime / dur);
-                var m = World.instances[id].state == ItemState.InWorld ? World.instances[id].transform : start;
-                m.m13 = Mathf.Lerp(y0, targetY, t * t);
-                World.SetTransform(id, m);
-                yield return null;
-            }
-            busy.Remove(id);
-            game.index.Insert(id);
         }
 
         void OpenDrawer(StorageUnit unit, string dest)

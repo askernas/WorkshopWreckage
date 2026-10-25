@@ -619,9 +619,9 @@ namespace WorkshopWreckage
             var e = ItemDatabase.Extents(def);
             var p = new Vector3(spot.x + Random.Range(-0.1f, 0.1f), e[2] * 0.5f, spot.z + Random.Range(-0.1f, 0.1f));
             _g.world.SetTransform(itemId, Matrix4x4.TRS(p, Quaternion.Euler(0, Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale));
-            _g.interaction.RestOnPile(itemId, spot);
             _g.world.SetState(itemId, ItemState.InWorld, "stage:" + box);
             _g.index.Insert(itemId);
+            _g.piles.Drop(itemId, default, 0.04f);
         }
 
         void CancelCycle()

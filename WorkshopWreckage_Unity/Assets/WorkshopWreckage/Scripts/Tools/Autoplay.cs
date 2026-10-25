@@ -189,7 +189,8 @@ namespace WorkshopWreckage
                   && g.stats.Get("PartSorted") - sortedStat0 == stored,
                   $"{sortedEv.Count} events for {stored} stored; counter +{g.stats.Get("PartSorted") - sortedStat0}");
 
-            // 5. save / load round trip
+            // 5. save / load round trip (a save first lets falling parts come to rest)
+            g.piles.Finish();
             var snap = Snapshot();
             var statsBefore = Json.Write(g.stats.ToDict());
             string lvBefore = $"level {g.progression.level} xp {g.progression.xp}";
@@ -389,14 +390,15 @@ namespace WorkshopWreckage
                 var before = g.index.QuerySphere(top.i.Position, 1.0f).ToDictionary(o => o, Gap);
                 g.player.Teleport(top.i.Position + new Vector3(0.6f, -top.i.Position.y, 0.6f));
                 g.interaction.Pickup(top.under[0], false);
-                yield return new WaitForSeconds(1.2f);
+                yield return new WaitForSeconds(0.3f);
+                for (float t = 0; t < 10 && g.piles.Settling; t += Time.deltaTime) yield return null;
                 // nothing within half a metre is left hanging in the air
                 var around = g.index.QuerySphere(top.i.Position, 0.5f).Where(o => w.instances[o].state == ItemState.InWorld).ToList();
                 float Worse(int o) => Gap(o) - before.GetValueOrDefault(o, 0f);
                 int worstId = around.Count > 0 ? around.OrderByDescending(Worse).First() : -1;
                 float worst = worstId >= 0 ? Worse(worstId) : 0;
                 string who = worstId >= 0 ? $" ({w.DefOf(worstId).displayName}: gap {Gap(worstId):0.000} m, before {before.GetValueOrDefault(worstId, -1f):0.000} m)" : "";
-                Check("nothing floats when the part under it is taken away", worst < 0.05f, $"top part {y0:0.000} -> {top.i.Position.y:0.000} m; worst new gap of {around.Count} parts nearby {worst:0.000} m{who}; settle: {g.interaction.lastSettleInfo}");
+                Check("nothing floats when the part under it is taken away", worst < 0.05f, $"top part {y0:0.000} -> {top.i.Position.y:0.000} m; worst new gap of {around.Count} parts nearby {worst:0.000} m{who}; settle: {g.piles.lastInfo}");
                 EmptyHands();
             }
             else Check("a part falls when the part under it is taken away", false, "no stacked pair found");
@@ -1166,6 +1168,15 @@ namespace WorkshopWreckage
             Check("with the blueprint unlocked, a delivered part is installed at once", wb.Complete(retro) && wb.StatusOf(retro) == RobotWorkbench.Status.ReadyForActivation, wb.Summary(retro));
             g.OpenWorkbench("retrobot");
             yield return g.Capture(Path.Combine(outDir, "05d_workbench_screen.png"), 8);
+            {
+                // playtest 2026-10-25: the options flashed every second (all buttons rebuilt by the refresh)
+                var before = g.hud.WorkbenchButtons();
+                float tw = Time.realtimeSinceStartup;
+                while (Time.realtimeSinceStartup - tw < 2.5f) yield return null;
+                var after = g.hud.WorkbenchButtons();
+                Check("the open workbench screen keeps its buttons through its refresh (no flashing)", before.Count > 0 && before.SequenceEqual(after) && after.All(b => b != null),
+                      $"{before.Count} buttons before, {after.Count} after, {after.Count(b => before.Contains(b))} the same");
+            }
             g.SetState("play");
             g.player.enabled = false;
             // 11. activation: it hops off the bench and starts work
@@ -1559,6 +1570,7 @@ namespace WorkshopWreckage
                 g.inventory.Select(g.world.DefOf(part.id).id);
                 g.interaction.DropHeld();
                 yield return new WaitForSeconds(0.5f);
+                for (float t = 0; t < 10 && g.piles.Settling; t += Time.deltaTime) yield return null;
                 var p = g.world.instances[part.id].Position;
                 Check("a part dropped at the top of tall shelving lands within reach (floor or a low deck)", g.world.instances[part.id].state == ItemState.InWorld && p.y < Game.MaxDropDeck + 0.4f && !g.UnreachableParts().Any(b => b.id == part.id),
                       $"landed at {p.y:0.00} m");
@@ -1588,18 +1600,23 @@ namespace WorkshopWreckage
                 g.interaction.DropHeld();
                 yield return new WaitForSeconds(0.3f);
             }
-            yield return new WaitForSeconds(0.5f);
-            int clashes = 0; string worst = "";
-            for (int a = 0; a < parts.Count; a++)
-                for (int b = a + 1; b < parts.Count; b++)
-                {
-                    var ba = g.index.WorldBounds(parts[a]); var bb = g.index.WorldBounds(parts[b]);
-                    if (!Interaction.FootprintsMeet(ba, bb)) continue;
-                    float dy = Mathf.Min(ba.max.y, bb.max.y) - Mathf.Max(ba.min.y, bb.min.y);
-                    if (dy > 0.01f) { clashes++; worst = $"{g.world.DefOf(parts[a]).displayName} / {g.world.DefOf(parts[b]).displayName} share {dy * 100:0} cm"; }
-                }
+            for (float t = 0; t < 12 && g.piles.Settling; t += Time.deltaTime) yield return null;
+            string settle = g.piles.lastInfo;
+            foreach (var id in parts) Debug.Log($"[piles] final {g.world.DefOf(id).displayName} {g.world.instances[id].state} {g.world.instances[id].Position}");
+            // no air: each part touches what it rests on; nothing sits inside another part
+            var floating = new List<string>();
+            float deepest = 0;
+            foreach (var id in parts)
+            {
+                var (supported, deep) = g.piles.Contact(id);
+                if (!supported) floating.Add($"{g.world.DefOf(id).displayName} at {g.world.instances[id].Position.y:0.000} m");
+                if (deep > 0.006f) Debug.Log($"[piles] overlap {deep * 1000:0} mm: {g.piles.lastContact}");
+                deepest = Mathf.Max(deepest, deep);
+            }
             float top = parts.Max(id => g.index.WorldBounds(id).max.y);
-            Check("parts dropped on one spot pile up instead of sharing space", parts.Count >= 4 && clashes == 0, $"{parts.Count} dropped, pile top {top:0.00} m, {clashes} overlapping pairs {worst}");
+            float spread = parts.Max(a => parts.Max(b => new Vector2(g.world.instances[a].Position.x - g.world.instances[b].Position.x, g.world.instances[a].Position.z - g.world.instances[b].Position.z).magnitude));
+            Check("parts dropped on one spot tumble into a pile: each rests on something, none inside another", parts.Count >= 4 && floating.Count == 0 && deepest < 0.006f && !g.piles.Settling,
+                  $"{parts.Count} dropped, pile top {top:0.00} m, spread {spread:0.00} m, deepest overlap {deepest * 1000:0.0} mm, floating: {(floating.Count == 0 ? "none" : string.Join("; ", floating))}; {settle}");
             yield return g.Capture(Path.Combine(outDir, "07e_drop_pile.png"), 3);
         }
 

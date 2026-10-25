@@ -30,6 +30,7 @@ namespace WorkshopWreckage
         public PlayerController player;
         public HeldView held;
         public Interaction interaction;
+        public PileSim piles;
         public Hud hud;
         public RobotWorkbench workbench;
         /// <summary>The 24 detachable heads, arms and propellers and where each one is (Modify Robot).</summary>
@@ -112,6 +113,9 @@ namespace WorkshopWreckage
             interaction = new GameObject("Interaction").AddComponent<Interaction>();
             interaction.transform.SetParent(transform, false);
             interaction.Init(this);
+            piles = new GameObject("PileSim").AddComponent<PileSim>();
+            piles.transform.SetParent(transform, false);
+            piles.Init(this);
             tools = new GameObject("PlayerTools").AddComponent<PlayerTools>();
             tools.transform.SetParent(transform, false);
             tools.Init(this);
@@ -253,6 +257,7 @@ namespace WorkshopWreckage
             if (save != null) SettleAfterLoad();
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
+            piles.Clear();
             interaction.ResetState();
             tools.ResetState();
             StartProgression(seed, save);
@@ -407,7 +412,7 @@ namespace WorkshopWreckage
                 if (p.x < layout.roomMin.x || p.x > layout.roomMax.x || -p.z < layout.roomMin.z || -p.z > layout.roomMax.z) o.Add((i.id, "outside the room"));
                 else if (p.y > maxY && !InTray(p)) o.Add((i.id, $"too high ({p.y:0.00} m)"));
                 else if (InsideContainer(p, 0)) o.Add((i.id, "inside a container"));
-                else if (p.y < 0.2f && UnitAt(p) != null && SurfaceBelow(p, p.y + 0.05f) < 0.01f) o.Add((i.id, "under a storage unit"));
+                else if (p.y < 0.2f && UnderUnit(p) && SurfaceBelow(p, p.y + 0.05f) < 0.01f) o.Add((i.id, "under a storage unit"));
             }
             return o;
         }
@@ -1171,6 +1176,17 @@ namespace WorkshopWreckage
         public int TrayCount => index.QuerySphere(TrayCenter, 1f).Count(i => InTray(world.instances[i].Position));
 
         /// <summary>The storage unit whose footprint contains a world point, if any.</summary>
+        /// <summary>Inside a unit's footprint itself (a part lying against its side is not under it).</summary>
+        bool UnderUnit(Vector3 p)
+        {
+            foreach (var u in units.Values)
+            {
+                var l = u.transform.InverseTransformPoint(p);
+                if (Mathf.Abs(l.x) < u.size.x * 0.5f && Mathf.Abs(l.z) < u.size.z * 0.5f) return true;
+            }
+            return false;
+        }
+
         public StorageUnit UnitAt(Vector3 p)
         {
             foreach (var u in units.Values)
@@ -1317,6 +1333,7 @@ namespace WorkshopWreckage
                 return;
             }
             _overwriteArmed = null;
+            piles.Finish();   // nothing is saved in mid-air
             var bad = UnreachableParts();
             if (bad.Count > 0) Debug.LogWarning($"[integrity] {bad.Count} unreachable part(s) at save: " + string.Join("; ", bad.Take(8).Select(b => $"{db.Get(world.instances[b.id].defId).displayName}: {b.why}")));
             if (SaveSystem.Write(slot, SaveSystem.Serialize(this)))
