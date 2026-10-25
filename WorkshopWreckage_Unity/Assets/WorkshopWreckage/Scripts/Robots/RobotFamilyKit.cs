@@ -632,6 +632,16 @@ namespace WorkshopWreckage
             return Vector3.Dot(new Vector3(gp.x, 0, gp.z), FlatForward);
         }
 
+        float? FamilyGripLow()
+        {
+            if (!HasGrippers) return null;
+            SnapshotPose();
+            Animate(new RobotAnim { dt = 0, bend = 1, armReach = 1, reachHeight = 0 });
+            float y = FamilyGripPoint.Value.y - transform.position.y;
+            RestorePose();
+            return y;
+        }
+
         float? FamilyAimReach(float aimHeight, float ahead)
         {
             if (!HasGrippers) return null;

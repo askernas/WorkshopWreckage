@@ -39,6 +39,9 @@ namespace WorkshopWreckage
     public class RobotModules
     {
         public const string FactoryLoc = "factory";
+        /// <summary>"build:&lt;robot&gt;": a spare taken off a built robot and fitted to a chassis still
+        /// being assembled on the bench; it goes on that robot when it is activated.</summary>
+        public const string BuildPrefix = "build:";
         public const int Version = 1;
         /// <summary>Spare-module slots on the workbench: room for every module of three robots.</summary>
         public const int BenchSlots = 12;
@@ -48,6 +51,9 @@ namespace WorkshopWreckage
         public readonly List<RobotModule> all = new();
         readonly Dictionary<string, RobotModule> _byId = new();
         readonly HashSet<string> _built = new();
+        /// <summary>Own modules left at the factory by a chassis built with another robot's head or arm in
+        /// that slot: their part item is still loose, and goes on the next robot built.</summary>
+        readonly HashSet<string> _waiting = new();
         /// <summary>Every time a chassis became complete (first build or repair), for future achievements.</summary>
         public readonly List<BuildNote> builds = new();
         bool _transferred, _allSeven;
@@ -116,6 +122,39 @@ namespace WorkshopWreckage
         }
         public IEnumerable<RobotModule> FittedOn(string robotId) => all.Where(m => m.MountedOn == robotId);
         public IEnumerable<RobotModule> Spares => all.Where(m => m.BenchSlot >= 0).OrderBy(m => m.BenchSlot);
+        /// <summary>The spare fitted to that slot of an unbuilt chassis' assembly, if any.</summary>
+        public RobotModule ReservedFor(string robotId, ModuleSlot s) => all.FirstOrDefault(m => m.slot == s && m.location == BuildPrefix + robotId);
+        public IEnumerable<RobotModule> Reserved => all.Where(m => m.location.StartsWith(BuildPrefix));
+
+        /// <summary>Why that spare cannot go into the assembly of an unbuilt chassis, or "".</summary>
+        public string CanReserve(string moduleId, string robotId)
+        {
+            var m = Get(moduleId);
+            if (m == null || m.BenchSlot < 0) return "That module is not on the workbench";
+            if (Built(robotId)) return "That robot is already built: fit it under Modify robots";
+            if (!SlotsOf(robotId).Contains(m.slot) || !Fits(m, robotId, m.slot)) return "It does not fit that robot";
+            if (ReservedFor(robotId, m.slot) != null) return $"Its {SlotName(m.slot)} is already chosen";
+            return "";
+        }
+
+        public bool Reserve(string moduleId, string robotId)
+        {
+            if (CanReserve(moduleId, robotId) != "") return false;
+            Get(moduleId).location = BuildPrefix + robotId;
+            return true;
+        }
+
+        /// <summary>Takes a reserved spare back off the assembly onto a free spare slot.</summary>
+        public string CanUnreserve(string robotId, ModuleSlot s)
+            => ReservedFor(robotId, s) == null ? $"No spare {SlotName(s)} is fitted" : FreeBenchSlot() < 0 ? "The workbench spare slots are full" : "";
+
+        public RobotModule Unreserve(string robotId, ModuleSlot s)
+        {
+            if (CanUnreserve(robotId, s) != "") return null;
+            var m = ReservedFor(robotId, s);
+            m.location = "bench:" + FreeBenchSlot();
+            return m;
+        }
         public int FreeBenchSlot()
         {
             for (int n = 0; n < BenchSlots; n++)
@@ -137,11 +176,19 @@ namespace WorkshopWreckage
 
         /// <summary>A chassis came online for the first time: its own modules leave the factory and are
         /// mounted on it. Returns false if it was already built (nothing changes).</summary>
-        public bool OnFirstActivation(string robotId, double playTime)
+        public bool OnFirstActivation(string robotId, double playTime, IReadOnlyDictionary<ModuleSlot, string> donors = null)
         {
             if (!IsChassis(robotId) || !_built.Add(robotId)) return false;
-            foreach (var m in all)
-                if (m.origin == robotId && m.location == FactoryLoc) m.location = "robot:" + robotId;
+            foreach (var s in SlotsOf(robotId))
+            {
+                // the slot's module: its own, the one of the robot whose head or arm item was fitted, or a
+                // spare taken off a built robot and fitted during assembly
+                string from = donors != null && donors.TryGetValue(s, out var d) ? d : robotId;
+                var m = ReservedFor(robotId, s) ?? Get(IdOf(s, from));
+                if (m != null && m.origin != robotId) from = m.origin;
+                if (m != null && (m.location == FactoryLoc || m.location == BuildPrefix + robotId)) { m.location = "robot:" + robotId; _waiting.Remove(m.id); }
+                if (from != robotId && Get(IdOf(s, robotId)) is RobotModule own && own.location == FactoryLoc) _waiting.Add(own.id);
+            }
             NoteBuilt(robotId, true, playTime);
             return true;
         }
@@ -289,12 +336,13 @@ namespace WorkshopWreckage
             if (all.Select(m => m.id).Distinct().Count() != all.Count || _byId.Count != all.Count) e.Add("duplicate module ids");
             foreach (var m in all)
             {
-                if (m.location == FactoryLoc) { if (Built(m.origin)) e.Add($"{m.id} still at the factory though {m.origin} is built"); }
+                if (m.location == FactoryLoc) { if (Built(m.origin) && !_waiting.Contains(m.id)) e.Add($"{m.id} still at the factory though {m.origin} is built"); }
                 else if (m.MountedOn is string r) { if (!Fits(m, r, m.slot)) e.Add($"{m.id} illegally mounted on {r}"); else if (!Built(r)) e.Add($"{m.id} mounted on unbuilt {r}"); }
+                else if (m.location.StartsWith(BuildPrefix)) { var b = m.location.Substring(BuildPrefix.Length); if (Built(b) || !Fits(m, b, m.slot)) e.Add($"{m.id} reserved for {b}, which cannot take it"); }
                 else if (m.BenchSlot >= BenchSlots) e.Add($"{m.id} in a spare slot that does not exist");
                 else if (m.BenchSlot < 0) e.Add($"{m.id} has an unknown location '{m.location}'");
             }
-            foreach (var g in all.Where(m => m.location != FactoryLoc).GroupBy(m => m.MountedOn != null ? m.location + "/" + m.slot : m.location))
+            foreach (var g in all.Where(m => m.location != FactoryLoc).GroupBy(m => m.MountedOn != null || m.location.StartsWith(BuildPrefix) ? m.location + "/" + m.slot : m.location))
                 if (g.Count() > 1) e.Add($"{g.Key} holds {string.Join(", ", g.Select(m => m.id))}");
             return e;
         }
@@ -305,6 +353,7 @@ namespace WorkshopWreckage
         {
             ["version"] = (double)Version,
             ["built"] = _built.OrderBy(x => x).Select(x => (object)x).ToList(),
+            ["waiting"] = _waiting.OrderBy(x => x).Select(x => (object)x).ToList(),
             ["transferred"] = _transferred,
             ["all_seven"] = _allSeven,
             ["locations"] = all.ToDictionary(m => m.id, m => (object)m.location),
@@ -328,7 +377,9 @@ namespace WorkshopWreckage
                 return;
             }
             _built.Clear();
+            _waiting.Clear();
             foreach (var x in Json.Arr(d.GetValueOrDefault("built"))) if (x is string s && IsChassis(s)) _built.Add(s);
+            foreach (var x in Json.Arr(d.GetValueOrDefault("waiting"))) if (x is string s && _byId.ContainsKey(s)) _waiting.Add(s);
             _transferred = Json.Bool(d, "transferred");
             _allSeven = Json.Bool(d, "all_seven");
             var locs = Json.Obj(d.GetValueOrDefault("locations")) ?? new Dictionary<string, object>();
@@ -336,11 +387,12 @@ namespace WorkshopWreckage
             foreach (var m in all)
             {
                 string loc = locs.GetValueOrDefault(m.id) as string ?? "";
-                string key = loc.StartsWith("robot:") ? loc + "/" + m.slot : loc;
-                bool legal = loc == FactoryLoc ? !Built(m.origin)
+                string key = loc.StartsWith("robot:") || loc.StartsWith(BuildPrefix) ? loc + "/" + m.slot : loc;
+                bool legal = loc == FactoryLoc ? !Built(m.origin) || _waiting.Contains(m.id)
                     : loc.StartsWith("robot:") ? Fits(m, loc.Substring(6), m.slot) && Built(loc.Substring(6))
+                    : loc.StartsWith(BuildPrefix) ? Fits(m, loc.Substring(BuildPrefix.Length), m.slot) && !Built(loc.Substring(BuildPrefix.Length))
                     : loc.StartsWith("bench:") && int.TryParse(loc.Substring(6), out int n) && n >= 0 && n < BenchSlots;
-                if (legal && taken.Add(key)) { m.location = loc; continue; }
+                if (legal && (loc == FactoryLoc || taken.Add(key))) { m.location = loc; continue; }   // the factory holds any number
                 // repair: its origin's slot if free, else a spare slot, else the factory for an unbuilt origin
                 m.location = Built(m.origin) ? "" : FactoryLoc;
             }

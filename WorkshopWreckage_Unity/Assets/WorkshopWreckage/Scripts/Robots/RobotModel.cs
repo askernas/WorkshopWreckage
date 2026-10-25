@@ -128,6 +128,9 @@ namespace WorkshopWreckage
         /// pick something up at the given height, or null (no such pose).</summary>
         public virtual float? GripReach(float reachHeight) => FamilyGripReach(reachHeight);
 
+        /// <summary>The lowest the claws get (world height over the feet, fully bent and reaching), or null.</summary>
+        public virtual float? GripLow() => FamilyGripLow();
+
         /// <summary>How far in front of the robot (world, flat) the claws are when raised to a height
         /// above its feet (aiming at a destination), or null (no aimed deposit).</summary>
         public virtual float? AimReach(float aimHeight) => FamilyAimReach(aimHeight, 0);

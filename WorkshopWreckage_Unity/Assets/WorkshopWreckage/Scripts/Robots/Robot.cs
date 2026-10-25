@@ -137,21 +137,27 @@ namespace WorkshopWreckage
             int n = _deferredUntil.TryGetValue(itemId, out var e) ? e.tries + 1 : 1;
             _deferredUntil[itemId] = (_time + 90f * n, n);
         }
-        float? _gripReachCache;
-        /// <summary>Gripper models: can the claws get to a part from the standing spot the path would end at?
-        /// A part lying inside a pile (the nearest free spot is further than the claws reach) is skipped
-        /// when choosing, instead of walking there and deferring it.</summary>
+        float? _gripReachCache, _gripLowCache;
+        RobotModel _gripModel;   // the caches hold for this model (a fitted head or arm rebuilds it)
         /// <summary>Where it stands to take a part from the sorting tray: the nearest free floor beside the part
         /// (further out if the tray's surroundings are crowded). A tray part is always within reach from there,
         /// however far the arms really are (a game rule: the player's tray is always emptied).</summary>
         Vector3? TrayGoal(ItemInstance inst) => _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, 0.65f) ?? _nav.NearestFree(inst.Position, 1.5f);
 
+        /// <summary>Gripper models: can the claws get to a part from the standing spot the path would end at?
+        /// A part lying inside a pile (the nearest free spot is further than the claws reach), or down in a
+        /// hollow lower than they bend to from the heap it would stand on (playtest 2026-10-25: Retrobot
+        /// walked to such parts again and again and gave up on each), is skipped when choosing, instead of
+        /// walking there and deferring it.</summary>
         bool InGripRange(ItemInstance inst, Vector3 goal)
         {
             if (!Grips) return true;
+            if (_gripModel != _model) { _gripModel = _model; _gripReachCache = _gripLowCache = null; }
             _gripReachCache ??= _model.GripReach(0.015f);
+            _gripLowCache ??= _model.GripLow();
             float reach = (_gripReachCache ?? 0.1f) + ContactMax + 0.03f;
-            if (Flat(inst.Position - goal).magnitude <= reach) return true;
+            bool low = _gripLowCache is float lo && inst.Position.y - Ground(goal) < lo - ContactMax;
+            if (!low && Flat(inst.Position - goal).magnitude <= reach) return true;
             Defer(inst.id);
             return false;
         }
@@ -317,6 +323,7 @@ namespace WorkshopWreckage
             bool tracked = reg != null && RobotModules.IsChassis(id) && reg.Built(id);
             string From(ModuleSlot s)
             {
+                if (!tracked && mode == Mode.Assembling) return s == ModuleSlot.Prop ? null : g.workbench?.DonorOrigin(Project, s);   // another robot's head or arm on the bench
                 if (!tracked || (s == ModuleSlot.Prop && !RobotModules.IsHover(id))) return null;
                 var m = reg.At(id, s);
                 return m == null ? "" : m.origin == id ? null : m.origin;
@@ -342,6 +349,8 @@ namespace WorkshopWreckage
             gameObject.SetActive(!onBench || g.workbench.OnBench(p));
             if (!onBench) return;
             var have = g.workbench.InstalledKeys(p);
+            (_model.headFrom, _model.armLFrom, _model.armRFrom) = (g.workbench.DonorOrigin(p, ModuleSlot.Head), g.workbench.DonorOrigin(p, ModuleSlot.ArmL), g.workbench.DonorOrigin(p, ModuleSlot.ArmR));
+            _modelFroms = (_model.headFrom, _model.armLFrom, _model.armRFrom, _model.propFrom);
             _model.assembling = true;
             _model.mountReady = part => !p.requires.TryGetValue(part, out var req) || req.All(have.Contains);
             _model.Build(have);
@@ -520,7 +529,10 @@ namespace WorkshopWreckage
             Sfx.Play("complete", transform.position + Vector3.up * 0.3f, -2);
             mode = Mode.Working;
             _step = Step.Choose;
-            g.modules?.OnFirstActivation(id, g.playTime);   // its own head, arms (and propeller) are mounted modules from now on
+            // its head, arms (and propeller) are mounted modules from now on: its own, or the other
+            // robots' heads and arms it was built with
+            g.modules?.OnFirstActivation(id, g.playTime, Project is RobotWorkbench.Project bp ? g.workbench.DonorOrigins(bp) : null);
+            ApplyModules();
             g.progression?.OnRobotRepaired(id);
             GameEvents.Raise(GameEventKind.RobotActivated, Owner, type);
             g.hud.Toast($"{displayName} is online and starts sorting!", true);
@@ -1101,17 +1113,17 @@ namespace WorkshopWreckage
             System.Func<ItemInstance, float> score = i => (i.Position - me).sqrMagnitude;
             specialistState = "";
             _stagedNow = StagedCounts();   // the staging cap holds for every robot (never waits on a full zone)
-            List<ItemInstance> tray = null;
-            if (strategy == "assigned_definition")
+            // parts the player put in the sorting tray come first, for every robot (playtest 2026-10-25),
+            // before a specialist's assignment or a Hoverbot's staging zones; only a part the player
+            // asked for by name (R) goes before them
+            var tray = g.index.QuerySphere(g.TrayCenter, 1f).Select(i => g.world.instances[i]).Where(i => g.InTray(i.Position) && Pickable(i)).ToList();
+            if (strategy == "assigned_definition" && (tray.Count == 0 || preferDef >= 0))
             {
                 if (!ChooseAssigned(ref pool, me)) { if (carried.Count > 0) { _step = Step.ToDest; _path = null; } else _idleT = 1.5f; return; }
             }
             else
             {
-                // parts the player put in the sorting tray come first (a Hoverbot empties the staging
-                // zones before them: nobody else can, while any robot can take the tray)
-                tray = g.index.QuerySphere(g.TrayCenter, 1f).Select(i => g.world.instances[i]).Where(i => g.InTray(i.Position) && Pickable(i)).ToList();
-                if (tray.Count > 0 && preferDef < 0 && strategy != "staging_first") pool = tray;
+                if (tray.Count > 0 && preferDef < 0) pool = tray;
                 if (preferDef >= 0)
                 {
                     var pref = g.world.IdsOf(preferDef).Select(i => g.world.instances[i]).Where(Pickable).ToList();
@@ -1139,12 +1151,12 @@ namespace WorkshopWreckage
                         }
                     }
                 }
-                if (pool == null && tray.Count > 0 && preferDef < 0) pool = tray;
                 pool ??= g.world.instances;
                 if (strategy == "opportunistic")
-                    // parts it can store itself first (a part for a high destination is worth 1.5 m of
-                    // walking less); with Better Targeting, sets already started come first too
-                    score = i => (i.Position - me).magnitude + (ReachableDest(g.db.Get(i.defId).storageBox) ? 0 : 1.5f)
+                    // the nearest part first; one it can store itself is worth 0.4 m of walking more than one for a high
+                    // destination (playtest 2026-10-25: "pick up what is nearest"); with Better Targeting, sets already
+                    // started come first too
+                    score = i => (i.Position - me).magnitude + (ReachableDest(g.db.Get(i.defId).storageBox) ? 0 : 0.4f)
                                  - (_targetRank > 0 && g.progress.SortedOf(i.defId) > 0 ? 1.5f : 0);
                 if (strategy == "multi_stop" && _routeRank > 0 && carried.Count > 0)
                 {
@@ -1239,7 +1251,7 @@ namespace WorkshopWreckage
                 {
                     float sc = (inst.Position - from).magnitude;
                     if (strategy == "opportunistic")
-                        sc += (ReachableDest(g.db.Get(inst.defId).storageBox) ? 0 : 1.5f) - (_targetRank > 0 && g.progress.SortedOf(inst.defId) > 0 ? 1.5f : 0);
+                        sc += (ReachableDest(g.db.Get(inst.defId).storageBox) ? 0 : 0.4f) - (_targetRank > 0 && g.progress.SortedOf(inst.defId) > 0 ? 1.5f : 0);
                     _planList.Add((sc, inst.id));
                 }
                 if (i % 600 == 599) yield return null;
@@ -1357,12 +1369,14 @@ namespace WorkshopWreckage
 
         bool Pickable(ItemInstance i)
         {
-            if (i.state != ItemState.InWorld || i.Position.y > ReachHeight || _unreachable.Contains(i.id) || g.robotReserved.Contains(i.id)) return false;
+            if (i.state != ItemState.InWorld || _unreachable.Contains(i.id) || g.robotReserved.Contains(i.id)) return false;
+            bool tray = g.InTray(i.Position);   // always within reach (TrayGoal), whatever the work zone or assignment
+            if (!tray && i.Position.y > ReachHeight) return false;
             if (_deferredUntil.Count > 0 && _deferredUntil.TryGetValue(i.id, out var deferredUntil) && _time < deferredUntil.until) return false;
-            if (zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
+            if (!tray && zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
             var def = g.db.Get(i.defId);
             if (!def.robotCarry || def.IsRobotPart || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;   // player-only: the largest 20 %
-            if (strategy == "assigned_definition" && assignedDef >= 0 && i.defId != assignedDef) return false;
+            if (!tray && strategy == "assigned_definition" && assignedDef >= 0 && i.defId != assignedDef) return false;
             if (Flies && g.debris != null && g.debris.At(i.Position) > i.Position.y + ItemDatabase.Extents(def)[2] * 0.5f + 0.05f) return false;   // buried
             bool staged = i.owner.StartsWith("stage:");
             if (staged && Blocked(def.storageBox)) return false;   // waits until someone clears the strays out of its destination

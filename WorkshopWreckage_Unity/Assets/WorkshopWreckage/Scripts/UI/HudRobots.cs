@@ -11,7 +11,7 @@ namespace WorkshopWreckage
     /// the type's upgrade tree, pause / follow / assignment).</summary>
     public partial class Hud
     {
-        RectTransform _wbTabs, _wbActions, _rbTabs, _rbActions, _rbUpgrades;
+        RectTransform _wbTabs, _wbActions, _wbSpares, _rbTabs, _rbActions, _rbUpgrades;
         Text _wbHeader, _wbPartsA, _wbPartsB, _rbInfo, _rbHeader;
         RawImage _wbPreview;
         Camera _previewCam;
@@ -65,6 +65,7 @@ namespace WorkshopWreckage
             _wbPartsA = Block(Col(parts, 500), 16, 310);
             _wbPartsB = Block(Col(parts, 500), 16, 310);
             _wbActions = Row(wb, 46, 10);
+            _wbSpares = Row(wb, 36, 8);   // modules taken off built robots, for this assembly
             Para(wb, "Robot parts are delivered by hand: carry them here and click the bench.  [F] at the bench: pick the robot up and turn it in your hands.", 14, Muted, 22);
 
             var rs = Screen("robots", 1500);
@@ -102,7 +103,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>QA: the workbench screen's buttons now on screen (unchanged ones must survive a refresh).</summary>
-        public List<GameObject> WorkbenchButtons() => _wbTabs.Cast<Transform>().Concat(_wbActions.Cast<Transform>()).Where(t => t.gameObject.activeSelf).Select(t => t.gameObject).ToList();
+        public List<GameObject> WorkbenchButtons() => _wbTabs.Cast<Transform>().Concat(_wbActions.Cast<Transform>()).Concat(_wbSpares.Cast<Transform>()).Where(t => t.gameObject.activeSelf).Select(t => t.gameObject).ToList();
 
         void RefreshWorkbench()
         {
@@ -154,9 +155,9 @@ namespace WorkshopWreckage
             else
             {
                 var have = wb.InstalledKeys(p);
-                foreach (var id in wb.PartIds(p))
+                foreach (var id in wb.NeededIds(p))
                 {
-                    var key = Robot.PartKey(_g.world.DefOf(id));
+                    var key = wb.KeyOn(p, id) + (wb.OriginOf(id) != p.type ? $" ({RobotModules.OriginName(wb.OriginOf(id))}'s)" : "");
                     var ps = wb.StateOf(id);
                     string why = ps == RobotWorkbench.PartState.Delivered ? wb.CanInstall(p, id) : "";
                     string txt = ps switch
@@ -169,13 +170,15 @@ namespace WorkshopWreckage
                     };
                     lines.Add($"{Cap(key)}:  {txt}");
                 }
+                foreach (var m in wb.ReservedOn(p))
+                    lines.Add($"{Cap(RobotModules.SlotName(m.slot))} ({RobotModules.OriginName(m.origin)}'s):  <color={Hex(GoodC)}>fitted from the spare modules</color>");
             }
             int half = (lines.Count + 1) / 2;
             _wbPartsA.text = string.Join("\n", lines.Take(half));
             _wbPartsB.text = string.Join("\n", lines.Skip(half));
 
             ClearChildren(_wbActions);
-            int installable = p.crafted ? 0 : wb.DeliveredIds(p).Count(id => wb.CanInstall(p, id) == "");
+            int installable = p.crafted ? 0 : wb.InstallableCount(p);
             var ib = MakeButton(_wbActions, installable > 0 ? $"Install delivered parts ({installable})" : "Install delivered parts", () =>
             {
                 int n = wb.InstallAll(p);
@@ -183,6 +186,38 @@ namespace WorkshopWreckage
                 RefreshWorkbench();
             });
             ib.interactable = installable > 0;
+            // a head or arm stripped off a built robot (Modify robots → Take off) goes on here too
+            ClearChildren(_wbSpares);
+            if (!p.crafted && _g.modules != null)
+            {
+                foreach (var m in _g.modules.Spares.Where(m => wb.CanFitSpare(p, m) == "").ToList())
+                {
+                    var spare = m;
+                    var fb = MakeButton(_wbSpares, $"Fit spare: {spare.Name}", () =>
+                    {
+                        bool ok = wb.FitSpare(p, spare);
+                        OnFeedback(ok ? $"{spare.Name} fitted to {p.name} ({wb.InstalledCount(p)}/{wb.Required(p)})" : wb.CanFitSpare(p, spare), ok);
+                        RefreshWorkbench();
+                    });
+                    fb.GetComponent<LayoutElement>().preferredWidth = 300;
+                    fb.GetComponentInChildren<Text>().fontSize = 15;
+                }
+                foreach (var m in wb.ReservedOn(p).ToList())
+                {
+                    var slot = m.slot;
+                    var name = m.Name;
+                    var tb = MakeButton(_wbSpares, $"Take off {name}", () =>
+                    {
+                        string why = wb.CanRemoveSpare(p, slot);
+                        bool ok = why == "" && wb.RemoveSpare(p, slot) != null;
+                        OnFeedback(ok ? $"{name} is back on the bench" : why, ok);
+                        RefreshWorkbench();
+                    });
+                    tb.GetComponent<LayoutElement>().preferredWidth = 300;
+                    tb.GetComponentInChildren<Text>().fontSize = 15;
+                }
+            }
+            _wbSpares.gameObject.SetActive(_wbSpares.childCount > 0);
             ib.GetComponent<LayoutElement>().preferredWidth = 360;
             var ab = MakeButton(_wbActions, $"Activate {p.name}", () =>
             {
@@ -232,7 +267,7 @@ namespace WorkshopWreckage
                 t += "Still needed: " + string.Join(", ", wb.MaterialsMissing(p).Where(kv => kv.Value > 0).Select(kv => $"{kv.Value} {kv.Key}")) + "\n";
             else
             {
-                var missing = wb.PartIds(p).Where(i => wb.StateOf(i) != RobotWorkbench.PartState.Installed).ToList();
+                var missing = wb.NeededIds(p).Where(i => wb.StateOf(i) != RobotWorkbench.PartState.Installed).ToList();
                 if (missing.Count == 0) t += $"<color={Hex(GoodC)}>Complete — activate it at the workbench.</color>\n";
                 else
                 {

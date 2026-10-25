@@ -33,6 +33,24 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "outline")
+            {
+                yield return OutlineShots();   // QA: the hover highlight is a thin glowing rim
+                Finish();
+                yield break;
+            }
+            if (section == "strip")
+            {
+                yield return StripChecks();   // QA: an arm stripped off a built robot goes on one being assembled
+                Finish();
+                yield break;
+            }
+            if (section == "donor")
+            {
+                yield return DonorPartChecks();   // QA: other robots' heads and arms on Retrobot (playtest 2026-10-25)
+                Finish();
+                yield break;
+            }
             if (section == "input")
             {
                 yield return InputAudioChecks();   // QA: focus loss, capture guard, saved volumes
@@ -363,6 +381,197 @@ namespace WorkshopWreckage
         void EmptyHands()
         {
             foreach (var id in g.inventory.items.ToList()) if (!g.interaction.DropInTray(id, false)) { g.inventory.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); }
+        }
+
+        /// <summary>Playtest 2026-10-25: a head or arm found for another robot can go on Retrobot. Unibot's
+        /// left arm (before the torso: it waits in the tray, then goes on) and Hoverbot's head build
+        /// Retrobot; it activates wearing them as modules; Retrobot's own left arm, found later, goes on
+        /// Unibot; nothing is duplicated or lost, and it all survives save/load.</summary>
+        IEnumerator DonorPartChecks()
+        {
+            var wb = g.workbench;
+            var retro = wb.P("retrobot");
+            var uni = wb.P("unibot");
+            var rb = g.retrobot;
+            g.player.enabled = false;
+            int Part(string robot, string key) => wb.PartIds(wb.P(robot)).First(i => Robot.PartKey(g.world.DefOf(i)) == key);
+            int uArm = Part("unibot", "left arm"), hHead = Part("hoverbot", "head"), rArm = Part("retrobot", "left arm"), rHead = Part("retrobot", "head");
+            LevelTo(2);
+            wb.selected = "retrobot";
+            // Unibot's arm before Retrobot's torso: into Unibot's tray, then on once the torso is in
+            Take(uArm); g.interaction.DepositStation(uArm);
+            bool waited = g.world.instances[uArm].state == ItemState.Stored && wb.DonorIn(retro, ModuleSlot.ArmL) < 0;
+            int torso = Part("retrobot", "torso");
+            Take(torso); g.interaction.DepositStation(torso);
+            int pulled = wb.InstallAll(retro);
+            bool armOn = wb.DonorIn(retro, ModuleSlot.ArmL) == uArm;
+            // Hoverbot's head with the torso in: fitted at once
+            Take(hHead); var (_, headMsg) = wb.Deliver(hHead);
+            bool headOn = wb.DonorIn(retro, ModuleSlot.Head) == hHead;
+            // Retrobot's own left arm and head now have nowhere on Retrobot
+            Take(rArm); g.interaction.DepositStation(rArm);
+            Take(rHead); g.interaction.DepositStation(rHead);
+            string ownWhy = wb.CanInstall(retro, rArm);
+            bool ownRefused = g.world.instances[rArm].state == ItemState.Stored && ownWhy.Contains("Unibot");
+            foreach (var key in new[] { "right arm", "leg assembly" }) { int id = Part("retrobot", key); Take(id); g.interaction.DepositStation(id); }
+            yield return Frames(2);
+            bool complete = wb.Complete(retro) && wb.Required(retro) == 5;
+            var froms = rb.ModelFroms;
+            Check("another robot's head and arm go on Retrobot: an arm before the torso waits in the tray and goes on with the torso, a head is fitted at once; Retrobot's own then waits",
+                  waited && pulled >= 1 && armOn && headOn && ownRefused && complete && froms.h == "hoverbot" && froms.l == "unibot",
+                  $"waited {waited}; pulled {pulled}, arm on {armOn}; head: {headMsg}; own arm: {ownWhy}; complete {complete} ({wb.InstalledCount(retro)}/{wb.Required(retro)}); bench model {froms}");
+            var (spot, _) = wb.MatSpot(0);
+            LookFrom(spot + wb.Front * 0.55f + Vector3.up * 0.32f + Vector3.Cross(Vector3.up, wb.Front) * 0.2f, spot + Vector3.up * 0.12f);
+            yield return g.Capture(Path.Combine(outDir, "30_retrobot_donor_bench.png"), 4);
+            // activation: the donors become its mounted modules, its own wait at the factory
+            g.SetState("play");
+            g.player.enabled = false;
+            bool act = wb.Activate(retro);
+            float t0 = Time.realtimeSinceStartup;
+            while (!rb.Active && Time.realtimeSinceStartup - t0 < 12) { LookAtRobot(1.0f, 0.9f, 0.4f); yield return null; }
+            var m = g.modules;
+            var audit = m.Audit();
+            bool mods = m.At("retrobot", ModuleSlot.ArmL)?.origin == "unibot" && m.At("retrobot", ModuleSlot.Head)?.origin == "hoverbot" && m.At("retrobot", ModuleSlot.ArmR)?.origin == "retrobot"
+                        && m.Get("arm_l.retrobot").location == RobotModules.FactoryLoc && m.Get("head.retrobot").location == RobotModules.FactoryLoc;
+            Check("Retrobot activates wearing Unibot's arm and Hoverbot's head as modules; its own wait at the factory; the module audit is clean",
+                  act && rb.Operational && mods && audit.Count == 0 && rb.ModelFroms.h == "hoverbot" && rb.ModelFroms.l == "unibot",
+                  $"operational {rb.Operational}; head {m.At("retrobot", ModuleSlot.Head)?.id}, left {m.At("retrobot", ModuleSlot.ArmL)?.id}, right {m.At("retrobot", ModuleSlot.ArmR)?.id}; audit: {(audit.Count == 0 ? "clean" : string.Join("; ", audit))}");
+            LookAtRobot(0.7f, 0.45f, 0.15f);
+            yield return g.Capture(Path.Combine(outDir, "31_retrobot_donor_online.png"), 3);
+            // Unibot: its left arm is on Retrobot; Retrobot's own (in its tray) goes on instead
+            LevelTo(5);
+            wb.selected = "unibot";
+            int uTorso = Part("unibot", "torso");
+            Take(uTorso); g.interaction.DepositStation(uTorso);
+            int got = wb.InstallAll(uni);
+            // Retrobot's spare head goes on too (Unibot's head shell with its eye and antennas then waits)
+            bool uniArm = wb.DonorIn(uni, ModuleSlot.ArmL) == rArm && wb.DonorIn(uni, ModuleSlot.Head) == rHead && got == 2 && wb.Required(uni) == 9 - 1 - 3 + 2;
+            bool intact = PartsIntact(out var pi);
+            Check("Retrobot's own left arm and head, waiting in the tray, go on Unibot (its own left arm is on Retrobot)",
+                  uniArm && intact, $"installed {got}; Unibot left arm slot: {(wb.DonorIn(uni, ModuleSlot.ArmL) is int x && x >= 0 ? g.world.DefOf(x).displayName : "empty")}; {wb.InstalledCount(uni)}/{wb.Required(uni)}; {pi}");
+            // save / load keeps all of it
+            string State() => $"{string.Join(",", wb.InstalledIds(retro))}|{string.Join(",", wb.InstalledIds(uni))}|{Json.Write(m.ToDict()["locations"])}|{Json.Write(m.ToDict()["waiting"])}";
+            var before = State();
+            g.SaveGame("autotest_donor");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_donor");
+            g.player.enabled = false;
+            yield return Frames(4);
+            wb = g.workbench; retro = wb.P("retrobot"); uni = wb.P("unibot"); m = g.modules;
+            var after = State();
+            var audit2 = m.Audit();
+            Check("donor heads and arms (on the bench and as modules) survive save/load, audit clean",
+                  before == after && audit2.Count == 0 && g.retrobot.ModelFroms.l == "unibot", before == after ? $"same; audit {(audit2.Count == 0 ? "clean" : string.Join("; ", audit2))}" : $"{before}  vs  {after}");
+            File.Delete(SaveSystem.PathOf("autotest_donor"));
+        }
+
+        /// <summary>Playtest 2026-10-25: the aimed-at part gets a thin glowing rim, not a shell much
+        /// larger than the part. Screenshots of a small, a long and a large part, close and at reach.</summary>
+        IEnumerator OutlineShots()
+        {
+            g.SetState("play");
+            g.player.enabled = false;
+            g.interaction.enabledInput = true;   // automated runs hide the hover each frame; aimed shots need it
+            var eye = g.player.transform.position + Vector3.up * PlayerController.Eye;
+            var near = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.InTray(i.Position) && i.Position.y < 0.3f)
+                .OrderBy(i => (i.Position - eye).sqrMagnitude).Take(400).ToList();
+            float Size(ItemInstance i) => ItemDatabase.Extents(g.world.DefOf(i.id)).Max();
+            var picks = new[] { near.OrderBy(Size).First(), near.OrderByDescending(i => { var e = ItemDatabase.Extents(g.world.DefOf(i.id)); return e.Max() / Mathf.Max(0.001f, e.Min()); }).First(), near.OrderByDescending(Size).First() };
+            int n = 0, shown = 0;
+            foreach (var p in picks)
+                foreach (var dist in new[] { 0.45f, 1.1f })
+                {
+                    var at = p.Position;
+                    var from = at + new Vector3(0.6f, 0.75f, 0.5f).normalized * dist;
+                    LookFrom(from, at);
+                    yield return Frames(2);
+                    g.interaction.UpdateTarget();
+                    yield return Frames(1);
+                    if (g.interaction.targetType == "item") shown++;
+                    yield return g.Capture(Path.Combine(outDir, $"34_outline_{n++}_{g.world.DefOf(p.id).displayName.Replace(' ', '_').Replace('/', '_')}_{dist:0.00}m.png"), 2);
+                }
+            g.interaction.enabledInput = false;
+            Check("the aimed-at part shows its highlight (screenshots 34_outline_*)", shown >= 4, $"{shown} of 6 aimed shots show a highlight");
+        }
+
+        /// <summary>Playtest 2026-10-25: strip a built robot and fit the part to another. Retrobot is
+        /// built and activated; its left arm comes off (a spare on the bench) and goes into Unibot's
+        /// assembly, standing in for Unibot's own; it can come off again; Unibot activates wearing it;
+        /// nothing is duplicated or lost, and it survives save/load.</summary>
+        IEnumerator StripChecks()
+        {
+            var wb = g.workbench;
+            var retro = wb.P("retrobot");
+            var uni = wb.P("unibot");
+            var m = g.modules;
+            g.player.enabled = false;
+            int Part(string robot, string key) => wb.PartIds(wb.P(robot)).First(i => Robot.PartKey(g.world.DefOf(i)) == key);
+            void Deliver(RobotWorkbench.Project p, IEnumerable<int> ids) { foreach (var id in ids) { Take(id); g.interaction.DepositStation(id); } wb.InstallAll(p); }
+            LevelTo(5);
+            // Retrobot built and running
+            wb.selected = "retrobot";
+            Deliver(retro, wb.PartIds(retro).ToList());
+            g.SetState("play");
+            g.player.enabled = false;
+            bool act = wb.Activate(retro);
+            float t0 = Time.realtimeSinceStartup;
+            while (!g.retrobot.Active && Time.realtimeSinceStartup - t0 < 12) { LookAtRobot(1.0f, 0.9f, 0.4f); yield return null; }
+            // its left arm off: a spare on the bench
+            var arm = m.Remove("retrobot", ModuleSlot.ArmL);
+            bool off = arm != null && arm.id == "arm_l.retrobot" && arm.BenchSlot >= 0 && !m.Complete("retrobot");
+            // Unibot: everything but its own left arm
+            wb.selected = "unibot";
+            int uArm = Part("unibot", "left arm");
+            Deliver(uni, wb.PartIds(uni).Where(id => id != uArm).ToList());
+            int req0 = wb.Required(uni);
+            string why = wb.CanFitSpare(uni, arm);
+            bool fit = why == "" && wb.FitSpare(uni, arm);
+            bool counted = wb.Required(uni) == req0 - 1 && wb.Complete(uni) && wb.InstalledKeys(uni).Contains("left arm") && wb.DonorOrigin(uni, ModuleSlot.ArmL) == "retrobot";
+            // and off again, and back on
+            bool back = wb.RemoveSpare(uni, ModuleSlot.ArmL) != null && arm.BenchSlot >= 0 && !wb.Complete(uni) && wb.FitSpare(uni, arm);
+            // Unibot's own left arm now has no place on Unibot
+            Take(uArm); g.interaction.DepositStation(uArm);
+            string ownWhy = wb.CanInstall(uni, uArm);
+            Check("an arm stripped off a built robot goes into another robot's assembly in place of its own, and can come off again",
+                  act && off && fit && counted && back && ownWhy.Contains("Retrobot") && m.Audit().Count == 0,
+                  $"Retrobot active {act}; off {off} ({arm?.location}); fit: {(why == "" ? "ok" : why)}; counted {counted} ({wb.InstalledCount(uni)}/{wb.Required(uni)}, was {req0}); off and on again {back}; own arm: {ownWhy}; audit {string.Join("; ", m.Audit())}");
+            yield return Frames(2);
+            var ub = wb.RobotOf(uni);
+            LookAtRobot(ub, 0.9f, 0.5f, 0.25f);
+            yield return g.Capture(Path.Combine(outDir, "32_strip_unibot_bench.png"), 3);
+            // activation: the stripped arm becomes Unibot's module, Unibot's own waits at the factory
+            bool act2 = wb.Activate(uni);
+            t0 = Time.realtimeSinceStartup;
+            while (!ub.Active && Time.realtimeSinceStartup - t0 < 12) { LookAtRobot(ub, 1.0f, 0.9f, 0.4f); yield return null; }
+            var audit = m.Audit();
+            bool mods = m.At("unibot", ModuleSlot.ArmL)?.id == "arm_l.retrobot" && m.Get("arm_l.unibot").location == RobotModules.FactoryLoc && m.At("retrobot", ModuleSlot.ArmL) == null && !m.Reserved.Any();
+            Check("the robot activates wearing the stripped arm; the stripped robot misses it; the module audit is clean",
+                  act2 && ub.Operational && mods && audit.Count == 0 && ub.ModelFroms.l == "retrobot",
+                  $"operational {ub.Operational}; Unibot left {m.At("unibot", ModuleSlot.ArmL)?.id}; Retrobot left {m.At("retrobot", ModuleSlot.ArmL)?.id ?? "none"}; own {m.Get("arm_l.unibot").location}; model {ub.ModelFroms}; audit {(audit.Count == 0 ? "clean" : string.Join("; ", audit))}");
+            LookAtRobot(ub, 0.7f, 0.45f, 0.15f);
+            yield return g.Capture(Path.Combine(outDir, "33_strip_unibot_online.png"), 3);
+            // a reservation (Retrobot's head into Spiderbot's assembly) survives save/load as well
+            var head = m.Remove("retrobot", ModuleSlot.Head);
+            var spider = wb.P("spiderbot");
+            LevelTo(spider.level);
+            wb.selected = "spiderbot";
+            // its torso first: the head goes on the torso
+            Deliver(spider, wb.PartIds(spider).Where(id => wb.MainSlotOf(id) != ModuleSlot.Head).ToList());
+            string resWhy = head == null ? "no head" : wb.CanFitSpare(spider, head);
+            bool res = resWhy == "" && wb.FitSpare(spider, head);
+            string State() => $"{Json.Write(m.ToDict()["locations"])}|{Json.Write(m.ToDict()["waiting"])}|{wb.InstalledCount(wb.P("spiderbot"))}/{wb.Required(wb.P("spiderbot"))}";
+            var before = State();
+            g.SaveGame("autotest_strip");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_strip");
+            g.player.enabled = false;
+            yield return Frames(4);
+            m = g.modules; wb = g.workbench;
+            var after = State();
+            Check("stripped and refitted modules (mounted and in an assembly) survive save/load, audit clean",
+                  res && before == after && m.Audit().Count == 0 && m.ReservedFor("spiderbot", ModuleSlot.Head)?.id == "head.retrobot",
+                  before == after ? $"same; reserved {(res ? "ok" : resWhy)}; audit {(m.Audit().Count == 0 ? "clean" : string.Join("; ", m.Audit()))}" : $"{before}  vs  {after}");
+            File.Delete(SaveSystem.PathOf("autotest_strip"));
         }
 
         /// <summary>Mouse and sound: losing focus in play pauses, frees the cursor and silences
@@ -1181,7 +1390,9 @@ namespace WorkshopWreckage
             while (Time.realtimeSinceStartup - t1 < 30 && firstTarget < 0) { if (zr.targetId >= 0 && zr.targetId != oldTarget) firstTarget = zr.targetId; yield return null; }
             Time.timeScale = 1;
             float dz = firstTarget >= 0 ? new Vector2(g.world.instances[firstTarget].Position.x - hc.x, g.world.instances[firstTarget].Position.z - hc.z).magnitude : -1;
-            Check("Task Coordination: an assigned robot works only in its zone", firstTarget >= 0 && dz <= zr.zoneRadius, $"target {dz:0.0} m from the zone centre (radius {zr.zoneRadius})");
+            bool zTray = firstTarget >= 0 && g.InTray(g.world.instances[firstTarget].Position);   // the sorting tray comes first, zone or not
+            Check("Task Coordination: an assigned robot works only in its zone (or empties the sorting tray)", firstTarget >= 0 && (dz <= zr.zoneRadius + 0.05f || zTray),
+                  $"target {dz:0.00} m from the zone centre (radius {zr.zoneRadius}){(zTray ? ", in the sorting tray" : "")}");
             zr.AssignZone(null);
 
             // Sorting tray: parts put there are picked up by the robots first
@@ -1788,6 +1999,9 @@ namespace WorkshopWreckage
                 deep0 = Mathf.Max(deep0, deep);
             }
             foreach (var a in air.Take(10)) Debug.Log("[piles] in the air at the start: " + a);
+            var unreach0 = g.UnreachableParts();
+            foreach (var (uid, why) in unreach0.Take(10)) Debug.Log($"[piles] unreachable at the start: {g.world.DefOf(uid).displayName} at {g.world.instances[uid].Position} ({why}) pile {(g.lastGen?.pileOf != null && uid < g.lastGen.pileOf.Length ? g.lastGen.pileOf[uid] : -9)}");
+            Check("a new world has no unreachable parts once it has settled", unreach0.Count == 0, $"{unreach0.Count} unreachable");
             Check("a new world's parts all rest on something (nothing in mid-air at the start)", air.Count == 0,
                   $"{sample.Count} of {loose.Count} loose parts checked, in the air: {air.Count}{(air.Count > 0 ? " (" + string.Join("; ", air.Take(3)) + ")" : "")}; deepest overlap {deep0 * 1000:0.0} mm; {g.piles.lastInfo}");
             var hs = g.layout.piles.First(p => p.kind == "heap" && p.surface == 0);

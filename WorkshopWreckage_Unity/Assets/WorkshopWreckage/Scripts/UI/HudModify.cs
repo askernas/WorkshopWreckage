@@ -168,6 +168,9 @@ namespace WorkshopWreckage
                 var x = spares.FirstOrDefault(m => m.BenchSlot == i);
                 sp += $"{i + 1,2}.  " + (x == null ? $"<color={Hex(Muted)}>—</color>" : ModuleText(x)) + "\n";
             }
+            foreach (var x in mods.Reserved)
+                sp += $"<color={Hex(Muted)}>fitted to {RobotModules.OriginName(x.location.Substring(RobotModules.BuildPrefix.Length))}'s assembly:</color> {ModuleText(x)}\n";
+            sp += $"<color={Hex(Muted)}>A spare can also go on a robot still being built: Robot Workbench → its page → Fit spare.</color>";
             _mdSpares.text = sp;
 
             // summons: mark several, then call them all
