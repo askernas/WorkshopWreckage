@@ -272,7 +272,7 @@ namespace WorkshopWreckage
                 {
                     var title = game.db.BoxLabel(targetDest) + "  ·  " + AssignedName(targetDest);
                     int strays = game.StraysIn(targetDest).Count;
-                    var sub = $"{Storage.Stored(targetDest).Count} / {game.db.BoxCapacity(targetDest)} stored" + (strays > 0 ? $"  ·  {strays} stray part{(strays == 1 ? "" : "s")} in the way" : "");
+                    var sub = $"{Storage.Stored(targetDest).Count} / {game.AssignedCount(targetDest)} stored" + (strays > 0 ? $"  ·  {strays} stray part{(strays == 1 ? "" : "s")} in the way" : "");
                     if (held < 0) return new TargetInfo { title = title, sub = sub, hint = "" };
                     var r = Storage.Check(targetDest, held);
                     if (r == StorageSystem.Result.Ok)

@@ -27,15 +27,16 @@ namespace WorkshopWreckage
         public int CostOf(int rank) => costPerRank.Count == 0 ? 1 : costPerRank[Math.Min(rank, costPerRank.Count - 1)];
     }
 
-    /// <summary>Player XP, levels and skills. Engine independent (no UnityEngine):
+    /// <summary>Player levels, skills and XP. Engine independent (no UnityEngine):
     /// all numbers come from shared/data/progression.json, the game only reports
-    /// events. Anti-exploit: sorting XP is granted once per instance, discovery once
-    /// per definition, every other reward once per key; pickups and drops never
-    /// grant XP, so juggling items earns nothing.</summary>
+    /// events. The level comes only from completed storage destinations (one point per
+    /// destination, once per game, whoever stored the last copy); XP is still counted
+    /// as a score but never raises the level. Anti-exploit: sorting XP is granted once
+    /// per instance, discovery once per definition, every other reward once per key.</summary>
     public class Progression
     {
         public readonly int maxLevel;
-        readonly double _curveBase, _curveExp, _presetScale;
+        readonly double _curveBase, _curveExp, _presetScale, _destCoef, _destExp, _destReference;
         readonly int _pointsPerLevel;
         readonly Dictionary<int, int> _bonusPoints = new();
         readonly Dictionary<string, double> _rewards = new();
@@ -49,6 +50,12 @@ namespace WorkshopWreckage
         readonly HashSet<int> _sortRewarded = new(), _discoverRewarded = new();
         readonly HashSet<string> _onceRewarded = new();
 
+        /// <summary>Destinations (by their one definition) completed at least once: the level points.</summary>
+        public readonly HashSet<int> completedDestinations = new();
+        /// <summary>Destinations that can be completed in this world (at least one part assigned).</summary>
+        public int destinationTotal = 500;
+        int[] _levelStart;
+
         public event Action<int> LeveledUp;                 // new level
         public event Action<long, string> XpGained;         // amount, reason
 
@@ -59,6 +66,10 @@ namespace WorkshopWreckage
             var curve = Json.Obj(lv["xp_curve"]);
             _curveBase = Json.Num(curve, "base", 60);
             _curveExp = Json.Num(curve, "exponent", 1.5);
+            var dc = Json.Obj(lv.GetValueOrDefault("destination_curve")) ?? new Dictionary<string, object>();
+            _destCoef = Json.Num(dc, "coefficient", 0.8);
+            _destExp = Json.Num(dc, "exponent", 1.2);
+            _destReference = Json.Num(dc, "reference_destinations", 500);
             _pointsPerLevel = Json.Int(lv, "skill_points_per_level", 1);
             foreach (var kv in Json.Obj(lv.GetValueOrDefault("bonus_skill_points")) ?? new Dictionary<string, object>())
                 _bonusPoints[int.Parse(kv.Key)] = (int)(double)kv.Value;
@@ -199,6 +210,46 @@ namespace WorkshopWreckage
 
         int PointsAt(int lvl) => _pointsPerLevel + _bonusPoints.GetValueOrDefault(lvl);
 
+        /// <summary>Sets the world's completable destination count (scales the level curve).</summary>
+        public void SetDestinationTotal(int n)
+        {
+            destinationTotal = Math.Max(1, n);
+            _levelStart = null;
+        }
+
+        /// <summary>Completed destinations needed to reach `lvl` (level 1: 0, level 2: 1).</summary>
+        public int DestinationsForLevel(int lvl)
+        {
+            if (_levelStart == null)
+            {
+                double scale = destinationTotal / _destReference;
+                _levelStart = new int[maxLevel + 2];
+                for (int l = 2; l <= maxLevel; l++)
+                    _levelStart[l] = _levelStart[l - 1] + (l == 2 ? 1 : Math.Max(1, (int)Math.Round(scale * _destCoef * Math.Pow(l - 1, _destExp))));
+                _levelStart[maxLevel + 1] = int.MaxValue;
+            }
+            return _levelStart[Math.Clamp(lvl, 1, maxLevel + 1)];
+        }
+
+        /// <summary>The level that `completed` destinations earn.</summary>
+        public int LevelFor(int completed)
+        {
+            int l = 1;
+            while (l < maxLevel && completed >= DestinationsForLevel(l + 1)) l++;
+            return l;
+        }
+
+        public int DestinationsCompleted => completedDestinations.Count;
+        /// <summary>Completions since this level started / needed for the next one.</summary>
+        public int DestinationsIntoLevel => DestinationsCompleted - DestinationsForLevel(level);
+        public int DestinationsForNext => level >= maxLevel ? 0 : DestinationsForLevel(level + 1) - DestinationsForLevel(level);
+        public float LevelFraction => level >= maxLevel ? 1f : (float)DestinationsIntoLevel / DestinationsForNext;
+
+        /// <summary>HUD line: "Level 3  ·  2/3 destinations to level 4".</summary>
+        public string LevelText => level >= maxLevel
+            ? $"Level {level} (max)  ·  {DestinationsCompleted} destinations completed"
+            : $"Level {level}  ·  {DestinationsIntoLevel}/{DestinationsForNext} destinations to level {level + 1}";
+
         /// <summary>XP needed to advance from `lvl` to `lvl + 1`.</summary>
         public long XpForLevel(int lvl) => lvl >= maxLevel ? long.MaxValue : (long)Math.Round(_curveBase * Math.Pow(lvl, _curveExp));
 
@@ -242,7 +293,6 @@ namespace WorkshopWreckage
         }
 
         public long XpIntoLevel => xp - XpAtLevelStart(level);
-        public float LevelFraction => level >= maxLevel ? 1f : (float)XpIntoLevel / XpForLevel(level);
 
         // ------------------------------------------------------------------ events
 
@@ -264,11 +314,22 @@ namespace WorkshopWreckage
             Grant(SetXp(copies) * share, "half a set");
         }
 
+        /// <summary>A destination's every assigned copy is stored or installed: its level point
+        /// (once per game; emptying and refilling it gives nothing).</summary>
         public void OnDefinitionCompleted(int defId, int copies)
         {
-            if (!_onceRewarded.Add("def:" + defId)) return;
-            double share = _onceRewarded.Contains("half:" + defId) ? HalfShare : 0;
-            Grant(SetXp(copies) * (1 - share), "set complete");
+            if (!completedDestinations.Add(defId)) return;
+            if (_onceRewarded.Add("def:" + defId))
+            {
+                double share = _onceRewarded.Contains("half:" + defId) ? HalfShare : 0;
+                Grant(SetXp(copies) * (1 - share), "set complete");
+            }
+            while (level < maxLevel && DestinationsCompleted >= DestinationsForLevel(level + 1))
+            {
+                level++;
+                skillPoints += PointsAt(level);
+                LeveledUp?.Invoke(level);
+            }
         }
 
         public void OnZoneRestored(int zone, int percentStep)
@@ -306,12 +367,6 @@ namespace WorkshopWreckage
             _fraction -= whole;
             xp += whole;
             XpGained?.Invoke(whole, reason);
-            while (level < maxLevel && xp >= XpAtLevelStart(level + 1))
-            {
-                level++;
-                skillPoints += PointsAt(level);
-                LeveledUp?.Invoke(level);
-            }
         }
 
         // ------------------------------------------------------------------ skills
@@ -354,6 +409,7 @@ namespace WorkshopWreckage
             ["discover_rewarded"] = _discoverRewarded.Select(x => (object)(double)x).ToList(),
             ["once"] = _onceRewarded.Select(x => (object)x).ToList(),
             ["robot_upgrades"] = upgradeRanks.ToDictionary(kv => kv.Key, kv => (object)(double)kv.Value),
+            ["completed_destinations"] = completedDestinations.Select(x => (object)(double)x).ToList(),
         };
 
         public void Load(Dictionary<string, object> d)
@@ -370,6 +426,14 @@ namespace WorkshopWreckage
             foreach (var x in Json.Arr(d.GetValueOrDefault("once"))) _onceRewarded.Add(x.ToString());
             upgradeRanks.Clear();
             foreach (var kv in Json.Obj(d.GetValueOrDefault("robot_upgrades")) ?? new Dictionary<string, object>()) upgradeRanks[kv.Key] = (int)(double)kv.Value;
+            completedDestinations.Clear();
+            if (d.ContainsKey("completed_destinations"))
+                foreach (var x in Json.Arr(d["completed_destinations"])) completedDestinations.Add((int)(double)x);
+            else   // a save from the XP levels: its completed sets become the points; nothing earned is taken away
+                foreach (var k in _onceRewarded) if (k.StartsWith("def:")) completedDestinations.Add(int.Parse(k.Substring(4)));
+            int earned = LevelFor(DestinationsCompleted);
+            for (int l = level + 1; l <= earned; l++) skillPoints += PointsAt(l);
+            level = Math.Max(level, earned);
         }
     }
 

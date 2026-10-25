@@ -3,10 +3,11 @@
 	"note": "Player levels, XP, skills and robot upgrades. The player carries 10 parts at first (Game.BaseInventory), 15 at most with both pocket skills. Engine independent; read by Progression.cs. XP is only ever granted once per instance/definition/zone/robot (see anti_exploit). Completing a whole ordinary item definition (every copy stored) is the main source of XP; sorting single parts gives a little. All unlock levels (robot blueprints, skills, respec) are in unlocks.json. 'status' marks what the current build implements: active = effect applied in game, planned = data reserved for a later milestone (see docs/ROADMAP.md).",
 	"levels": {
 		"max_level": 25,
-		"xp_curve": {"type": "power", "base": 19, "exponent": 1.55, "comment": "XP needed to go from level L to L+1 = round(base * L^exponent)"},
+		"destination_curve": {"type": "power", "coefficient": 0.8, "exponent": 1.2, "reference_destinations": 500, "comment": "Levels come only from completed storage destinations (every assigned copy stored or installed; each destination counts once per game). Completions needed to go from level L to L+1 = max(1, round(scale * coefficient * L^exponent)), level 1 -> 2 always 1; scale = the preset's completable destinations / reference_destinations (Standard 500 -> 1, Large 751 -> 1.5, Massive 1000 -> 2). Level 25 needs about 83% of the destinations on every preset."},
+		"xp_curve": {"type": "power", "base": 19, "exponent": 1.55, "comment": "Legacy: XP is still counted (telemetry, workshop score) but no longer raises the level."},
 		"skill_points_per_level": 2,
-		"bonus_skill_points": {"5": 1, "10": 1, "15": 1, "20": 1},
-		"comment": "Two points per level: player skills and the five robot upgrade trees share the pool, and there are more ranks than points on purpose (choices matter)."
+		"bonus_skill_points": {"5": 1, "10": 1, "15": 1, "20": 1, "23": 1, "24": 1, "25": 1},
+		"comment": "Two points per level (three at 5, 10, 15, 20 and 23-25, the levels without a new blueprint or skill): player skills and the five robot upgrade trees share the pool, and there are more ranks than points on purpose (choices matter)."
 	},
 	"xp_rewards": {
 		"sort_item": 1,

@@ -497,7 +497,7 @@ namespace WorkshopWreckage
         {
             var pr = _g.progression;
             if (pr == null) return;
-            _skillHeader.text = $"Level {pr.level} / {pr.maxLevel}   ·   {pr.XpIntoLevel:N0} / {(pr.level >= pr.maxLevel ? 0 : pr.XpForLevel(pr.level)):N0} XP   ·   {pr.skillPoints} skill point{(pr.skillPoints == 1 ? "" : "s")}";
+            _skillHeader.text = $"{pr.LevelText}   ·   {pr.skillPoints} skill point{(pr.skillPoints == 1 ? "" : "s")}";
             foreach (Transform c in _skillList) Destroy(c.gameObject);
             foreach (var s in pr.skills.OrderBy(s => s.unlockLevel))
             {
@@ -622,7 +622,7 @@ namespace WorkshopWreckage
             var p = _g.progress;
             var pr = _g.progression;
             if (_g.objectives != null) _objective.text = _g.objectives.HudText();
-            _level.text = pr == null ? "" : (pr.level >= pr.maxLevel ? $"Level {pr.level} (max)  ·  {pr.xp:N0} XP" : $"Level {pr.level}  ·  {pr.XpIntoLevel:N0}/{pr.XpForLevel(pr.level):N0} XP") + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
+            _level.text = pr == null ? "" : pr.LevelText + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
             _progress.text = $"Workshop restored  {p.OverallPercent:0.0}%   ({p.sortedTotal} / {_g.world.Count} sorted)";
             int z = _g.layout.ZoneAt(_g.player.transform.position);
             _zone.text = $"{_g.layout.zones[z].name}  —  {p.ZonePercent(z):0}% restored" + RobotStatus();

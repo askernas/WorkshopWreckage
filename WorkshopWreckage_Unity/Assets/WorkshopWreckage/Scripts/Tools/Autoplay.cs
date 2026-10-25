@@ -33,6 +33,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "dest")
+            {
+                yield return DestinationChecks();   // QA: exact destination counts and destination levels
+                Finish();
+                yield break;
+            }
             if (section == "pile")
             {
                 yield return PileChecks();   // QA: dropped parts pile up
@@ -223,9 +229,10 @@ namespace WorkshopWreckage
             yield return PileChecks();
             // 7d. a save survives a change of the item catalog (P1-4)
             yield return MigrationChecks();
+            yield return DestinationChecks();
             {
                 // partial set credit: half a set pays its share of the completion XP, the rest comes at the end
-                var pr = g.progression;
+                var pr = FreshProgression();
                 long x0 = pr.xp;
                 pr.OnDefinitionHalf(-424242, 6);
                 long half = pr.xp - x0;
@@ -1028,11 +1035,18 @@ namespace WorkshopWreckage
             if (i.state == ItemState.Carried && i.owner == "player" && !g.inventory.items.Contains(id)) g.inventory.Add(id);
         }
 
-        /// <summary>Earns real XP (objective rewards) until the level is reached.</summary>
+        /// <summary>Earns real level points (completions of stand-in destinations) until the level is reached.</summary>
         void LevelTo(int level)
         {
             var pr = g.progression;
-            for (int k = 0; pr.level < level && k < 5000; k++) pr.OnObjective("autotest_level_" + k);
+            for (int k = 0; pr.level < level && k < 5000; k++) pr.OnDefinitionCompleted(-100000 - pr.DestinationsCompleted, 1);
+        }
+
+        Progression FreshProgression()
+        {
+            var pr = new Progression(Shared.ReadObject(Shared.DataPath("progression.json")), g.presetId);
+            pr.SetDestinationTotal(g.CompletableDestinations());
+            return pr;
         }
 
         /// <summary>Stands in front of a workbench mat and aims at the bench top there.</summary>
@@ -1079,7 +1093,7 @@ namespace WorkshopWreckage
             Check("Retrobot inactive before assembly", !rb.Active && !rb.Operational, rb.Describe());
             // the parts' discovery XP is earned first, then the player goes back to level 1
             foreach (var id in parts.Concat(wb.PartIds(uniP))) g.progress.Discover(g.world.instances[id].defId);
-            pr.level = 1; pr.xp = 0;
+            pr.level = 1; pr.xp = 0; pr.completedDestinations.Clear();
             wb.CheckBlueprints(false);
             Check("blueprints lock robots behind the player levels in unlocks.json", !wb.Unlocked(retro) && wb.projects.All(p => p.level == Unlocks.Robot(p.id, -1)),
                   string.Join(", ", wb.projects.Select(p => $"{p.name} lv {p.level}")));
@@ -1191,15 +1205,13 @@ namespace WorkshopWreckage
             LookAtRobot(0.7f, 0.45f, 0.15f);
             yield return g.Capture(Path.Combine(outDir, "06_retrobot_online.png"), 3);
 
-            // 15. every preset can reach every blueprint level from ordinary collection work
+            // 15. every preset can reach every blueprint level from completed destinations
             var cfgRobots = Robot.AllConfig();
             int maxBp = wb.projects.Where(p => !p.crafted).Max(p => p.level), maxCraft = wb.projects.Max(p => p.level);
-            int oItems = g.world.Count - g.db.RobotPartIds().Count, oDefs = g.db.order.Count(d => !g.db.Get(d).IsRobotPart && g.world.TotalOf(d) > 0);
-            // the real reward rules in a random broad order (not a linear estimate: IMPLEMENTATION_AUDIT P2-7)
-            var copies = g.db.order.Where(d => !g.db.Get(d).IsRobotPart && g.world.TotalOf(d) > 0).Select(d => g.world.TotalOf(d)).ToList();
-            long at75 = pr.SimulatedCollectionXp(copies, 0.75), at100 = pr.SimulatedCollectionXp(copies, 1.0);
-            Check("every blueprint level is reachable from collection work alone (robots by 75% of the sets, crafted Hoverbots by 100%)", at75 >= pr.XpAtLevelStart(maxBp) && at100 >= pr.XpAtLevelStart(maxCraft),
-                  $"{g.presetId}: {at75:N0} XP at 75% vs {pr.XpAtLevelStart(maxBp):N0} for level {maxBp}; {at100:N0} XP at 100% vs {pr.XpAtLevelStart(maxCraft):N0} for level {maxCraft}");
+            int dests = g.CompletableDestinations();
+            Check("every blueprint level is reachable by completing destinations (robots by 75% of them, crafted Hoverbots and level 25 by 85%)",
+                  pr.DestinationsForLevel(maxBp) <= dests * 0.75 && pr.DestinationsForLevel(maxCraft) <= dests * 0.85 && pr.DestinationsForLevel(pr.maxLevel) <= dests * 0.85,
+                  $"{g.presetId}: {dests} destinations; level {maxBp} at {pr.DestinationsForLevel(maxBp)}, level {maxCraft} at {pr.DestinationsForLevel(maxCraft)}, level {pr.maxLevel} at {pr.DestinationsForLevel(pr.maxLevel)}");
 
             // let him work on his own (sped up), photographing a pick-up and a carry
             int sortedBefore = g.progress.sortedTotal, robotBefore = g.telemetry.sortedRobot;
@@ -1643,6 +1655,85 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Save migration: a save whose catalog differs is mapped by definition id.</summary>
+        /// <summary>Exact destination accounting and destination-based levels: every ordinary part
+        /// has exactly one destination, every X/X target is the assigned count, a completion gives
+        /// one point once (player or robot), single sorts give none, and points survive save/load.</summary>
+        IEnumerator DestinationChecks()
+        {
+            // 1. accounting: unique ids, one destination per part, assigned totals, achievable
+            var ordinary = g.world.instances.Where(i => !g.world.DefOf(i.id).IsRobotPart).ToList();
+            bool idsOk = g.world.instances.Select((inst, k) => inst.id == k).All(x => x);
+            var defDest = new Dictionary<int, string>();
+            int dupDefs = 0, missing = 0, overCap = 0, labelBad = 0, empty = 0;
+            foreach (var box in g.db.boxes.Keys)
+            {
+                var defs = g.db.order.Where(d => g.db.Get(d).storageBox == box).ToList();
+                foreach (var d in defs) if (!defDest.TryAdd(d, box)) dupDefs++;
+                int assigned = g.AssignedCount(box);
+                if (assigned == 0) { empty++; continue; }
+                if (assigned != defs.Sum(g.world.TotalOf)) labelBad++;
+                if (assigned > g.db.BoxCapacity(box)) overCap++;
+                var lbl = g.LabelFor(box).Item3;
+                if (lbl != "" && !lbl.EndsWith("/" + assigned)) labelBad++;
+            }
+            foreach (var i in ordinary) if (!g.db.boxes.ContainsKey(g.world.DefOf(i.id).storageBox)) missing++;
+            int assignedSum = g.db.boxes.Keys.Sum(g.AssignedCount), dests = g.CompletableDestinations();
+            Check("destination accounting is exact: unique part ids, every ordinary part in exactly one destination, X/X targets = assigned parts, all achievable",
+                  idsOk && dupDefs == 0 && missing == 0 && overCap == 0 && labelBad == 0 && assignedSum == ordinary.Count && dests + empty == g.db.boxes.Count && g.progression.destinationTotal == dests,
+                  $"{g.presetId}: {ordinary.Count} ordinary parts, {assignedSum} assigned; {g.db.boxes.Count} destinations = {dests} completable + {empty} empty; duplicates {dupDefs}, without destination {missing}, over capacity {overCap}, wrong targets {labelBad}");
+
+            // 2. a real completion in this world: points only for the last copy, once, also for a robot
+            var pr = g.progression;
+            string target = g.db.boxes.Keys.Where(b => g.AssignedCount(b) >= 3 && g.storage.Stored(b).Count == 0 && g.StraysIn(b).Count == 0)
+                .Where(b => g.db.order.Where(d => g.db.Get(d).storageBox == b).SelectMany(g.world.IdsOf).All(id => g.world.instances[id].state == ItemState.InWorld))
+                .OrderBy(b => g.AssignedCount(b)).FirstOrDefault();
+            if (target == null) { Check("a destination to complete exists", false, ""); yield break; }
+            var ids = g.db.order.Where(d => g.db.Get(d).storageBox == target).SelectMany(g.world.IdsOf).ToList();
+            int pts0 = pr.DestinationsCompleted, lv0 = pr.level;
+            for (int k = 0; k < ids.Count - 1; k++) { g.index.Remove(ids[k]); g.storage.Deposit(target, ids[k]); }
+            int ptsPartial = pr.DestinationsCompleted;
+            g.index.Remove(ids[^1]);
+            g.storage.Deposit(target, ids[^1], "robot:retrobot");   // a robot stores the last copy
+            int ptsDone = pr.DestinationsCompleted;
+            // emptying and refilling it gives nothing
+            g.storage.Remove(target, ids[0]);
+            g.world.SetState(ids[0], ItemState.Carried, "player");
+            g.storage.Deposit(target, ids[0]);
+            int ptsRefill = pr.DestinationsCompleted;
+            yield return Frames(2);
+            string label = g.LabelFor(target).Item3;
+            Check("completing a destination gives exactly one level point, the last copy may be a robot's, refilling gives none",
+                  ptsPartial == pts0 && ptsDone == pts0 + 1 && ptsRefill == ptsDone && label == $"{ids.Count}/{ids.Count}",
+                  $"{g.db.BoxLabel(target)} ({ids.Count} parts, label {label}): points {pts0} -> {ptsPartial} before the last copy -> {ptsDone} -> {ptsRefill} after a refill; level {lv0} -> {pr.level}");
+
+            // 3. rules on a fresh progression: single sorts never level, the curve rises, the save keeps it
+            var f = FreshProgression();
+            for (int k = 0; k < 5000; k++) f.OnSorted(-1 - k, false);
+            for (int k = 0; k < 50; k++) f.OnZoneRestored(k, 25);
+            bool sortsNoLevel = f.level == 1 && f.xp > 0;
+            f.OnDefinitionCompleted(-1, 3);
+            bool firstGivesTwo = f.level == 2 && f.skillPoints == 2;
+            f.OnDefinitionCompleted(-1, 3);
+            bool once = f.DestinationsCompleted == 1;
+            var inc = Enumerable.Range(2, f.maxLevel - 1).Select(l => f.DestinationsForLevel(l) - f.DestinationsForLevel(l - 1)).ToList();
+            bool rising = inc[0] == 1 && inc.Zip(inc.Skip(1), (a, b) => b >= a).All(x => x) && inc[^1] > inc[1];
+            for (int k = 2; f.DestinationsCompleted < f.DestinationsForLevel(9); k++) f.OnDefinitionCompleted(-k, 3);
+            var saved = Json.Write(f.ToDict());
+            var r = FreshProgression();
+            r.Load(Json.Obj(Json.Parse(saved)));
+            bool roundTrip = r.level == f.level && r.skillPoints == f.skillPoints && r.DestinationsCompleted == f.DestinationsCompleted && Json.Write(r.ToDict()) == saved;
+            // a save from the XP levels: completed sets become points, nothing earned is taken away
+            var legacy = Json.Obj(Json.Parse(saved));
+            legacy.Remove("completed_destinations");
+            legacy["level"] = 3.0;
+            var m = FreshProgression();
+            m.Load(legacy);
+            bool migrated = m.DestinationsCompleted == f.DestinationsCompleted && m.level == f.level;
+            Check("levels come only from destinations: 5000 single sorts give level 1, the first completion level 2, the curve rises, points survive save/load and old saves",
+                  sortsNoLevel && firstGivesTwo && once && rising && roundTrip && migrated,
+                  $"sorts only: level {(sortsNoLevel ? 1 : 0)}; first completion -> level 2 with 2 points {firstGivesTwo}; once {once}; increments {string.Join(" ", inc)}; round trip {roundTrip}; legacy {migrated} (level {m.level})");
+        }
+
         IEnumerator MigrationChecks()
         {
             int sorted0 = g.progress.sortedTotal, inv0 = g.inventory.items.Count;

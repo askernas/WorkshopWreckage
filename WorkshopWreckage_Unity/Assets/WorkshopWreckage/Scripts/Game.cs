@@ -288,7 +288,7 @@ namespace WorkshopWreckage
             foreach (var r in robots) r.RefreshAssembly();   // which crafted Hoverbot is on the bench depends on the others
             workbench.Refresh();
             progress.Milestone += (key, text) => { hud.Toast(text, key.StartsWith("zone") || key == "first_pickup"); Sfx.Play("milestone", null, -6); };
-            progress.DefinitionCompleted += id => { hud.Toast($"Set complete: {db.Get(id).displayName}  (all {world.TotalOf(id)})", true); Sfx.Play("complete", null, -4); };
+            progress.DefinitionCompleted += id => Sfx.Play("complete", null, -4);   // the toast comes with the level point (StartProgression)
             progress.Discovered += id => { _labelsDirty.Add(db.Get(id).storageBox); Sfx.Play("discover", null, -12); };
             int lastCount = inventory.items.Count;
             inventory.Changed += () =>
@@ -1221,6 +1221,7 @@ namespace WorkshopWreckage
             telemetry = new Telemetry(presetId, seed, world.Count);
             playTime = 0;
             _telemetryFile = Path.Combine(Application.persistentDataPath, "telemetry", $"{presetId}_{seed}_{DateTime.Now:yyyyMMdd_HHmmss}.json");
+            progression.SetDestinationTotal(CompletableDestinations());
             if (save != null)
             {
                 progression.Load(Json.Obj(save.GetValueOrDefault("progression")));
@@ -1239,7 +1240,7 @@ namespace WorkshopWreckage
             progress.Discovered += id => GameEvents.Raise(GameEventKind.PartDiscovered, "player", "", id, db.Get(id).CategoryName);
             progression.LeveledUp += lv =>
             {
-                hud.Toast($"Level {lv}!  Skill point earned (Esc → Skills)", true);
+                hud.Toast($"Level {lv}!  Skill points earned (Esc → Skills)", true);
                 Sfx.Play("milestone", null, -4);
                 telemetry.LevelReached(lv, playTime, progress.sortedTotal);
             };
@@ -1252,7 +1253,13 @@ namespace WorkshopWreckage
                 progression.OnSorted(id, robot);
                 telemetry.Sorted(robot, playTime, progress.sortedTotal);
             };
-            progress.DefinitionCompleted += id => progression.OnDefinitionCompleted(id, world.TotalOf(id));
+            // the level point: once per destination, whoever (player or robot) stored the last copy
+            progress.DefinitionCompleted += id =>
+            {
+                bool fresh = !progression.completedDestinations.Contains(id);
+                progression.OnDefinitionCompleted(id, world.TotalOf(id));
+                if (fresh) hud.Toast($"Destination complete: {db.Get(id).displayName}  ({world.TotalOf(id)}/{world.TotalOf(id)})   ·   {progression.LevelText}", true);
+            };
             progress.DefinitionHalf += id => progression.OnDefinitionHalf(id, world.TotalOf(id));
             progress.Discovered += id => { progression.OnDiscovered(id, db.Get(id).IsRobotPart); if (progression.Has("reveal_totals")) progress.revealed.Add(id); };
             progress.DefinitionCompleted += id => progress.revealed.Add(id);   // a finished set shows its total
@@ -1395,7 +1402,14 @@ namespace WorkshopWreckage
             return u.DestWorld(box) * StorageArrangement.SlotLocal(world.DefOf(id), index, StorageUnit.Inner(d));
         }
 
-        (string, string, string, bool) LabelFor(string dest)
+        /// <summary>Parts assigned to a destination in this world: the target of its X/X count
+        /// (not the box's capacity, which is only the physical room).</summary>
+        public int AssignedCount(string dest) => _assignments.TryGetValue(dest, out var defs) ? defs.Sum(world.TotalOf) : 0;
+
+        /// <summary>Destinations with at least one part assigned (each gives one level point when complete).</summary>
+        public int CompletableDestinations() => _assignments.Keys.Count(d => db.boxes.ContainsKey(d) && AssignedCount(d) > 0);
+
+        public (string, string, string, bool) LabelFor(string dest)
         {
             var d = db.boxes[dest];
             var code = Json.Str(d, "slot");
@@ -1404,7 +1418,7 @@ namespace WorkshopWreckage
             string name = "";
             foreach (var id in defs) if (progress != null && progress.IsDiscovered(id)) { known = true; name = db.Get(id).displayName; }
             int stored = storage != null ? storage.Stored(dest).Count : 0;
-            return (code, name, stored > 0 || known ? $"{stored}/{db.BoxCapacity(dest)}" : "", known);
+            return (code, name, stored > 0 || known ? $"{stored}/{AssignedCount(dest)}" : "", known);
         }
 
         public void Presort(float fraction)
