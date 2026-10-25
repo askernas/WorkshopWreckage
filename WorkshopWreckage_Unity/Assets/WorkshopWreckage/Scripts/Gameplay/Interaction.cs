@@ -121,7 +121,7 @@ namespace WorkshopWreckage
                 if (lmbDown)
                 {
                     if (targetType == "socket") Primary();
-                    else Feedback?.Invoke("Both hands on the Sorting Arm — mount it on a cabinet socket, or [Z] set it down at the workbench", false);
+                    else Feedback?.Invoke("Both hands on the Sorting Arm — mount it on an overhead socket above a drawer cabinet, or [Z] set it down at the workbench", false);
                 }
                 if (kb.zKey.wasPressedThisFrame) { carriedArm.ToBench(); Feedback?.Invoke("Sorting Arm set down at the workbench", true); }
                 return;

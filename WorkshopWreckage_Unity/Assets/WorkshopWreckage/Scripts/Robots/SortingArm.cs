@@ -6,15 +6,18 @@ using UnityEngine.Rendering;
 
 namespace WorkshopWreckage
 {
-    /// <summary>A fixed socket for a Sorting Arm on top of one half of a drawer cabinet
-    /// (storage_layout.json sockets). The fixture is always visible: a steel bracket with
-    /// hazard stripes, a power contact and a lamp (green = ready, amber = arm mounted).</summary>
+    /// <summary>A fixed overhead socket for a Sorting Arm above one half of a drawer cabinet
+    /// (storage_layout.json sockets). It does not touch the cabinet: a ceiling-hung gantry beam
+    /// carries a drop tube on the arm's turret axis (the one place the limbs never sweep) down to
+    /// a carriage plate the coupler bolts under, just in front of the cabinet header. Always
+    /// visible, with hazard stripes, a power box and a lamp (green = ready, amber = arm mounted).</summary>
     public class ArmSocket : MonoBehaviour
     {
         public string id, unit, side;
         public List<string> dests;
         public Vector3 point;          // where the arm's coupler hangs (world)
         public Quaternion facing;      // the arm's root rotation (forward = out of the cabinet)
+        public float mastTop;          // world height of the gantry beam's underside (the drop tube runs point..mastTop)
         public Renderer lamp;
         public SortingArm occupant;
         static Material _ready, _busy, _off;
@@ -88,7 +91,7 @@ namespace WorkshopWreckage
             Show(CarryScale, true);
             _m.Fold(1);
             Sfx.Play("servo", transform.position, -6);
-            _g.hud.Toast("Carrying the Sorting Arm — aim at a free socket on top of a drawer cabinet and click to mount it.  [Z] sets it down at the workbench.", true);
+            _g.hud.Toast("Carrying the Sorting Arm — aim at a free overhead socket above a drawer cabinet and click to mount it.  [Z] sets it down at the workbench.", true);
             return true;
         }
 
@@ -185,6 +188,7 @@ namespace WorkshopWreckage
                     if (i.state != ItemState.InWorld || _g.robotReserved.Contains(id) || _g.interaction.busy.Contains(id)) continue;
                     var def = _g.world.DefOf(id);
                     if (!def.robotCarry || def.IsRobotPart || def.storageBox != box || i.Position.y > 0.7f || ItemDatabase.Extents(def)[0] > _r.MaxItemSize) continue;   // Wide Gripper raises the size
+                    if (!InReach(i.Position + Vector3.up * (SortingArmModel.GripLen + 0.04f))) continue;   // the gripper must really get there
                     bool staged = i.owner == "stage:" + box || Vector3.ProjectOnPlane(i.Position - spot.Value, Vector3.up).magnitude <= 0.5f;
                     if (!staged) continue;
                     float d = (i.Position - socket.point).sqrMagnitude;
@@ -193,6 +197,49 @@ namespace WorkshopWreckage
             }
             idleReason = best < 0 ? "no staged parts below its drawers" : "";
             return best;
+        }
+
+        /// <summary>Whether the wrist can be put at `wrist` (world) from the mounted shoulder.</summary>
+        bool InReach(Vector3 wrist)
+        {
+            float d = (wrist - (socket.point + Vector3.down * SortingArmModel.ShoulderDrop)).magnitude;
+            return d <= SortingArmModel.L1 + SortingArmModel.L2 - 0.01f && d >= Mathf.Abs(SortingArmModel.L1 - SortingArmModel.L2) + 0.03f;
+        }
+
+        /// <summary>QA (autoplay): poses the mounted arm at every wrist target of its own drawers
+        /// (approach and insert) and at the rim of each staging pile, and reports the worst wrist
+        /// error (how far the gripper falls short) and the smallest clearance between the limbs
+        /// and the overhead mount (drop tube and beam). Re-parks the arm.</summary>
+        public (float worstErr, float minClear, string worst) ReachTest()
+        {
+            float worstErr = 0, minClear = float.MaxValue;
+            string worst = "";
+            var front = Vector3.ProjectOnPlane(socket.facing * Vector3.forward, Vector3.up).normalized;
+            float clear = SortingArmModel.GripLen + 0.04f;
+            void Probe(string what, Vector3 w, Vector3 dir)
+            {
+                _m.Reach(w, dir);
+                float err = (_m.head.position - w).magnitude;
+                float c = _m.MountClearance(socket.point, socket.mastTop);
+                if (err > worstErr) { worstErr = err; worst = what; }
+                minClear = Mathf.Min(minClear, c);
+            }
+            foreach (var box in socket.dests)
+            {
+                var d = _g.db.boxes[box];
+                var unit = _g.units[Json.Str(d, "unit")];
+                var dp = unit.DestPoint(d);
+                var drawerW = dp + front * (clear + 0.12f);
+                Probe(box + " approach", drawerW, -front);
+                Probe(box + " insert", drawerW - front * 0.1f, -front);
+                var spot = _r.StagingSpot(box);
+                if (!spot.HasValue) continue;
+                foreach (var o in new[] { Vector3.zero, front * 0.3f, -front * 0.15f, Vector3.Cross(Vector3.up, front) * 0.3f, -Vector3.Cross(Vector3.up, front) * 0.3f })
+                    Probe(box + " pile", spot.Value + o + Vector3.up * (0.03f + clear), Vector3.down);
+            }
+            Probe("park", _m.ParkWrist(_yaw), Vector3.down);
+            _m.Park(_yaw);
+            return (worstErr, minClear, worst);
         }
 
         /// <summary>Cycle speed with the Faster Servos upgrade (never past its limit).</summary>
@@ -223,7 +270,7 @@ namespace WorkshopWreckage
             var box = def.storageBox;
             var unit = _g.units[Json.Str(_g.db.boxes[box], "unit")];
             var front = Vector3.ProjectOnPlane(socket.facing * Vector3.forward, Vector3.up).normalized;
-            var restW = _m.GripPoint;
+            var restW = _m.head.position;   // the wrist, where Move's targets are measured
             var down = Vector3.down;
             var p0 = inst.Position;
             float clear = SortingArmModel.GripLen + 0.04f;
@@ -276,7 +323,7 @@ namespace WorkshopWreckage
 
         IEnumerator Retract(Vector3 from)
         {
-            var mid = socket.point + Vector3.down * 0.25f + socket.facing * Vector3.forward * 0.35f;
+            var mid = _m.ParkWrist(_yaw);   // retract straight into the parked pose (no snap)
             yield return Move(u => (Vector3.Lerp(from, mid, u), Vector3.down), 0.6f);
             _m.Park(_yaw);
             _m.Grip(0.6f);
@@ -362,7 +409,14 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- socket fixtures
 
-        /// <summary>Builds the fixed sockets of one drawer cabinet (from storage_layout.json).</summary>
+        // overhead mount (cabinet-local, Godot axes): the coupler hangs MountFwd in front of the drawer
+        // fronts and MountUp above the cabinet's nominal height, so its plate clears the header board;
+        // the gantry beam runs above the highest point any limb reaches (shoulder + L1 + elbow cap)
+        const float MountFwd = 0.16f, MountUp = 0.1f, BeamGap = 0.62f, BeamH = 0.14f, TubeR = 0.045f;
+
+        /// <summary>Builds the fixed overhead sockets of one drawer cabinet (from storage_layout.json):
+        /// per half, its part of the gantry beam with a ceiling hanger at the outer end, the drop
+        /// tube and the carriage plate. No colliders, nothing rests on the cabinet.</summary>
         public static void BuildSockets(Game g, StorageUnit su, string unitId)
         {
             foreach (var kv in g.db.sockets.Where(s => s.Value.unit == unitId))
@@ -371,40 +425,56 @@ namespace WorkshopWreckage
                 var fronts = dests.Select(d => su.FrontCenterG(Json.Int(g.db.boxes[d], "row") * su.cols + Json.Int(g.db.boxes[d], "col"))).ToList();
                 float x = fronts.Average(f => f.x), zf = fronts.Max(f => f.z);
                 float top = (float)Json.Num(g.db.Unit(unitId), "height", 2.0);
+                float py = top + MountUp, pz = zf + MountFwd;          // coupler top (the arm's root)
+                float yb = py + BeamGap, ceiling = g.layout.roomMax.y;  // beam underside
+                float half = su.size.x * 0.5f, outer = side == "L" ? -half : half;
                 var go = new GameObject("Socket_" + kv.Key);
                 go.transform.SetParent(su.transform, false);
                 var b = new Batch();
                 var steel = EnvMaterials.Plain(new Color(0.3f, 0.31f, 0.33f), 0.9f, 0.45f);
                 var yellow = EnvMaterials.Plain(new Color(0.9f, 0.68f, 0.12f), 0.3f, 0.5f);
                 var black = EnvMaterials.Plain(new Color(0.06f, 0.06f, 0.06f), 0f, 0.6f);
-                b.Box(new Vector3(x, top + 0.02f, zf - 0.12f), new Vector3(0.42f, 0.04f, 0.3f), steel);           // plate on the cabinet top
-                b.Box(new Vector3(x, top + 0.02f, zf + 0.06f), new Vector3(0.3f, 0.04f, 0.14f), steel);           // overhang
-                b.Box(new Vector3(x, top - 0.005f, zf + 0.1f), new Vector3(0.2f, 0.012f, 0.12f), black);         // coupler seat
-                for (int k = 0; k < 6; k++)
-                    b.Box(new Vector3(x - 0.125f + k * 0.05f, top + 0.02f, zf + 0.132f), new Vector3(0.025f, 0.04f, 0.006f), k % 2 == 0 ? yellow : black);
-                foreach (var dx in new[] { -0.07f, 0.07f }) b.Cylinder(new Vector3(x + dx, top - 0.02f, zf + 0.1f), 0.012f, 0.03f, steel);   // locking pins
-                b.Box(new Vector3(x + 0.17f, top + 0.06f, zf - 0.2f), new Vector3(0.06f, 0.06f, 0.06f), steel);   // power box
+                // gantry beam (I-section) over this half, from the cabinet's centre line to just past its side
+                float bx0 = Mathf.Min(0, outer * 1.03f), bx1 = Mathf.Max(0, outer * 1.03f), bl = bx1 - bx0, bc = (bx0 + bx1) / 2;
+                b.Box(new Vector3(bc, yb + 0.008f, pz), new Vector3(bl, 0.016f, 0.16f), steel);                // bottom flange
+                b.Box(new Vector3(bc, yb + BeamH / 2, pz), new Vector3(bl, BeamH - 0.03f, 0.014f), steel);       // web
+                b.Box(new Vector3(bc, yb + BeamH - 0.008f, pz), new Vector3(bl, 0.016f, 0.16f), steel);        // top flange
+                for (int k = 0; k < 6; k++)   // hazard stripes along the beam's front flange edge, over the socket
+                    b.Box(new Vector3(x - 0.125f + k * 0.05f, yb + 0.008f, pz + 0.081f), new Vector3(0.025f, 0.018f, 0.004f), k % 2 == 0 ? yellow : black);
+                // ceiling hanger at the outer end: threaded rod, clamp on the beam, plate on the ceiling
+                float hx = outer * 0.97f, rodLen = ceiling - (yb + BeamH);
+                b.Box(new Vector3(hx, yb + BeamH + 0.02f, pz), new Vector3(0.06f, 0.04f, 0.18f), steel);
+                b.Cylinder(new Vector3(hx, yb + BeamH + rodLen / 2, pz), 0.014f, rodLen, steel);
+                b.Box(new Vector3(hx, ceiling - 0.01f, pz), new Vector3(0.16f, 0.02f, 0.16f), steel);
+                // drop tube on the turret axis, flanged at both ends, down to the carriage plate
+                b.Box(new Vector3(x, yb - 0.008f, pz), new Vector3(0.14f, 0.016f, 0.14f), steel);
+                b.Cylinder(new Vector3(x, (yb + py) / 2 + 0.02f, pz), TubeR, yb - py - 0.04f, steel);
+                b.Box(new Vector3(x, py + 0.045f, pz), new Vector3(0.12f, 0.012f, 0.12f), steel);
+                b.Box(new Vector3(x, py + 0.02f, pz), new Vector3(0.46f, 0.04f, 0.4f), steel);                  // carriage plate the coupler bolts under
+                b.Box(new Vector3(x, py + 0.02f, pz + 0.201f), new Vector3(0.3f, 0.012f, 0.004f), yellow);    // front edge marker
+                b.Box(new Vector3(x, yb - 0.05f, pz + 0.07f), new Vector3(0.07f, 0.07f, 0.04f), steel);         // power box under the beam
                 b.Build(go.transform, "SocketGeo", true);
                 var s = go.AddComponent<ArmSocket>();
                 s.id = kv.Key; s.unit = unit; s.side = side; s.dests = dests;
-                s.point = su.transform.TransformPoint(Batch.G(x, top - 0.01f, zf + 0.1f));
+                s.point = su.transform.TransformPoint(Batch.G(x, py, pz));
+                s.mastTop = su.transform.TransformPoint(Batch.G(x, yb, pz)).y;
                 s.facing = su.transform.rotation * Quaternion.LookRotation(Batch.G(0, 0, 1), Vector3.up);
                 var lamp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
                 Object.Destroy(lamp.GetComponent<Collider>());
                 lamp.transform.SetParent(go.transform, false);
-                lamp.transform.localPosition = Batch.G(x + 0.17f, top + 0.1f, zf - 0.2f);
+                lamp.transform.localPosition = Batch.G(x, yb - 0.05f, pz + 0.1f);   // on the power box, facing the aisle
                 lamp.transform.localScale = Vector3.one * 0.035f;
                 s.lamp = lamp.GetComponent<Renderer>();
                 s.lamp.shadowCastingMode = ShadowCastingMode.Off;
                 s.SetLamp();
-                // aim target (the Target layer, like storage destinations)
+                // aim target (the Target layer, like storage destinations): the carriage plate
                 var tgt = new GameObject("SocketTarget");
                 tgt.layer = Layers.Target;
                 tgt.transform.SetParent(go.transform, false);
-                tgt.transform.localPosition = Batch.G(x, top + 0.04f, zf - 0.02f);
+                tgt.transform.localPosition = Batch.G(x, py - 0.02f, pz);
                 var col = tgt.AddComponent<BoxCollider>();
                 col.isTrigger = true;
-                col.size = new Vector3(0.5f, 0.2f, 0.42f);
+                col.size = new Vector3(0.5f, 0.2f, 0.44f);
                 var st = tgt.AddComponent<StorageTarget>();
                 st.unit = su;
                 st.destId = "SOCKET:" + kv.Key;

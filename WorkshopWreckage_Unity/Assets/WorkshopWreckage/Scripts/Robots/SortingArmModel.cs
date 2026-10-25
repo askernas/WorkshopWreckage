@@ -6,7 +6,7 @@ namespace WorkshopWreckage
     /// a mustard toy-enamel industrial arm (bolted panel plates, seams, rust, looping hoses, the
     /// stencilled "A-01"), big red joint caps with bolt rings and brass hubs, a red drum turret
     /// with amber indicators, and a big hooked red / gunmetal pincer; it hangs from a bolted
-    /// docking coupler on a cabinet socket. Built at true
+    /// docking coupler on an overhead cabinet socket. Built at true
     /// size (≈2 m reach from the socket) and shown at 0.42 scale on the bench and while
     /// carried (folded, standing on its coupler). Pose is driven by SortingArm through
     /// analytic two-bone IK in the shoulder plane; the elbow always bends outward (away
@@ -255,15 +255,52 @@ namespace WorkshopWreckage
             Grip(0.5f);
         }
 
-        /// <summary>Mounted rest: jack-knifed upward (upper arm up, forearm folded back down
-        /// beside it), so the gripper waits just above the cabinet top, clear of every drawer.</summary>
+        /// <summary>Mounted rest: upper arm raised out over the aisle, forearm hanging straight down
+        /// in front of the turret, gripper down at shoulder height. The forearm stays off the turret
+        /// axis, where the overhead mount's drop tube comes down.</summary>
         public void Park(float yawDeg)
         {
-            _shoulder.localRotation = Quaternion.Euler(0, yawDeg, 0);
-            _upper.localRotation = Quaternion.AngleAxis(176, Vector3.right);
-            _elbow.localRotation = Quaternion.AngleAxis(-168, Vector3.right);
-            _wrist.localRotation = Quaternion.AngleAxis(-8, Vector3.right);
+            Reach(ParkWrist(yawDeg), body.TransformDirection(Vector3.down));
             Grip(0.6f);
+        }
+
+        const float ParkOut = 0.3f;
+
+        /// <summary>The parked wrist (world): level with the shoulder, ParkOut out of the cabinet
+        /// (turned by yawDeg about the turret).</summary>
+        public Vector3 ParkWrist(float yawDeg) =>
+            body.TransformPoint(new Vector3(0, -ShoulderDrop, 0) + Quaternion.Euler(0, yawDeg, 0) * Vector3.forward * ParkOut);
+
+        /// <summary>QA: the smallest gap (m) between the limbs in the current pose and the overhead
+        /// mount: the drop tube (r 0.045) on the turret axis from the coupler (`root`) up to the
+        /// beam (`beamY`), and the beam's underside. Limbs are their bounding boxes in their own
+        /// pivot frames (joint caps included).</summary>
+        public float MountClearance(Vector3 root, float beamY)
+        {
+            // (pivot, centre, half extents) in the pivot's local frame; limbs run along -Y
+            var limbs = new (Transform t, Vector3 c, Vector3 h)[]
+            {
+                (_upper, new Vector3(UX, -L1 / 2, 0), new Vector3(0.09f, L1 / 2 + 0.12f, 0.12f)),                       // upper arm and its rounded ends
+                (_upper, new Vector3(UX + 0.1f, 0, 0), new Vector3(0.04f, 0.09f, 0.09f)),                              // shoulder bearing hub
+                (_elbow, new Vector3(FX, -(L2 - 0.13f) / 2, 0), new Vector3(0.065f, (L2 - 0.13f) / 2 + 0.08f, 0.08f)),  // forearm
+                (_elbow, new Vector3((FX - 0.08f + UX + 0.15f) / 2, 0, 0), new Vector3((UX + 0.23f - FX) / 2, 0.105f, 0.105f)),   // elbow axle and red cap
+                (_wrist, new Vector3(0, -0.16f, 0), new Vector3(0.1f, 0.2f, 0.1f)),                                    // gripper head and fingers
+            };
+            float best = float.MaxValue;
+            for (int i = 0; i <= 40; i++)
+            {
+                var p = new Vector3(root.x, Mathf.Lerp(root.y + 0.04f, beamY, i / 40f), root.z);
+                foreach (var (t, c, h) in limbs)
+                {
+                    var q = t.InverseTransformPoint(p) - c;
+                    var o = new Vector3(Mathf.Max(Mathf.Abs(q.x) - h.x, 0), Mathf.Max(Mathf.Abs(q.y) - h.y, 0), Mathf.Max(Mathf.Abs(q.z) - h.z, 0));
+                    best = Mathf.Min(best, o.magnitude - 0.045f);
+                }
+            }
+            foreach (var (t, c, h) in limbs)   // the beam's underside above every box corner
+                for (int k = 0; k < 8; k++)
+                    best = Mathf.Min(best, beamY - t.TransformPoint(c + Vector3.Scale(h, new Vector3((k & 1) * 2 - 1, (k & 2) - 1, (k & 4) / 2f - 1))).y);
+            return best;
         }
 
         /// <summary>Sets the joints directly (degrees): turret yaw, upper arm, elbow and wrist pitch.

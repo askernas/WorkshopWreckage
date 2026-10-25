@@ -1257,6 +1257,14 @@ namespace WorkshopWreckage
             string why = arm.Mount(sk);
             Check("the arm mounts on an empty socket and serves exactly that half", why == "" && arm.place == SortingArm.Place.Mounted && sk.occupant == arm && arm.Served.SetEquals(sk.dests) && g.ArmServes(sk.dests[0]) && !g.ArmServes(other.dests[0]),
                   why == "" ? arm.Describe() : why);
+            // the overhead mount: every drawer of its half (corners included) and the rim of every
+            // staging pile within reach, and no limb ever meets the drop tube or the beam
+            var (reachErr, mountClear, reachWorst) = arm.ReachTest();
+            Check("the overhead arm reaches all its drawers and piles without touching its mount", reachErr < 0.01f && mountClear > 0.01f,
+                  $"worst wrist error {reachErr * 100:0.0} cm ({reachWorst}), min clearance to the mount {mountClear * 100:0.0} cm");
+            var aisle = (other.point - sk.point).normalized;   // DC1 stands against a wall: look from the aisle side
+            LookFrom(sk.point + sk.facing * Vector3.forward * 2.4f + aisle * 1.3f + Vector3.down * 0.5f, sk.point + Vector3.up * 0.15f);
+            yield return g.Capture(Path.Combine(outDir, "17_sorting_arm_mount.png"), 2);
 
             // stage three parts below its drawers (rows above the floor row) and one below the other half
             var mine = new List<int>();
@@ -1298,7 +1306,7 @@ namespace WorkshopWreckage
                   $"{mine.Count(i => g.world.instances[i].state == ItemState.Stored)}/{mine.Count} stored, delivered {bot.delivered - deliveredBefore}, sorted +{g.progress.sortedTotal - sortedBefore}");
             Check("it never touches the other half of the cabinet", foreign < 0 || g.world.instances[foreign].state == ItemState.InWorld,
                   foreign < 0 ? "no foreign part found" : $"{g.world.DefOf(foreign).displayName}: {g.world.instances[foreign].state}");
-            LookFrom(sk.point + sk.facing * Vector3.forward * 2.2f + Vector3.down * 0.3f, sk.point + Vector3.down * 0.8f);
+            LookFrom(sk.point + sk.facing * Vector3.forward * 2.4f + aisle * 1.3f + Vector3.down * 0.6f, sk.point + Vector3.down * 0.5f);
             yield return g.Capture(Path.Combine(outDir, "19_sorting_arm_parked.png"), 2);
 
             // save / load: mounted stays mounted on the same socket; a carried arm comes back to the bench

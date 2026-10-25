@@ -470,7 +470,7 @@ namespace WorkshopWreckage
                 Sfx.Play("complete", transform.position + Vector3.up * 0.3f, -2);
                 g.progression?.OnRobotRepaired(id);
                 GameEvents.Raise(GameEventKind.RobotActivated, Owner, type);
-                g.hud.Toast($"{displayName} is ready — carry it to a socket on a drawer cabinet", true);
+                g.hud.Toast($"{displayName} is ready — carry it to an overhead socket above a drawer cabinet", true);
                 g.workbench?.Refresh();
                 foreach (var r in g.robots) if (r != this && r.mode == Mode.Assembling) r.RefreshAssembly();
                 yield break;
