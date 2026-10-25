@@ -9,7 +9,8 @@ namespace WorkshopWreckage
 {
     /// <summary>Player collection tools unlocked through skills (progression.json):
     /// Handful (bulk pickup of the same part around the one you pick), Magnetic Glove
-    /// (hold B: magnetic parts fly to you; material / category filters match the part
+    /// (hold B: copies of the magnetic part in your first slot fly to you, as many as the glove's
+    /// level I-X; playtest 2026-10-25, it replaced the material / category filters that matched the part
     /// in hand), Parts Scanner (V: highlights unsorted copies of the part in hand and
     /// its destination), Supermagnet (X: exact-match attraction of the held part's
     /// definition). All of them move real items into the inventory: never sorted
@@ -55,6 +56,8 @@ namespace WorkshopWreckage
                 return t.position + Vector3.up * 0.6f + Vector3.ProjectOnPlane(t.forward, Vector3.up).normalized * 0.5f;
             }
         }
+        /// <summary>Magnetic Glove level 0-10: how many copies one hold of B pulls in.</summary>
+        public int MagnetLevel => (int)P.Effect("magnet_level");
         int HeldDef => g.inventory.HeldId() >= 0 ? g.world.instances[g.inventory.HeldId()].defId : -1;
 
         /// <summary>Can the player's tools take this part right now?</summary>
@@ -156,27 +159,27 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- magnet
 
-        /// <summary>Hold B: one magnetic part at a time flies to the hand (nearest
-        /// first), up to the glove's limit per hold.</summary>
+        /// <summary>Hold B: copies of the magnetic part in the first inventory slot fly to the hand one
+        /// at a time (nearest first), as many per hold as the glove's level (1-10).</summary>
         public int MagnetTick(float dt)
         {
             float range = (float)P.Effect("magnet_range_m") * g.Scale("tool_range");
             if (range <= 0) { if (_magnetT <= 0) { g.hud.OnFeedback("You need the Magnetic Glove skill (Esc → Skills)", false); _magnetT = 2; } _magnetT -= dt; return 0; }
-            int max = Mathf.RoundToInt((float)P.Effect("magnet_max_items") * g.Scale("tool_items"));
+            int max = MagnetLevel;
             _magnetT -= dt;
             if (_magnetT > 0 || _magnetTaken >= max) return 0;
             _magnetT = 0.11f;
             var hand = MagnetOrigin;
-            int held = HeldDef;
-            var hd = held >= 0 ? g.db.Get(held) : null;
-            bool byMaterial = P.Has("filter_material") && hd != null, byCategory = P.Has("filter_category") && hd != null;
+            var stacks = Inv.Stacks();
+            if (stacks.Count == 0) { g.hud.OnFeedback("Magnetic Glove: pick up the part you want more of (it pulls copies of your first slot)", false); _magnetT = 2; return 0; }
+            var want = g.db.Get(stacks[0].defId);
+            if (!want.magnetic) { g.hud.OnFeedback($"Magnetic Glove: {want.displayName} isn't magnetic", false); _magnetT = 2; return 0; }
             int pick = -1;
             foreach (var i in g.index.QuerySphere(hand, range)
-                         .Where(Takeable)
-                         .Where(i => { var d = g.world.DefOf(i); return d.magnetic && (!byMaterial || d.material == hd.material) && (!byCategory || d.category == hd.category); })
+                         .Where(i => Takeable(i) && g.world.instances[i].defId == want.id)
                          .OrderBy(i => (g.world.instances[i].Position - hand).sqrMagnitude))
                 if (LineOfSight(hand, g.world.instances[i].Position)) { pick = i; break; }
-            if (pick < 0) return 0;
+            if (pick < 0) { if (_magnetTaken == 0) { g.hud.OnFeedback($"Magnetic Glove: no {want.displayName} within {range:0.0} m", false); _magnetT = 2; } return 0; }
             if (Inv.IsFull) { g.hud.OnFeedback($"Your hands are full ({Inv.Count}/{Inv.capacity})", false); _magnetT = 1; return 0; }
             float dist = (g.world.instances[pick].Position - hand).magnitude;
             if (!Take(pick, Mathf.Lerp(0.12f, 0.35f, dist / Mathf.Max(range, 0.1f)))) return 0;

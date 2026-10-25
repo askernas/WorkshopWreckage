@@ -399,6 +399,8 @@ namespace WorkshopWreckage
 
         public bool Has(string effect) => Effect(effect) > 0;
 
+        static readonly Dictionary<string, int> RetiredSkills = new() { ["filter_material"] = 1, ["filter_category"] = 1 };
+
         // ------------------------------------------------------------------ save
 
         public Dictionary<string, object> ToDict() => new()
@@ -421,6 +423,8 @@ namespace WorkshopWreckage
             skillPoints = Json.Int(d, "skill_points");
             unlocked.Clear(); _sortRewarded.Clear(); _discoverRewarded.Clear(); _onceRewarded.Clear();
             foreach (var x in Json.Arr(d.GetValueOrDefault("unlocked"))) unlocked.Add(x.ToString());
+            // skills taken out of the tree (2026-10-25: the glove's filters gave way to its levels) give their points back
+            foreach (var kv in RetiredSkills) if (unlocked.Remove(kv.Key)) skillPoints += kv.Value;
             foreach (var x in Json.Arr(d.GetValueOrDefault("sort_rewarded"))) _sortRewarded.Add((int)(double)x);
             foreach (var x in Json.Arr(d.GetValueOrDefault("discover_rewarded"))) _discoverRewarded.Add((int)(double)x);
             foreach (var x in Json.Arr(d.GetValueOrDefault("once"))) _onceRewarded.Add(x.ToString());

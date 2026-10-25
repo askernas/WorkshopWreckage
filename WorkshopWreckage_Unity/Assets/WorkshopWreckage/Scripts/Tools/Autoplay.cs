@@ -51,6 +51,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "tools")
+            {
+                yield return ToolChecks();   // QA: player tools (glove levels, playtest 2026-10-25)
+                Finish();
+                yield break;
+            }
             if (section == "donor")
             {
                 yield return DonorPartChecks();   // QA: other robots' heads and arms on Retrobot (playtest 2026-10-25)
@@ -1397,19 +1403,42 @@ namespace WorkshopWreckage
             else Check("Supermagnet pulls only exact matches, unsorted, within range", false, "no group found");
 
             EmptyHands();
-            // Magnetic glove (empty hand: no filters): only magnetic parts come
-            var mag = g.world.instances.Where(Free).FirstOrDefault(i => g.world.DefOf(i.id).magnetic && i.Position.y < 0.3f);
+            // Magnetic glove (playtest 2026-10-25): levels I-X; one hold of B pulls in as many copies of the
+            // magnetic part in the first slot as its level, nothing else
+            var glove = Enumerable.Range(4, 7).Select(n => "magnet_" + n).Where(pr.unlocked.Contains).ToList();
+            foreach (var id in glove) pr.unlocked.Remove(id);   // level III for the count
+            var mag = g.world.instances.Where(Free).Where(i => g.world.DefOf(i.id).magnetic && i.Position.y < 0.3f)
+                .FirstOrDefault(i => g.world.IdsOf(i.defId).Count(o => o != i.id && Free(g.world.instances[o]) && (g.world.instances[o].Position - i.Position).magnitude < 1.2f) >= 4);
             if (mag != null)
             {
-                g.player.Teleport(mag.Position + new Vector3(0, -mag.Position.y, -0.5f));
+                Take(mag.id);
+                var copy = g.world.IdsOf(mag.defId).Where(o => Free(g.world.instances[o])).OrderBy(o => (g.world.instances[o].Position - mag.Position).sqrMagnitude).First();
+                var at = g.world.instances[copy].Position;
+                g.player.Teleport(at + new Vector3(0, -at.y, -0.5f));
                 g.player.SetView(0, -0.6f);
-                g.inventory.heldDef = -1;
-                int before = g.inventory.Count;
-                for (float t = 0; t < 1.5f; t += Time.deltaTime) { g.tools.MagnetTick(Time.deltaTime); yield return null; }
+                int before = g.inventory.Count, lvl = g.tools.MagnetLevel;
+                for (float t = 0; t < 2.5f; t += Time.deltaTime) { g.tools.MagnetTick(Time.deltaTime); yield return null; }
                 var got = g.inventory.items.Skip(before).ToList();
-                Check("Magnetic glove pulls magnetic parts only", got.Count > 0 && got.All(i => g.world.DefOf(i).magnetic), $"{got.Count} parts pulled");
+                g.tools.ResetState();
+                // a part that isn't magnetic pulls nothing
+                EmptyHands();
+                var plain = g.world.instances.Where(Free).FirstOrDefault(i => !g.world.DefOf(i.id).magnetic);
+                int none = -1;
+                if (plain != null) { Take(plain.id); int b2 = g.inventory.Count; for (float t = 0; t < 0.6f; t += Time.deltaTime) { g.tools.MagnetTick(Time.deltaTime); yield return null; } none = g.inventory.Count - b2; }
+                Check("Magnetic glove level III pulls exactly 3 copies of the first slot's magnetic part, nothing else; a non-magnetic part pulls none",
+                      lvl == 3 && got.Count == 3 && got.All(i => g.world.instances[i].defId == mag.defId) && none == 0,
+                      $"level {lvl}: {got.Count} × {g.world.DefOf(mag.id).displayName} (all the same {got.All(i => g.world.instances[i].defId == mag.defId)}); non-magnetic {none}");
             }
-            else Check("Magnetic glove pulls magnetic parts only", false, "no magnetic part found");
+            else Check("Magnetic glove level III pulls exactly 3 copies of the first slot's magnetic part", false, "no cluster of a magnetic part found");
+            foreach (var id in glove) pr.unlocked.Add(id);
+            g.tools.ResetState();
+            // a save with the old filter skills gets their points back
+            var old = pr.ToDict();
+            old["unlocked"] = ((List<object>)old["unlocked"]).Concat(new object[] { "filter_material", "filter_category" }).ToList();
+            int pts = pr.skillPoints;
+            pr.Load(old);
+            Check("the glove has ten levels (I-X); a save with the retired filter skills refunds their points", g.tools.MagnetLevel == 10 && pr.skillPoints == pts + 2 && !pr.unlocked.Contains("filter_material"),
+                  $"level {g.tools.MagnetLevel}, points {pts} -> {pr.skillPoints}");
             foreach (var r in g.robots) r.enabled = true;
 
             EmptyHands();
