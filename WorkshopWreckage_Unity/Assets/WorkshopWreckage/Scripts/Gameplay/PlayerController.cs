@@ -76,11 +76,30 @@ namespace WorkshopWreckage
             _vel = Vector3.zero;
         }
 
+        /// <summary>Frames the cursor has been locked in a row (counted at the end of each frame).</summary>
+        public static int LockedFrames { get; private set; }
+        /// <summary>Mouse movement steers the view: locked for two full frames, past the recentring warp.</summary>
+        public static bool LookReady => Cursor.lockState == CursorLockMode.Locked && LockedFrames >= 2;
+        /// <summary>A click counts in play: the cursor was already locked last frame (not the capturing click).</summary>
+        public static bool ClickReady => Cursor.lockState == CursorLockMode.Locked && LockedFrames >= 1;
+
+        float _lockYaw, _lockPitch;
+
+        void LateUpdate()
+        {
+            bool locked = Cursor.lockState == CursorLockMode.Locked;
+            if (locked && LockedFrames == 0) { _lockYaw = _yaw; _lockPitch = _pitch; Debug.Log("[input] cursor captured"); }
+            // QA: the view right after a capture is where it was (no jump from the recentring warp)
+            if (locked && LockedFrames == 4) Debug.Log($"[input] view change over the capture: {Mathf.Abs(_yaw - _lockYaw) * Mathf.Rad2Deg:0.00} deg yaw, {Mathf.Abs(_pitch - _lockPitch) * Mathf.Rad2Deg:0.00} deg pitch");
+            if (!locked && LockedFrames > 0) Debug.Log("[input] cursor released");
+            LockedFrames = locked ? LockedFrames + 1 : 0;
+        }
+
         void Update()
         {
             var kb = Keyboard.current;
             var mouse = Mouse.current;
-            if (lookEnabled && mouse != null && Cursor.lockState == CursorLockMode.Locked)
+            if (lookEnabled && mouse != null && LookReady)
             {
                 var d = mouse.delta.ReadValue();
                 float s = sensitivity * 0.01f;   // radians per pixel, as in Godot

@@ -89,8 +89,9 @@ namespace WorkshopWreckage
             foreach (var l in FindObjectsByType<Light>()) Destroy(l.gameObject);
             Physics.IgnoreLayerCollision(Layers.Player, Layers.Target);
             Sfx.Init(transform);
-            // tests, screenshots and benchmarks run silently (--mute does it for normal runs too)
-            if (args.ContainsKey("mute") || Automated) { AudioListener.volume = 0; Sfx.masterVolume = 0; }
+            // sound is on in a normal run at the saved volumes; tests, screenshots and benchmarks
+            // run silently (--mute does it for normal runs too) without touching the saved volumes
+            Sfx.LoadVolumes(args.ContainsKey("mute") || Automated);
 
             RetrobotModel.LegacyLook = args.TryGetValue("retrolook", out var rlook) && rlook == "legacy";
             if (args.TryGetValue("retrosplay", out var rsp)) RetrobotModel.HipSplay = float.Parse(rsp, System.Globalization.CultureInfo.InvariantCulture);   // QA: thigh splay (deg)   // QA: the finish before the polish pass
@@ -543,7 +544,7 @@ namespace WorkshopWreckage
             builder.machineSpindle.localRotation *= Quaternion.Euler(_machineSpin * 900f * Time.deltaTime, 0, 0);
             builder.machineHandwheel.localRotation *= Quaternion.Euler(_machineSpin * 40f * Time.deltaTime, 0, 0);
             builder.machineLamp.intensity = 1.6f * _machineSpin;
-            builder.machineHum.volume = 0.35f * _machineSpin * Sfx.masterVolume;
+            builder.machineHum.volume = state == "paused" || state == "menu" ? 0 : 0.35f * _machineSpin * Sfx.masterVolume;
         }
 
         bool _machineRunning;
@@ -1530,6 +1531,26 @@ namespace WorkshopWreckage
             _menuT += Time.unscaledDeltaTime;
             player.Teleport(Shared.Pos(layout.spawn.x, 0, layout.spawn.z));
             player.SetView((Mathf.Sin(_menuT * 0.06f) * 32f) * Mathf.Deg2Rad, (-5f + Mathf.Sin(_menuT * 0.043f) * 3f) * Mathf.Deg2Rad);
+        }
+
+        /// <summary>Alt+Tab, a click outside the window, minimising: play pauses (the pause menu
+        /// frees and shows the cursor) and the sound stops until the window is back. Never in
+        /// automated runs, which may run without focus.</summary>
+        void OnApplicationFocus(bool focused)
+        {
+            if (!Automated) HandleFocus(focused);
+        }
+
+        public void HandleFocus(bool focused)
+        {
+            AudioListener.pause = !focused;
+            if (!focused && state == "play")
+            {
+                if (interaction.inspecting) interaction.EndInspect();
+                SetState("paused");
+            }
+            if (!focused) { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
+            Debug.Log($"[input] focus {(focused ? "back" : "lost")}: state {state}, cursor {Cursor.lockState}{(Cursor.visible ? " visible" : " hidden")}, sound {(AudioListener.pause ? "paused" : "on")}");
         }
 
         public void SetState(string s)

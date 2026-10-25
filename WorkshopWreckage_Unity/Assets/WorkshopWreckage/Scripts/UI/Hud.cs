@@ -367,7 +367,8 @@ namespace WorkshopWreckage
             Title(st, "SETTINGS");
             SliderRow(st, "Mouse sensitivity", 0.05f, 0.6f, _g.player != null ? _g.player.sensitivity : 0.22f, v => _g.player.sensitivity = v);
             SliderRow(st, "Field of view", 60, 100, 72, v => _g.player.cam.fieldOfView = v);
-            SliderRow(st, "Master volume", 0, 1, Sfx.masterVolume, v => Sfx.masterVolume = v);
+            SliderRow(st, "Master volume", 0, 1, Sfx.MasterSetting, Sfx.SetMaster);
+            SliderRow(st, "Sound effects", 0, 1, Sfx.SfxSetting, Sfx.SetSfx);
             ToggleRow(st, "V-Sync", QualitySettings.vSyncCount > 0, on => QualitySettings.vSyncCount = on ? 1 : 0);
             ToggleRow(st, "Fullscreen", UnityEngine.Screen.fullScreen, on => UnityEngine.Screen.fullScreen = on);
             ToggleRow(st, "Invert mouse Y", false, on => _g.player.invertY = on);

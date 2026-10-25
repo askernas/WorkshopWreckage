@@ -97,7 +97,7 @@ namespace WorkshopWreckage
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (!enabledInput) { HideHover(); return; }
-            bool lmbDown = mouse != null && mouse.leftButton.wasPressedThisFrame;
+            bool lmbDown = mouse != null && mouse.leftButton.wasPressedThisFrame && PlayerController.ClickReady;
             bool lmbHeld = mouse != null && mouse.leftButton.isPressed;
             float wheel = mouse != null ? mouse.scroll.ReadValue().y : 0;
             if (inspecting)
@@ -111,7 +111,7 @@ namespace WorkshopWreckage
                 if (wheel != 0) game.held.Zoom(wheel > 0 ? 0.15f : -0.15f);
                 float turn = (kb.qKey.isPressed ? 1 : 0) - (kb.eKey.isPressed ? 1 : 0);
                 if (turn != 0) game.held.RotateBy(new Vector2(-turn * 240f * Time.deltaTime, 0));
-                if (mouse != null && Cursor.lockState == CursorLockMode.Locked) game.held.RotateBy(mouse.delta.ReadValue() * new Vector2(1, -1));
+                if (mouse != null && PlayerController.LookReady) game.held.RotateBy(mouse.delta.ReadValue() * new Vector2(1, -1));
                 return;
             }
             UpdateTarget();

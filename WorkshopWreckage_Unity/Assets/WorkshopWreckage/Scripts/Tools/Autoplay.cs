@@ -33,6 +33,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "input")
+            {
+                yield return InputAudioChecks();   // QA: focus loss, capture guard, saved volumes
+                Finish();
+                yield break;
+            }
             if (section == "tutorial")
             {
                 yield return TutorialChecks();   // QA: the one-time robot-part tutorial
@@ -357,6 +363,47 @@ namespace WorkshopWreckage
         void EmptyHands()
         {
             foreach (var id in g.inventory.items.ToList()) if (!g.interaction.DropInTray(id, false)) { g.inventory.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); }
+        }
+
+        /// <summary>Mouse and sound: losing focus in play pauses, frees the cursor and silences
+        /// the game; a fresh capture skips the recentring frames; the volumes are saved, and a
+        /// muted run never writes them. (The OS-level Alt+Tab test drives a normal build.)</summary>
+        IEnumerator InputAudioChecks()
+        {
+            g.SetState("play");
+            yield return Frames(2);
+            g.HandleFocus(false);
+            bool lost = g.state == "paused" && Cursor.lockState == CursorLockMode.None && Cursor.visible && AudioListener.pause;
+            g.HandleFocus(true);
+            bool back = !AudioListener.pause && g.state == "paused";
+            g.SetState("play");
+            // the capture guard: no look on the capturing frames, a click only once locked a frame
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return null;
+            bool guard0 = !PlayerController.LookReady;
+            yield return Frames(3);
+            bool guardOk = guard0 && (Cursor.lockState != CursorLockMode.Locked || (PlayerController.LookReady && PlayerController.ClickReady));
+            string lockNote = Cursor.lockState == CursorLockMode.Locked ? "locked" : "lock not granted without focus";
+            Cursor.lockState = CursorLockMode.None;
+            // saved volumes (the player's own values are put back afterwards)
+            bool hadM = PlayerPrefs.HasKey("ww_master_volume"), hadS = PlayerPrefs.HasKey("ww_sfx_volume");
+            float oldM = PlayerPrefs.GetFloat("ww_master_volume", 1f), oldS = PlayerPrefs.GetFloat("ww_sfx_volume", 0.8f);
+            Sfx.LoadVolumes(true);
+            Sfx.SetMaster(0.11f);
+            bool muteWritesNothing = AudioListener.volume == 0 && Sfx.masterVolume == 0 && PlayerPrefs.GetFloat("ww_master_volume", 1f) == oldM;
+            Sfx.LoadVolumes(false);
+            bool defaultsOn = hadM || (AudioListener.volume == 1f && Sfx.masterVolume == 0.8f);
+            Sfx.SetMaster(0.5f);
+            Sfx.SetSfx(0.3f);
+            Sfx.LoadVolumes(false);
+            bool saved = Mathf.Approximately(AudioListener.volume, 0.5f) && Mathf.Approximately(Sfx.masterVolume, 0.3f);
+            if (hadM) PlayerPrefs.SetFloat("ww_master_volume", oldM); else PlayerPrefs.DeleteKey("ww_master_volume");
+            if (hadS) PlayerPrefs.SetFloat("ww_sfx_volume", oldS); else PlayerPrefs.DeleteKey("ww_sfx_volume");
+            PlayerPrefs.Save();
+            Sfx.LoadVolumes(true);
+            Check("mouse and sound: focus loss pauses, frees the cursor and stops the sound; the capture skips the warp frames; volumes are saved, --mute writes nothing",
+                  lost && back && guardOk && muteWritesNothing && defaultsOn && saved,
+                  $"focus lost: paused + cursor free + sound paused {lost}; back: sound on, still paused until resumed {back}; capture guard {guardOk} ({lockNote}); mute writes nothing {muteWritesNothing}; sound on by default {defaultsOn}; saved 0.5/0.3 restored {saved}");
         }
 
         /// <summary>The robot-part tutorial: not for a robot's pickup or a robot-themed spare part,

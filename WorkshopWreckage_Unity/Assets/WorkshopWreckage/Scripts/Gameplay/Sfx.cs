@@ -12,6 +12,40 @@ namespace WorkshopWreckage
         readonly List<AudioSource> _2d = new(), _3d = new();
         public static float masterVolume = 0.8f;
 
+        /// <summary>Settings (PlayerPrefs): master = the whole mix (AudioListener.volume), sound
+        /// effects = Sfx.masterVolume. A muted run (--mute, automated) plays nothing and never
+        /// writes the saved values.</summary>
+        public static float MasterSetting { get; private set; } = 1f;
+        public static float SfxSetting { get; private set; } = 0.8f;
+        public static bool Muted { get; private set; }
+
+        public static void LoadVolumes(bool mute)
+        {
+            Muted = mute;
+            MasterSetting = Mathf.Clamp01(PlayerPrefs.GetFloat("ww_master_volume", 1f));
+            SfxSetting = Mathf.Clamp01(PlayerPrefs.GetFloat("ww_sfx_volume", 0.8f));
+            AudioListener.volume = mute ? 0 : MasterSetting;
+            masterVolume = mute ? 0 : SfxSetting;
+        }
+
+        public static void SetMaster(float v)
+        {
+            MasterSetting = Mathf.Clamp01(v);
+            if (Muted) return;
+            AudioListener.volume = MasterSetting;
+            PlayerPrefs.SetFloat("ww_master_volume", MasterSetting);
+            PlayerPrefs.Save();
+        }
+
+        public static void SetSfx(float v)
+        {
+            SfxSetting = Mathf.Clamp01(v);
+            if (Muted) return;
+            masterVolume = SfxSetting;
+            PlayerPrefs.SetFloat("ww_sfx_volume", SfxSetting);
+            PlayerPrefs.Save();
+        }
+
         public static void Init(Transform parent)
         {
             if (_i != null) return;
