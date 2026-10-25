@@ -6,7 +6,7 @@ namespace WorkshopWreckage
     /// a mustard toy-enamel industrial arm (bolted panel plates, seams, rust, looping hoses, the
     /// stencilled "A-01"), big red joint caps with bolt rings and brass hubs, a red drum turret
     /// with amber indicators, and a big hooked red / gunmetal pincer; it hangs from a bolted
-    /// docking coupler on an overhead cabinet socket. Built at true
+    /// docking coupler under the lift mast of an overhead rail mount. Built at true
     /// size (≈2 m reach from the socket) and shown at 0.42 scale on the bench and while
     /// carried (folded, standing on its coupler). Pose is driven by SortingArm through
     /// analytic two-bone IK in the shoulder plane; the elbow always bends outward (away
@@ -15,9 +15,9 @@ namespace WorkshopWreckage
     /// right finger, cable harness.</summary>
     public class SortingArmModel : RobotModel
     {
-        public const float L1 = 0.85f, L2 = 0.8f, ShoulderDrop = 0.42f, GripLen = 0.17f;
+        public const float L1 = 0.85f, L2 = 0.8f, ShoulderDrop = 0.42f, GripLen = 0.36f;   // the part is pinched between the hooked claw tips
         const float UX = 0.2f, FX = 0.07f;   // the upper arm runs beside the turret, the forearm inside it (the reference)
-        Transform _shoulder, _upper, _elbow, _wrist, _fingerL, _fingerR;
+        Transform _shoulder, _upper, _elbow, _wrist, _claw, _fingerL, _fingerR;
         public override float ModelHeight => 2.0f;
         protected override Material Skin(Material m) => FamilySkin(m, FamilyOrange);   // industrial orange
         protected override Material BoltSkin(Material m) => FamilyBoltSkin(m);
@@ -28,12 +28,13 @@ namespace WorkshopWreckage
             _upper = Pivot("Upper", _shoulder, new Vector3(0, -(ShoulderDrop - 0.06f), 0));
             _elbow = Pivot("Elbow", _upper, new Vector3(0, -L1, 0));
             _wrist = Pivot("Wrist", _elbow, new Vector3(0, -L2, 0));
-            _fingerL = Pivot("FingerL", _wrist, new Vector3(-0.04f, -0.1f, 0));
-            _fingerR = Pivot("FingerR", _wrist, new Vector3(0.04f, -0.1f, 0));
+            _claw = Pivot("Claw", _wrist, Vector3.zero);   // rolls the pincer about the grip axis
+            _fingerL = Pivot("FingerL", _claw, new Vector3(-0.04f, -0.1f, 0));
+            _fingerR = Pivot("FingerR", _claw, new Vector3(0.04f, -0.1f, 0));
             // the pincer opens in the arm's swing plane, so the claws show in profile (the reference)
             _fingerL.localRotation = Quaternion.Euler(0, 90, 0);
             _fingerR.localRotation = Quaternion.Euler(0, 90, 0);
-            carry = Pivot("Grip", _wrist, new Vector3(0, -GripLen, 0));
+            carry = Pivot("Grip", _claw, new Vector3(0, -GripLen, 0));
             head = _wrist;
             Mount(body, "shoulder turret", Vector3.down, 0.07f);
             Mount(_shoulder, "control unit", Vector3.right, 0.04f);
@@ -252,55 +253,50 @@ namespace WorkshopWreckage
             _upper.localRotation = Quaternion.AngleAxis(Mathf.Lerp(0, 18, f), Vector3.right);
             _elbow.localRotation = Quaternion.AngleAxis(Mathf.Lerp(0, -165, f), Vector3.right);
             _wrist.localRotation = Quaternion.AngleAxis(Mathf.Lerp(0, -20, f), Vector3.right);
+            _claw.localRotation = Quaternion.identity;
             Grip(0.5f);
         }
 
-        /// <summary>Mounted rest: upper arm raised out over the aisle, forearm hanging straight down
-        /// in front of the turret, gripper down at shoulder height. The forearm stays off the turret
-        /// axis, where the overhead mount's drop tube comes down.</summary>
-        public void Park(float yawDeg)
+        /// <summary>Mounted rest above the unit: upper arm raised forward (clear of the coupler and
+        /// the mount), forearm down to the wrist level with the shoulder, ParkOut out over the aisle,
+        /// the pincer pointing up and out. Nothing hangs below the shoulder.</summary>
+        public void Park(float baseYaw)
         {
-            Reach(ParkWrist(yawDeg), body.TransformDirection(Vector3.down));
+            ReachPlanar(ParkWrist(), ParkDir, baseYaw, ClawRoll);
             Grip(0.6f);
         }
 
-        const float ParkOut = 0.3f;
+        public const float ParkOut = 1.0f, ClawRoll = 90;   // mounted, the claws open sideways (along the unit's front)
 
-        /// <summary>The parked wrist (world): level with the shoulder, ParkOut out of the cabinet
-        /// (turned by yawDeg about the turret).</summary>
-        public Vector3 ParkWrist(float yawDeg) =>
-            body.TransformPoint(new Vector3(0, -ShoulderDrop, 0) + Quaternion.Euler(0, yawDeg, 0) * Vector3.forward * ParkOut);
+        /// <summary>The parked wrist (world): level with the shoulder, ParkOut out over the aisle.</summary>
+        public Vector3 ParkWrist() => body.TransformPoint(new Vector3(0, -ShoulderDrop, ParkOut));
+        public Vector3 ParkDir => body.TransformDirection(new Vector3(0, 1, 1).normalized);
 
-        /// <summary>QA: the smallest gap (m) between the limbs in the current pose and the overhead
-        /// mount: the drop tube (r 0.045) on the turret axis from the coupler (`root`) up to the
-        /// beam (`beamY`), and the beam's underside. Limbs are their bounding boxes in their own
-        /// pivot frames (joint caps included).</summary>
-        public float MountClearance(Vector3 root, float beamY)
+        /// <summary>QA: the limbs in the current pose as world boxes (pivot frames, joint caps and
+        /// claws included); `withBase` adds the coupler and turret, which hang on the mount.</summary>
+        public void LimbBoxes(System.Collections.Generic.List<Obb> into, bool withBase)
         {
-            // (pivot, centre, half extents) in the pivot's local frame; limbs run along -Y
-            var limbs = new (Transform t, Vector3 c, Vector3 h)[]
-            {
-                (_upper, new Vector3(UX, -L1 / 2, 0), new Vector3(0.09f, L1 / 2 + 0.12f, 0.12f)),                       // upper arm and its rounded ends
-                (_upper, new Vector3(UX + 0.1f, 0, 0), new Vector3(0.04f, 0.09f, 0.09f)),                              // shoulder bearing hub
-                (_elbow, new Vector3(FX, -(L2 - 0.13f) / 2, 0), new Vector3(0.065f, (L2 - 0.13f) / 2 + 0.08f, 0.08f)),  // forearm
-                (_elbow, new Vector3((FX - 0.08f + UX + 0.15f) / 2, 0, 0), new Vector3((UX + 0.23f - FX) / 2, 0.105f, 0.105f)),   // elbow axle and red cap
-                (_wrist, new Vector3(0, -0.16f, 0), new Vector3(0.1f, 0.2f, 0.1f)),                                    // gripper head and fingers
-            };
-            float best = float.MaxValue;
-            for (int i = 0; i <= 40; i++)
-            {
-                var p = new Vector3(root.x, Mathf.Lerp(root.y + 0.04f, beamY, i / 40f), root.z);
-                foreach (var (t, c, h) in limbs)
-                {
-                    var q = t.InverseTransformPoint(p) - c;
-                    var o = new Vector3(Mathf.Max(Mathf.Abs(q.x) - h.x, 0), Mathf.Max(Mathf.Abs(q.y) - h.y, 0), Mathf.Max(Mathf.Abs(q.z) - h.z, 0));
-                    best = Mathf.Min(best, o.magnitude - 0.045f);
-                }
-            }
-            foreach (var (t, c, h) in limbs)   // the beam's underside above every box corner
-                for (int k = 0; k < 8; k++)
-                    best = Mathf.Min(best, beamY - t.TransformPoint(c + Vector3.Scale(h, new Vector3((k & 1) * 2 - 1, (k & 2) - 1, (k & 4) / 2f - 1))).y);
-            return best;
+            into.Add(Obb.Of(_upper, new Vector3(UX, -L1 / 2, 0), new Vector3(0.09f, L1 / 2 + 0.12f, 0.12f)));                     // upper arm and its rounded ends
+            into.Add(Obb.Of(_upper, new Vector3(UX + 0.1f, 0, 0), new Vector3(0.04f, 0.09f, 0.09f)));                            // shoulder bearing hub
+            into.Add(Obb.Of(_elbow, new Vector3(FX, -(L2 - 0.13f) / 2, 0), new Vector3(0.065f, (L2 - 0.13f) / 2 + 0.08f, 0.08f)));  // forearm
+            into.Add(Obb.Of(_elbow, new Vector3((FX - 0.08f + UX + 0.15f) / 2, 0, 0), new Vector3((UX + 0.23f - FX) / 2, 0.105f, 0.105f)));   // elbow axle and red cap
+            into.Add(Obb.Of(_wrist, new Vector3(0.03f, -0.03f, 0), new Vector3(0.095f, 0.072f, 0.1f)));                            // wrist knuckle and gripper housing
+            into.Add(Obb.Of(_claw, new Vector3(0, -0.25f, 0), new Vector3(0.065f, 0.155f, 0.158f + 0.07f * _open)));               // the two claws (their outward bow at the current opening)
+            if (!withBase) return;
+            into.Add(Obb.Of(body, new Vector3(0, -0.056f, 0), new Vector3(0.23f, 0.056f, 0.2f)));                                  // docking coupler
+            into.Add(Obb.Of(_shoulder, new Vector3(-0.03f, -0.19f, 0), new Vector3(0.165f, 0.25f, 0.14f)));                        // turret and control unit
+        }
+
+        /// <summary>Planar reach for the mounted arm: the turret holds `baseYaw` (0 or 180, which side
+        /// of the swing plane the upper arm runs on), so the arm swings in one fixed plane square to
+        /// the unit and the elbow always bends out over the aisle (no yaw flips). The wrist must lie in
+        /// that plane (the carriage puts it there); `roll` turns the claws about the grip axis.</summary>
+        public void ReachPlanar(Vector3 wrist, Vector3 gripDir, float baseYaw, float roll)
+        {
+            _shoulder.localRotation = Quaternion.Euler(0, baseYaw, 0);
+            float sigma = baseYaw > 90 ? 1 : -1;   // +1: the shoulder's reach axis (-Z) faces the aisle
+            Solve(wrist, gripDir, sigma);
+            _claw.localRotation = Quaternion.AngleAxis(roll, Vector3.up);
         }
 
         /// <summary>Sets the joints directly (degrees): turret yaw, upper arm, elbow and wrist pitch.
@@ -311,11 +307,14 @@ namespace WorkshopWreckage
             _upper.localRotation = Quaternion.AngleAxis(upper, Vector3.right);
             _elbow.localRotation = Quaternion.AngleAxis(elbow, Vector3.right);
             _wrist.localRotation = Quaternion.AngleAxis(wrist, Vector3.right);
+            _claw.localRotation = Quaternion.identity;
         }
 
+        float _open = 0.5f;
         public void Grip(float open01)
         {
-            float x = 0.012f + 0.07f * Mathf.Clamp01(open01);
+            _open = Mathf.Clamp01(open01);
+            float x = 0.012f + 0.07f * _open;
             _fingerL.localPosition = new Vector3(0, -0.1f, x);
             _fingerR.localPosition = new Vector3(0, -0.1f, -x);
         }
@@ -328,12 +327,18 @@ namespace WorkshopWreckage
             var hd = new Vector3(t.x, 0, t.z);
             // the arm reaches along the shoulder's -Z; yaw towards the target
             _shoulder.localRotation = hd.sqrMagnitude > 1e-6f ? Quaternion.LookRotation(-hd.normalized, Vector3.up) : Quaternion.identity;
+            Solve(wrist, gripDir, 1);
+        }
+
+        /// <summary>Two-bone IK in the shoulder plane; the elbow bends towards sigma * the reach axis.</summary>
+        void Solve(Vector3 wrist, Vector3 gripDir, float sigma)
+        {
             var tp = _shoulder.InverseTransformPoint(wrist) - _upper.localPosition;
             float h = -tp.z, v = tp.y;
             float d = Mathf.Clamp(Mathf.Sqrt(h * h + v * v), Mathf.Abs(L1 - L2) + 0.02f, L1 + L2 - 0.002f);
             float phi = Mathf.Atan2(h, -v);
             float alpha = Mathf.Acos(Mathf.Clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
-            float th1 = phi + alpha;   // elbow outward
+            float th1 = phi + sigma * alpha;
             var e = new Vector2(L1 * Mathf.Sin(th1), -L1 * Mathf.Cos(th1));   // (forward, up) of the elbow
             var dirT = new Vector2(Mathf.Sin(phi), -Mathf.Cos(phi)) * d;
             var fw = dirT - e;
@@ -344,6 +349,9 @@ namespace WorkshopWreckage
             _elbow.localRotation = Quaternion.AngleAxis((th2 - th1) * Mathf.Rad2Deg, Vector3.right);
             _wrist.localRotation = Quaternion.AngleAxis((thw - th2) * Mathf.Rad2Deg, Vector3.right);
         }
+
+        /// <summary>QA: the joint rotations (upper, elbow, wrist), to catch snaps along a path.</summary>
+        public Quaternion[] JointRots => new[] { _upper.localRotation, _elbow.localRotation, _wrist.localRotation };
 
         /// <summary>Where the gripper holds a part (world).</summary>
         public Vector3 GripPoint => carry.position;

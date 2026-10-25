@@ -27,6 +27,12 @@ namespace WorkshopWreckage
             yield return g.Capture(Path.Combine(outDir, "00_main_menu.png"), 15);
             g.SetState("play");
             yield return Frames(10);
+            if (g.args.TryGetValue("apsection", out var section) && section == "arm")
+            {
+                yield return ArmChecks();   // QA: the Sorting Arm acceptance section alone
+                Finish();
+                yield break;
+            }
 
             // 0. keyboard turning: inject real Q / E key presses through the Input System
             var kb = UnityEngine.InputSystem.Keyboard.current ?? UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>();
@@ -263,6 +269,11 @@ namespace WorkshopWreckage
             g.PlaceCamera("0.6,1.65,3.6,0,-18");
             g.hud.SetHudVisible(true);
             yield return g.Capture(Path.Combine(outDir, "04_hud_overview.png"), 10);
+            Finish();
+        }
+
+        void Finish()
+        {
             File.WriteAllText(Path.Combine(outDir, "autoplay_report.json"), Json.Write(new Dictionary<string, object> { ["checks"] = checks, ["passed"] = (double)passed, ["failed"] = (double)failed }));
             Debug.Log($"[autoplay] {passed} passed, {failed} failed");
             Application.Quit(failed == 0 ? 0 : 1);
@@ -1219,17 +1230,27 @@ namespace WorkshopWreckage
             }
         }
 
-        /// <summary>Sorting Arm vertical slice (docs/ROBOT_WORKSHOP_ASSET_AUDIT.md §5). The
-        /// mobile robots are paused so only the arm touches the test parts.</summary>
+        /// <summary>Sorting Arm vertical slice (docs/ROBOT_WORKSHOP_ASSET_AUDIT.md §5): one overhead
+        /// rail mount per drawer cabinet and shelving unit, the full-path reach / clearance QA,
+        /// player access around a parked arm, sorting at a cabinet and at a shelf, relocation both
+        /// ways, save/load at both. The mobile robots are paused so only the arm touches the test parts.</summary>
         IEnumerator ArmChecks()
         {
             var wb = g.workbench;
             var cabinets = g.units.Values.Where(u => u.type == "drawer_cabinet").ToList();
-            var drawerIds = g.db.boxes.Values.Where(d => Json.Str(d, "kind") == "drawer").Select(d => Json.Str(d, "id")).ToHashSet();
-            bool halves = g.sockets.Values.All(s => s.dests.Count == 18) && g.sockets.Values.GroupBy(s => s.unit).All(gr => gr.Count() == 2 && !gr.First().dests.Intersect(gr.Last().dests).Any())
-                          && g.sockets.Values.SelectMany(s => s.dests).ToHashSet().SetEquals(drawerIds);
-            Check("two fixed sockets per 6 x 6 drawer cabinet, each serving exactly its own 18-drawer half", g.sockets.Count == cabinets.Count * 2 && halves,
-                  $"{g.sockets.Count} sockets on {cabinets.Count} cabinets");
+            var shelves = g.units.Values.Where(u => u.type == "shelving").ToList();
+            bool CrateUnderDeck(Dictionary<string, object> d) => Json.Str(d, "kind") == "wooden_crate" && Json.Int(d, "level") < Json.Arr(g.units[Json.Str(d, "unit")].unit["levels"]).Count - 1;
+            bool layoutOk = cabinets.Concat(shelves).All(u =>
+            {
+                var mine = g.sockets.Values.Where(s => s.unit == u.id).ToList();
+                var expect = u.dests.Where(d => !CrateUnderDeck(d)).Select(d => Json.Str(d, "id")).ToHashSet();
+                return mine.Count == 1 && mine[0].dests.ToHashSet().SetEquals(expect) && (u.type != "drawer_cabinet" || expect.Count == 36);
+            }) && g.sockets.Count == cabinets.Count + shelves.Count;
+            int crates = shelves.Sum(u => u.dests.Count(CrateUnderDeck));
+            Check("one overhead rail mount per drawer cabinet (all 36 drawers) and per shelving unit (all its containers but crates under a deck)", layoutOk,
+                  $"{g.sockets.Count} mounts on {cabinets.Count} cabinets + {shelves.Count} shelves; {crates} crates under a deck left out (9.5 cm under the next beam)");
+            bool noColliders = g.sockets.Values.All(s => s.GetComponentsInChildren<Collider>().All(c => c.isTrigger));
+            Check("the mounts add no solid colliders (only the aim trigger on the carriage)", noColliders, "");
             var p = wb.P("sorting_arm");
             var bot = wb.RobotOf(p);
             var arm = bot?.arm;
@@ -1239,10 +1260,11 @@ namespace WorkshopWreckage
             var paused = g.robots.Where(r => r.Mobile && r.Active).ToList();
             foreach (var r in paused) r.paused = true;
             wb.ForceInstall(p);
-            wb.Activate(p);
+            if (!wb.Activate(p)) wb.DebugUnlock(p);   // the arm-only section starts below the blueprint level
             float t0 = Time.realtimeSinceStartup;
             while (!bot.Operational && Time.realtimeSinceStartup - t0 < 15) yield return null;
             Check("an activated arm waits folded at the workbench (it never roams)", bot.Operational && arm.place == SortingArm.Place.Bench && (bot.transform.position - bot.home).magnitude < 0.05f, arm.Describe());
+            if (!bot.Operational) { foreach (var r in paused) r.paused = false; yield break; }
 
             // carry: two-handed, no pocket slot, no pickups meanwhile
             int pockets = g.inventory.items.Count;
@@ -1251,72 +1273,112 @@ namespace WorkshopWreckage
             bool refused = !g.interaction.Pickup(loose.id, false);
             Check("the arm is carried in both hands: no inventory slot, no part pickups", g.CarriedArm == arm && g.inventory.items.Count == pockets && refused, arm.Describe());
 
-            // mount on the left half of the first cabinet
-            var sk = g.sockets.Values.OrderBy(s => s.id).First(s => s.side == "L");
-            var other = g.sockets.Values.First(s => s.unit == sk.unit && s.side == "R");
+            int total = g.world.instances.Count;
+            // ---- cabinet
+            var sk = g.sockets.Values.Where(s => s.cabinet).OrderBy(s => s.id).First();
+            // the nearest shelf holding parts the arm can carry (large-parts shelves hold none: it leaves those alone)
+            bool Carryable(string b) => g.StraysIn(b).Count == 0 && g.world.instances.Any(i => i.state is ItemState.InWorld or ItemState.Stored
+                && g.world.DefOf(i.id) is var d && d.storageBox == b && d.robotCarry && !d.IsRobotPart && ItemDatabase.Extents(d)[0] <= bot.MaxItemSize);
+            var shelfMounts = g.sockets.Values.Where(s => !s.cabinet).OrderBy(s => (s.su.transform.position - sk.su.transform.position).sqrMagnitude).ToList();
+            var shelfSk = shelfMounts.FirstOrDefault(s => s.dests.Count(b => Carryable(b)) >= 4) ?? shelfMounts.First();
             string why = arm.Mount(sk);
-            Check("the arm mounts on an empty socket and serves exactly that half", why == "" && arm.place == SortingArm.Place.Mounted && sk.occupant == arm && arm.Served.SetEquals(sk.dests) && g.ArmServes(sk.dests[0]) && !g.ArmServes(other.dests[0]),
-                  why == "" ? arm.Describe() : why);
-            // the overhead mount: every drawer of its half (corners included) and the rim of every
-            // staging pile within reach, and no limb ever meets the drop tube or the beam
-            var (reachErr, mountClear, reachWorst) = arm.ReachTest();
-            Check("the overhead arm reaches all its drawers and piles without touching its mount", reachErr < 0.01f && mountClear > 0.01f,
-                  $"worst wrist error {reachErr * 100:0.0} cm ({reachWorst}), min clearance to the mount {mountClear * 100:0.0} cm");
-            var aisle = (other.point - sk.point).normalized;   // DC1 stands against a wall: look from the aisle side
-            LookFrom(sk.point + sk.facing * Vector3.forward * 2.4f + aisle * 1.3f + Vector3.down * 0.5f, sk.point + Vector3.up * 0.15f);
-            yield return g.Capture(Path.Combine(outDir, "17_sorting_arm_mount.png"), 2);
+            Check($"the arm mounts on {sk.id} and serves all 36 drawers of that cabinet, nothing else", why == "" && arm.place == SortingArm.Place.Mounted && sk.occupant == arm && arm.Served.SetEquals(sk.dests) && sk.dests.Count == 36
+                  && sk.dests.All(g.ArmServes) && !shelfSk.dests.Any(g.ArmServes), why == "" ? arm.Describe() : why);
+            var rep = arm.ReachTest();
+            Check("cabinet: the whole cycle path (travel, pickup, transport, insert, release, withdraw, park) reaches all 36 drawers and the piles with clearance", ReachOk(rep), rep.ToString());
+            bot.paused = true;
+            arm.ParkNow();
+            yield return Frames(3);
+            yield return ArmAccess(arm, sk);
+            bot.paused = false;
+            g.hud.SetHudVisible(false);
+            {
+                var t = sk.su.transform;
+                var c = t.TransformPoint(Batch.G(0, 1.5f, sk.su.size.z / 2));
+                LookFrom(c + sk.Front * 3.0f + t.TransformDirection(Vector3.right) * 0.7f + Vector3.up * 0.1f, c + Vector3.up * 0.8f);
+                yield return g.Capture(Path.Combine(outDir, "17a_arm_cabinet_installation.png"), 2);
+                LookFrom(c + sk.Front * 2.4f + Vector3.up * 0.15f, c + Vector3.up * 0.2f);
+                yield return g.Capture(Path.Combine(outDir, "17b_arm_parked_fronts_clear.png"), 2);
+                // the lowest drawer farthest from the parking end
+                var far = sk.dests.Where(b => Json.Int(g.db.boxes[b], "row") == 5).OrderByDescending(b => Mathf.Abs(sk.su.FrontCenterG(sk.su.SlotOf(b)).x - sk.parkX)).First();
+                bot.paused = true;
+                arm.QaPose(far, "insert");
+                yield return Frames(12);
+                var fp = sk.su.DestPoint(g.db.boxes[far]);
+                LookFrom(fp + sk.Front * 2.2f + t.TransformDirection(Vector3.right) * (sk.su.FrontCenterG(sk.su.SlotOf(far)).x > 0 ? -1.2f : 1.2f) + Vector3.up * 1.0f, fp + Vector3.up * 0.4f);
+                yield return g.Capture(Path.Combine(outDir, "17c_arm_lowest_farthest_drawer.png"), 2);
+                arm.ParkNow();
+                bot.paused = false;
+            }
+            g.hud.SetHudVisible(true);
+            // sort at the cabinet: corner drawers first, then the centre, plus a part for the shelf it must leave alone
+            var corners = sk.dests.Where(b => { var d = g.db.boxes[b]; int r = Json.Int(d, "row"), c = Json.Int(d, "col"); return (r == 0 || r == 5) && (c == 0 || c == 5); })
+                .Concat(sk.dests.Where(b => { var d = g.db.boxes[b]; return Json.Int(d, "row") is 2 or 3 && Json.Int(d, "col") is 2 or 3; })).Concat(sk.dests).Distinct().ToList();
+            var foreign = PartsFor(shelfSk.dests, bot, 1);
+            yield return ArmSort(arm, bot, PartsFor(corners, bot, 4), foreign, "cabinet (corner and centre drawers)");
 
-            // stage three parts below its drawers (rows above the floor row) and one below the other half
-            var mine = new List<int>();
-            foreach (var box in sk.dests.Where(b => Json.Int(g.db.boxes[b], "row") < 5 && g.StraysIn(b).Count == 0 && g.storage.Stored(b).Count < g.db.BoxCapacity(b)))
-            {
-                var id = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).storageBox == box).Select(i => i.id).DefaultIfEmpty(-1).First();
-                if (id >= 0) mine.Add(id);
-                if (mine.Count == 3) break;
-            }
-            int foreign = -1;
-            foreach (var box in other.dests)
-            {
-                foreign = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).storageBox == box).Select(i => i.id).DefaultIfEmpty(-1).First();
-                if (foreign >= 0) break;
-            }
-            foreach (var id in mine.Append(foreign).Where(i => i >= 0)) StageAt(id, g.world.DefOf(id).storageBox, bot);
-            int sortedBefore = g.progress.sortedTotal, deliveredBefore = bot.delivered;
-            long xpBefore = g.progression.xp;
-            Time.timeScale = 3;
+            // ---- relocation cabinet -> shelf
+            var armObj = arm.gameObject;
+            arm.PickUp();
             t0 = Time.realtimeSinceStartup;
-            bool shot = false;
-            while (mine.Any(i => g.world.instances[i].state != ItemState.Stored) && Time.realtimeSinceStartup - t0 < 60)
+            while (arm.place != SortingArm.Place.Carried && Time.realtimeSinceStartup - t0 < 20) yield return null;
+            why = arm.Mount(shelfSk);
+            Check($"relocation cabinet → shelf: the same arm mounts on {shelfSk.id}, serves that shelf and no longer the cabinet", why == "" && arm.gameObject == armObj && g.sockets.Values.Count(s => s.occupant != null) == 1
+                  && sk.occupant == null && shelfSk.occupant == arm && arm.Served.SetEquals(shelfSk.dests) && shelfSk.dests.All(g.ArmServes) && !sk.dests.Any(g.ArmServes), why == "" ? arm.Describe() : why);
+            rep = arm.ReachTest();
+            Check($"shelf: the whole cycle path reaches all {shelfSk.dests.Count} containers on every level and the piles with clearance", ReachOk(rep), rep.ToString());
+            bot.paused = true;
+            arm.ParkNow();
+            yield return Frames(3);
+            yield return ArmAccess(arm, shelfSk);
+            g.hud.SetHudVisible(false);
             {
-                if (!shot && arm.heldId >= 0)
-                {
-                    shot = true;
-                    Time.timeScale = 1;
-                    LookFrom(sk.point + sk.facing * Vector3.forward * 1.9f + Vector3.down * 0.5f, sk.point + Vector3.down * 0.9f);
-                    yield return g.Capture(Path.Combine(outDir, "18_sorting_arm_working.png"), 2);
-                    Time.timeScale = 3;
-                }
-                yield return null;
+                var t = shelfSk.su.transform;
+                var c = t.TransformPoint(Batch.G(0, 1.6f, shelfSk.su.size.z / 2));
+                LookFrom(c + shelfSk.Front * 2.0f + t.TransformDirection(Vector3.right) * 0.6f + Vector3.up * 0.05f, c + Vector3.up * 0.9f);
+                yield return g.Capture(Path.Combine(outDir, "17d_arm_shelf_installation.png"), 2);
+                // working: level over a mid-level container
+                var mid = shelfSk.dests.OrderBy(b => Mathf.Abs(Json.Int(g.db.boxes[b], "level") - 2)).ThenBy(b => Mathf.Abs(shelfSk.su.transform.InverseTransformPoint(shelfSk.su.DestPoint(g.db.boxes[b])).x)).First();
+                arm.QaPose(mid, "insert");
+                yield return Frames(3);
+                var mp = arm.CarryPoint(mid);
+                LookFrom(mp + shelfSk.Front * 1.9f + t.TransformDirection(Vector3.right) * 0.9f + Vector3.up * 0.2f, mp + Vector3.up * 0.5f);
+                yield return g.Capture(Path.Combine(outDir, "17e_arm_working_at_shelf.png"), 2);
+                arm.ParkNow();
             }
-            float wait = Time.realtimeSinceStartup;
-            while (Time.realtimeSinceStartup - wait < 4) yield return null;   // time to (wrongly) touch the foreign part
-            Time.timeScale = 1;
-            bool inBoxes = mine.All(i => g.world.instances[i].state == ItemState.Stored && g.storage.Stored(g.world.DefOf(i).storageBox).Contains(i));
-            Check("the arm sorts staged parts into its own drawers through normal storage (sets, XP; loose parts in its piles count too)", mine.Count == 3 && inBoxes && bot.delivered - deliveredBefore >= 3 && g.progress.sortedTotal - sortedBefore >= 3 && g.progression.xp > xpBefore,
-                  $"{mine.Count(i => g.world.instances[i].state == ItemState.Stored)}/{mine.Count} stored, delivered {bot.delivered - deliveredBefore}, sorted +{g.progress.sortedTotal - sortedBefore}");
-            Check("it never touches the other half of the cabinet", foreign < 0 || g.world.instances[foreign].state == ItemState.InWorld,
-                  foreign < 0 ? "no foreign part found" : $"{g.world.DefOf(foreign).displayName}: {g.world.instances[foreign].state}");
-            LookFrom(sk.point + sk.facing * Vector3.forward * 2.4f + aisle * 1.3f + Vector3.down * 0.6f, sk.point + Vector3.down * 0.5f);
-            yield return g.Capture(Path.Combine(outDir, "19_sorting_arm_parked.png"), 2);
+            g.hud.SetHudVisible(true);
+            bot.paused = false;
+            var levels = shelfSk.dests.GroupBy(b => Json.Int(g.db.boxes[b], "level")).OrderByDescending(gr => gr.Key).SelectMany(gr => gr.Take(2)).Concat(shelfSk.dests).Distinct().ToList();
+            yield return ArmSort(arm, bot, PartsFor(levels, bot, 4), PartsFor(sk.dests, bot, 1), "shelf (top, middle and bottom levels)");
 
-            // save / load: mounted stays mounted on the same socket; a carried arm comes back to the bench
+            // save / load at the shelf
             g.SaveGame("autotest_arm");
             g.StartWorld(g.world.seed, null);
             g.LoadGame("autotest_arm");
             yield return Frames(5);
             bot = g.workbench.RobotOf(g.workbench.P("sorting_arm"));
             arm = bot.arm;
-            Check("save/load keeps the arm mounted on its socket", arm.place == SortingArm.Place.Mounted && arm.socket != null && arm.socket.id == sk.id && g.sockets[sk.id].occupant == arm, arm.Describe());
+            sk = g.sockets[sk.id]; shelfSk = g.sockets[shelfSk.id];
+            Check("save/load at a shelf: the arm comes back mounted on the same shelf mount, parked, serving it", arm.place == SortingArm.Place.Mounted && arm.socket == shelfSk && shelfSk.occupant == arm
+                  && arm.Served.SetEquals(shelfSk.dests) && Mathf.Abs(shelfSk.cx - shelfSk.parkX) < 0.01f && Mathf.Abs(shelfSk.cH - shelfSk.hPark) < 0.01f, arm.Describe());
+
+            // ---- relocation shelf -> cabinet
+            armObj = arm.gameObject;
+            arm.PickUp();
+            t0 = Time.realtimeSinceStartup;
+            while (arm.place != SortingArm.Place.Carried && Time.realtimeSinceStartup - t0 < 20) yield return null;
+            why = arm.Mount(sk);
+            Check($"relocation shelf → cabinet: the same arm mounts back on {sk.id}, serves the cabinet and no longer the shelf", why == "" && arm.gameObject == armObj && shelfSk.occupant == null && sk.occupant == arm
+                  && arm.Served.SetEquals(sk.dests) && !shelfSk.dests.Any(g.ArmServes), why == "" ? arm.Describe() : why);
+            yield return ArmSort(arm, bot, PartsFor(sk.dests.AsEnumerable().Reverse().ToList(), bot, 2), new List<int>(), "cabinet after relocation");
+            g.SaveGame("autotest_arm");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_arm");
+            yield return Frames(5);
+            bot = g.workbench.RobotOf(g.workbench.P("sorting_arm"));
+            arm = bot.arm;
+            Check("save/load at a cabinet: the arm comes back mounted on the same cabinet mount", arm.place == SortingArm.Place.Mounted && arm.socket != null && arm.socket.id == sk.id && g.sockets[sk.id].occupant == arm
+                  && arm.Served.SetEquals(g.sockets[sk.id].dests), arm.Describe());
             arm.PickUp();   // a busy arm finishes its part first, then comes into the hands
             float tw = Time.realtimeSinceStartup;
             while (arm.place != SortingArm.Place.Carried && Time.realtimeSinceStartup - tw < 20) yield return null;
@@ -1325,9 +1387,138 @@ namespace WorkshopWreckage
             g.LoadGame("autotest_arm");
             yield return Frames(5);
             bot = g.workbench.RobotOf(g.workbench.P("sorting_arm"));
-            Check("an arm saved while carried is set down at the workbench on load (nothing lost)", bot.arm.place == SortingArm.Place.Bench && g.sockets.Values.All(s => s.occupant == null) && g.CarriedArm == null, bot.arm.Describe());
+            Check("an arm saved while carried is set down at the workbench on load (nothing lost)", bot.arm.place == SortingArm.Place.Bench && g.sockets.Values.All(s => s.occupant == null) && g.CarriedArm == null
+                  && g.world.instances.Count == total, bot.arm.Describe());
             File.Delete(SaveSystem.PathOf("autotest_arm"));
             foreach (var r in g.robots.Where(r => r.Mobile)) r.paused = false;
+        }
+
+        static bool ReachOk(SortingArm.ReachReport r) => r.targets > 0 && r.worstErr < 0.01f && r.mountClear > 0.01f && r.furnClear > 0.005f && r.maxJump < 25;
+
+        /// <summary>Up to n loose parts (one per destination, in the given order) the arm can carry.</summary>
+        List<int> PartsFor(List<string> boxes, Robot bot, int n)
+        {
+            var ids = new List<int>();
+            bool Fits(int i) { var d = g.world.DefOf(i); return d.robotCarry && !d.IsRobotPart && ItemDatabase.Extents(d)[0] <= bot.MaxItemSize; }
+            foreach (var box in boxes)
+            {
+                if (g.StraysIn(box).Count > 0) continue;
+                var id = g.world.instances.Where(i => i.state == ItemState.InWorld && !ids.Contains(i.id)).Select(i => i.id)
+                    .Where(i => g.world.DefOf(i).storageBox == box && Fits(i)).DefaultIfEmpty(-1).First();
+                if (id < 0)
+                {
+                    // no loose part of this destination left: take one out of it, as the player would
+                    id = g.storage.Stored(box).Where(Fits).DefaultIfEmpty(-1).First();
+                    if (id >= 0) g.storage.Remove(box, id);
+                }
+                else if (g.storage.Stored(box).Count >= g.db.BoxCapacity(box)) continue;
+                if (id >= 0) ids.Add(id);
+                if (ids.Count == n) break;
+            }
+            return ids;
+        }
+
+        /// <summary>Stages the parts (and the foreign ones, for a unit it does not serve) and lets the
+        /// mounted arm sort: each part stored exactly once in its own destination, none lost or
+        /// duplicated, the foreign parts left where they lie.</summary>
+        IEnumerator ArmSort(SortingArm arm, Robot bot, List<int> mine, List<int> foreign, string what)
+        {
+            foreach (var id in mine.Concat(foreign)) StageAt(id, g.world.DefOf(id).storageBox, bot);
+            var foreignAt = foreign.ToDictionary(i => i, i => g.world.instances[i].Position);
+            int total = g.world.instances.Count, deliveredBefore = bot.delivered, sortedBefore = g.progress.sortedTotal;
+            long xpBefore = g.progression.xp;
+            Time.timeScale = 3;
+            float t0 = Time.realtimeSinceStartup;
+            float maxJump = 0;
+            Vector3? last = null;
+            while (mine.Any(i => g.world.instances[i].state != ItemState.Stored) && Time.realtimeSinceStartup - t0 < 90)
+            {
+                // a part in the claws stays with the claws (no jumps of the held model)
+                if (arm.heldId >= 0) { var gp = arm.GetComponentInChildren<SortingArmModel>().GripPoint; if (last.HasValue) maxJump = Mathf.Max(maxJump, (gp - last.Value).magnitude); last = gp; }
+                else last = null;
+                yield return null;
+            }
+            float wait = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - wait < 3) yield return null;   // time to (wrongly) touch a foreign part
+            Time.timeScale = 1;
+            bool once = mine.All(i => g.world.instances[i].state == ItemState.Stored && g.storage.Stored(g.world.DefOf(i).storageBox).Count(x => x == i) == 1
+                                      && g.db.boxes.Keys.Count(b => g.storage.Stored(b).Contains(i)) == 1);
+            bool untouched = foreign.All(i => g.world.instances[i].state == ItemState.InWorld && (g.world.instances[i].Position - foreignAt[i]).magnitude < 0.01f);
+            Check($"the arm sorts staged parts at the {what} through normal storage: each stored once, nothing lost, other units' parts untouched",
+                  mine.Count >= 2 && once && untouched && g.world.instances.Count == total && bot.delivered - deliveredBefore >= mine.Count && g.progress.sortedTotal - sortedBefore >= mine.Count && g.progression.xp > xpBefore && maxJump < 0.25f,
+                  $"{mine.Count(i => g.world.instances[i].state == ItemState.Stored)}/{mine.Count} stored ({string.Join(", ", mine.Select(i => g.world.DefOf(i).storageBox))}), delivered {bot.delivered - deliveredBefore}, " +
+                  $"{foreign.Count} foreign untouched {untouched}, largest held-part step {maxJump * 100:0.0} cm/frame");
+        }
+
+        /// <summary>A parked arm leaves the unit usable: no visible part of the arm or its mount inside
+        /// the space in front of the unit (up to its top, 0.9 m out), no sight line from the player's
+        /// eye to any destination crossing it, every destination can be aimed at, and (cabinet) every
+        /// drawer opens and closes.</summary>
+        IEnumerator ArmAccess(SortingArm arm, ArmSocket sk)
+        {
+            var su = sk.su;
+            float w = su.size.x, d = su.size.z;
+            var vol = Obb.In(su.transform, new Vector3(-w / 2, 0, d / 2 - 0.02f), new Vector3(w / 2, sk.top, d / 2 + 0.9f));
+            var parts = arm.VisibleParts().Where(r => r.enabled && r.gameObject.activeInHierarchy).ToList();
+            float gap = parts.Min(r => Obb.Gap(Obb.World(r.bounds.min, r.bounds.max), vol));
+            float low = parts.Min(r => r.bounds.min.y);
+            // baseline: what the aiming helper reaches with the arm and mount out of the way (their
+            // colliders off); the parked arm must not take any of it away
+            var cols = arm.GetComponentsInChildren<Collider>().Concat(sk.GetComponentsInChildren<Collider>()).Where(c => c.enabled).ToList();
+            foreach (var c in cols) c.enabled = false;
+            var baseline = new HashSet<string>();
+            bool hit = false;
+            IEnumerator Aim(string dest)   // the helper settles the camera over frames: a second try before calling it a miss
+            {
+                hit = false;
+                for (int k = 0; k < 2 && !hit; k++)
+                {
+                    yield return AimAtDest(dest);
+                    g.interaction.UpdateTarget();
+                    hit = g.interaction.targetType == "dest" && g.interaction.targetDest == dest;
+                }
+            }
+            foreach (var dest in sk.dests)
+            {
+                yield return Aim(dest);
+                if (hit) baseline.Add(dest);
+            }
+            foreach (var c in cols) c.enabled = true;
+            int blocked = 0, aimed = 0, opened = 0;
+            string bad = "";
+            bool closed = true;
+            var missed = new List<string>();
+            foreach (var dest in sk.dests)
+            {
+                yield return Aim(dest);
+                var cam = g.player.cam.transform;
+                var ray = new Ray(cam.position, cam.forward);
+                if (parts.Any(r => r.bounds.IntersectRay(ray, out float dist) && dist < 1.3f)) { blocked++; if (bad == "") bad = dest + " hidden"; }
+                // the first thing the aim ray meets (triggers included) is never the arm or its mount
+                var first = Physics.RaycastAll(ray, 4f, ~0, QueryTriggerInteraction.Collide).OrderBy(h => h.distance).Select(h => h.collider).FirstOrDefault();
+                if (first != null && cols.Contains(first)) { blocked++; if (bad.Length < 160) bad += $"{dest}: aim caught by {first.name}; "; }
+                if (hit)
+                {
+                    aimed++;
+                    if (sk.cabinet && g.inventory.HeldId() < 0)
+                    {
+                        g.interaction.Primary();
+                        if (su.OpenCount > 0) opened++;
+                        // let it close before the next one (an open drawer would sit in the next aim)
+                        Time.timeScale = 4;
+                        float tc = Time.realtimeSinceStartup;
+                        while (su.OpenCount > 0 && Time.realtimeSinceStartup - tc < 4) yield return null;
+                        Time.timeScale = 1;
+                        closed &= su.OpenCount == 0;
+                    }
+                }
+                else if (baseline.Contains(dest)) missed.Add(dest);
+            }
+            int n = sk.dests.Count, nb = baseline.Count;
+            Check($"{sk.unit}: the parked arm and its mount leave the front clear — every {(sk.cabinet ? "drawer" : "container")} visible and aimable{(sk.cabinet ? ", opens and closes" : "")}",
+                  gap > 0 && blocked == 0 && (!sk.cabinet || (opened == aimed && closed)),
+                  $"lowest visible part {low:0.00} m (unit top {sk.top:0.00} m), gap to the access space {gap * 100:0.0} cm; {n - blocked}/{n} sight lines clear, {aimed}/{n} aimed with the arm parked ({nb}/{n} without arm and mount: the aiming helper's own limit)" +
+                  (sk.cabinet ? $", {opened}/{aimed} opened, all closed again {closed}" : "") + (missed.Count > 0 ? $"; helper misses with the arm (not caught by it): {string.Join(" ", missed)}" : "") + (bad != "" ? $"; problems: {bad}" : ""));
         }
 
         /// <summary>Puts a part on the staging pile of its destination (as a robot would).</summary>

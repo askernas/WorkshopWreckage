@@ -85,14 +85,14 @@
 			"battery_minutes": 0, "charge_minutes": 0, "radius": 0.2,
 			"limits": {"cycle_speed": 1.6, "max_item_size": 0.45},
 			"strengths": ["Fast local sorting: clears the staging piles below its half of a drawer cabinet", "Works all day on workshop power"],
-			"limitations": ["Stationary: serves only the 18 drawers (3 x 6) of the cabinet half it is mounted on", "Never picks loose parts from the floor or other cabinets", "The player carries it from socket to socket"],
+			"limitations": ["Stationary: serves only the unit it is mounted on (all 36 drawers of a cabinet, or the containers of a shelving unit; wooden crates under a deck are too low to reach into)", "Never picks loose parts from the floor or other units", "The player carries it from mount to mount"],
 			"assembly": {"requires": {"shoulder turret": ["docking coupler"], "control unit": ["shoulder turret"], "upper arm": ["shoulder turret"], "motor cartridge": ["upper arm"], "elbow servo": ["upper arm"], "forearm": ["elbow servo"], "wrist rotator": ["forearm"], "sensor head": ["wrist rotator"], "left finger": ["wrist rotator"], "right finger": ["wrist rotator"], "cable harness": ["control unit", "forearm"]}},
 			"extra_units": [
 				{"id": "sorting_arm_2", "name": "Sorting Arm #2", "materials": {"Machine Parts": 4, "Gears": 6, "Bearings": 4, "Electronics": 6, "Springs": 2}},
 				{"id": "sorting_arm_3", "name": "Sorting Arm #3", "materials": {"Machine Parts": 6, "Gears": 6, "Bearings": 6, "Electronics": 8, "Shafts & Pins": 4}}
 			],
 			"extra_units_note": "The first arm needs its 12 unique parts; further arms are crafted from ordinary salvage (by category), like Hoverbot #2/#3. At most max_instances arms exist.",
-			"sockets_note": "Arms mount only on fixed sockets: two per 6 x 6 drawer cabinet (storage_layout.json sockets: SK-<unit>-L serves columns 1-3, SK-<unit>-R columns 4-6, 18 drawers each).",
+			"sockets_note": "Arms mount only on fixed sockets: one overhead rail mount per drawer cabinet and per shelving unit (storage_layout.json sockets: SK-<unit> serves the whole unit; the arm hangs from a trolley and lift mast that run along a ceiling-hung rail, independent of the furniture).",
 			"personality": "Patient, precise, a little proud. Ticks its servos while it waits."
 		}
 	}

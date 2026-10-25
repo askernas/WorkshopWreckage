@@ -121,7 +121,7 @@ namespace WorkshopWreckage
                 if (lmbDown)
                 {
                     if (targetType == "socket") Primary();
-                    else Feedback?.Invoke("Both hands on the Sorting Arm — mount it on an overhead socket above a drawer cabinet, or [Z] set it down at the workbench", false);
+                    else Feedback?.Invoke("Both hands on the Sorting Arm — mount it on the overhead rail above a drawer cabinet or shelving unit, or [Z] set it down at the workbench", false);
                 }
                 if (kb.zKey.wasPressedThisFrame) { carriedArm.ToBench(); Feedback?.Invoke("Sorting Arm set down at the workbench", true); }
                 return;
@@ -294,7 +294,7 @@ namespace WorkshopWreckage
                 {
                     if (!game.sockets.TryGetValue(targetSocket, out var sk)) break;
                     var arm = sk.occupant;
-                    string sub = $"Serves {sk.Label} (18 drawers)" + (arm != null ? $"  ·  {arm.Describe()}" : "  ·  empty");
+                    string sub = $"Serves {sk.Label}" + (arm != null ? $"  ·  {arm.Describe()}" : "  ·  empty");
                     if (game.CarriedArm != null)
                         return arm == null ? new TargetInfo { title = "Sorting Arm socket " + sk.id, sub = sub, hint = "[LMB] Mount the Sorting Arm here", tone = 1 }
                                            : new TargetInfo { title = "Sorting Arm socket " + sk.id, sub = sub, hint = "Taken — find an empty socket (green lamp)", tone = -1 };

@@ -36,7 +36,7 @@ namespace WorkshopWreckage
         public RobotModules modules;
         public readonly List<Robot> robots = new();
         public Robot retrobot => robots.Find(r => r.id == "retrobot");
-        /// <summary>Sorting Arm sockets of the current layout (two per drawer cabinet).</summary>
+        /// <summary>Sorting Arm mounts of the current layout (one per drawer cabinet and shelving unit).</summary>
         public readonly Dictionary<string, ArmSocket> sockets = new();
         /// <summary>The Sorting Arm in the player's hands (two-handed carry), if any.</summary>
         public SortingArm CarriedArm => robots.Select(r => r.arm).FirstOrDefault(a => a != null && a.place == SortingArm.Place.Carried);
@@ -1365,7 +1365,7 @@ namespace WorkshopWreckage
                 var su = go.AddComponent<StorageUnit>();
                 su.Setup(u, dests);
                 units[id] = su;
-                if (su.type == "drawer_cabinet") SortingArm.BuildSockets(this, su, id);
+                SortingArm.BuildSockets(this, su, id);   // drawer cabinets and shelving have an overhead arm mount
             }
         }
 

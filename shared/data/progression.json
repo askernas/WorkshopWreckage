@@ -101,7 +101,7 @@
 		{"id": "hover_staging", "robot": "hoverbot", "name": "Staging Prioritization", "description": "Empties the fullest staging zones first, then the closest.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "staging_priority", "mode": "rank", "effect_per_rank": 1, "status": "active"},
 		{"id": "hover_fleet", "robot": "hoverbot", "name": "Fleet Coordination", "description": "Hoverbots split the staging zones between them instead of crowding the same one.", "max_rank": 3, "cost_per_rank": [1, 1, 1], "stat": "fleet_coordination", "mode": "rank", "effect_per_rank": 1, "status": "active"},
 		{"id": "arm_servos", "robot": "sorting_arm", "name": "Faster Servos", "description": "Stronger joint servos: each rank makes the whole pick-and-place cycle 15% faster.", "max_rank": 3, "cost_per_rank": [1, 1, 2], "stat": "cycle_speed", "mode": "percent", "effect_per_rank": 0.15, "status": "active"},
-		{"id": "arm_gripper", "robot": "sorting_arm", "name": "Wide Gripper", "description": "Longer fingers: handles bigger parts (0.36 m, then 0.41 m, then 0.45 m). Its reach stays one half-cabinet.", "max_rank": 2, "cost_per_rank": [1, 2], "stat": "max_item_size", "mode": "add", "effect_per_rank": 0.045, "status": "active"}
+		{"id": "arm_gripper", "robot": "sorting_arm", "name": "Wide Gripper", "description": "Longer fingers: handles bigger parts (0.36 m, then 0.41 m, then 0.45 m). Its reach stays the one unit it is mounted on.", "max_rank": 2, "cost_per_rank": [1, 2], "stat": "max_item_size", "mode": "add", "effect_per_rank": 0.045, "status": "active"}
 	],
 	"respec": {"status": "active", "comment": "From this level the Robots screen can refund every robot upgrade point (player skills stay)."},
 	"restoration": {

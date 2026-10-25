@@ -480,20 +480,20 @@ namespace WorkshopWreckage.EditorTools
             items.AddRange(Json.Arr(robots["items"]));
             File.WriteAllText(Path.Combine(dir, "world_config.json"), Json.Write(config));
             File.WriteAllText(Path.Combine(dir, "item_catalog.json"), Json.Write(new Dictionary<string, object> { ["version"] = 3.0, ["preset"] = id, ["items"] = items }));
-            // Sorting Arm sockets: two per drawer cabinet, each serving one vertical half
-            // (columns 1-3 / 4-6 of a 6 x 6 cabinet = 18 drawers). Only drawer cabinets are
-            // eligible (docs/ROBOT_WORKSHOP_ASSET_AUDIT.md §4).
+            // Sorting Arm mounts: one overhead rail per drawer cabinet and per shelving unit, serving
+            // the whole unit; a wooden crate under a shelf deck is left out (its rim sits 9.5 cm under
+            // the next level's beam, too tight for the pincer) (docs/ROBOT_WORKSHOP_ASSET_AUDIT.md §4).
             var sockets = new List<object>();
-            foreach (var u in units.Where(u => Json.Str(u, "type") == "drawer_cabinet"))
+            foreach (var u in units.Where(u => Json.Str(u, "type") is "drawer_cabinet" or "shelving"))
             {
                 string uid = Json.Str(u, "id");
-                int ucols = Json.Int(u, "cols", 6);
-                foreach (var (side, left) in new[] { ("L", true), ("R", false) })
-                    sockets.Add(new Dictionary<string, object>
-                    {
-                        ["id"] = $"SK-{uid}-{side}", ["unit"] = uid, ["side"] = side,
-                        ["dests"] = dests.Where(d => Json.Str(d, "unit") == uid && (Json.Int(d, "col") < ucols / 2) == left).Select(d => (object)Json.Str(d, "id")).ToList(),
-                    });
+                int top = Json.Arr(u.GetValueOrDefault("levels")).Count - 1;
+                sockets.Add(new Dictionary<string, object>
+                {
+                    ["id"] = $"SK-{uid}", ["unit"] = uid, ["side"] = "",
+                    ["dests"] = dests.Where(d => Json.Str(d, "unit") == uid && !(Json.Str(d, "kind") == "wooden_crate" && Json.Int(d, "level") < top))
+                        .Select(d => (object)Json.Str(d, "id")).ToList(),
+                });
             }
             File.WriteAllText(Path.Combine(dir, "storage_layout.json"), Json.Write(new Dictionary<string, object>
             {

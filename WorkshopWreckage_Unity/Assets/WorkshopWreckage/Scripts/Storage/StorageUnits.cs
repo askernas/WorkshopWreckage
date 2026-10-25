@@ -412,6 +412,9 @@ namespace WorkshopWreckage
 
         // ------------------------------------------------------------ drawers
 
+        /// <summary>QA: drawers standing open (or closing).</summary>
+        public int OpenCount => _open.Count;
+
         public int SlotOf(string destId) => _labelIndex.TryGetValue(destId, out var i) ? i : -1;
 
         /// <summary>Opens a drawer with the given contents (mesh, materials, tray-local Unity matrix);
