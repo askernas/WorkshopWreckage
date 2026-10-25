@@ -75,9 +75,11 @@ namespace WorkshopWreckage.EditorTools
         public static void ValidateAll()
         {
             int failures = 0;
+            var all = new List<ItemDatabase>();
             foreach (var (id, pc) in ItemDatabase.Presets())
             {
                 var db = ItemDatabase.LoadPreset(id);
+                all.Add(db);
                 if (db.IsValid) db.Validate();
                 foreach (var e in db.errors.Take(30)) Debug.LogError($"[validate] {id}: {e}");
                 if (!db.IsValid) { failures++; continue; }
@@ -113,8 +115,54 @@ namespace WorkshopWreckage.EditorTools
                               $"layout {layoutMs:0} ms, world {gen.lastGenerationMs:0} ms; heights: " + string.Join(", ", bySurface.Select(kv => $"{kv.Key} {kv.Value}")));
                 }
             }
+            failures += ValidateComponentScale(all);
             failures += ValidateProgression();
             if (Application.isBatchMode) EditorApplication.Exit(failures == 0 ? 0 : 1);
+        }
+
+        /// <summary>component_scale.json against the catalogue: the anchors and the player-only list
+        /// must match the ranking over every sortable definition of every preset, and a definition is
+        /// robot-eligible in every preset or in none.</summary>
+        static int ValidateComponentScale(List<ItemDatabase> dbs)
+        {
+            int failures = 0;
+            var defs = dbs.SelectMany(d => d.definitions.Values).ToList();
+            foreach (var e in ComponentScale.Check(defs)) { Debug.LogError("[validate] " + e); failures++; }
+            var mixed = defs.GroupBy(d => d.id).Where(g => g.Select(d => d.robotCarry).Distinct().Count() > 1 || g.Select(d => d.componentScale).Distinct().Count() > 1).ToList();
+            foreach (var g in mixed.Take(10)) { Debug.LogError($"[validate] component_scale: item {g.Key} differs between presets"); failures++; }
+            var sortable = defs.Where(d => !d.IsRobotPart).GroupBy(d => d.id).Select(g => g.First()).ToList();
+            Debug.Log($"[validate] component_scale: {(ComponentScale.Enabled ? "on" : "off")}, {sortable.Count} sortable definitions, {sortable.Count(d => d.robotCarry)} robot-eligible, " +
+                      $"{sortable.Count(d => !d.robotCarry)} player-only; factor {sortable.Min(d => d.componentScale):0.000}–{sortable.Max(d => d.componentScale):0.000}, " +
+                      $"largest part {sortable.Max(d => ItemDatabase.Extents(d)[0]) * 1000:0.0} mm; per preset: " +
+                      string.Join(", ", dbs.Select(db => $"{db.presetId} {db.definitions.Values.Count(d => !d.IsRobotPart && d.robotCarry)}/{db.definitions.Values.Count(d => !d.IsRobotPart)}")));
+            return failures;
+        }
+
+        /// <summary>Writes the anchors and the player-only list into shared/data/component_scale.json
+        /// from the catalogue (every preset), keeping its other settings. Run after a catalogue change.
+        /// CLI: -executeMethod WorkshopWreckage.EditorTools.CatalogAuthoring.WriteComponentScale</summary>
+        [MenuItem("Workshop Wreckage/Write component scale list")]
+        public static void WriteComponentScale()
+        {
+            var cfg = Shared.ReadObject(ComponentScale.Path);
+            var defs = ItemDatabase.Presets().SelectMany(p => ItemDatabase.LoadPreset(p.id).definitions.Values).ToList();
+            float full = (float)Json.Num(cfg, "full_size_mm", 250), max = (float)Json.Num(cfg, "max_factor", 2), share = (float)Json.Num(cfg, "robot_share", 0.8);
+            var (po, smallest) = ComponentScale.Rank(defs, full, max, share);
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var sb = new System.Text.StringBuilder();
+            sb.Append("{\n");
+            sb.Append($"  \"_doc\": {Json.Write(Json.Str(cfg, "_doc"))},\n");
+            sb.Append($"  \"enabled\": {(Json.Bool(cfg, "enabled") ? "true" : "false")},\n");
+            sb.Append($"  \"max_factor\": {max.ToString(inv)},\n");
+            sb.Append($"  \"full_size_mm\": {full.ToString(inv)},\n");
+            sb.Append($"  \"smallest_mm\": {smallest.ToString(inv)},\n");
+            sb.Append($"  \"robot_share\": {share.ToString(inv)},\n");
+            sb.Append($"  \"player_only\": [");
+            for (int i = 0; i < po.Count; i++) sb.Append((i % 20 == 0 ? "\n    " : " ") + po[i] + (i < po.Count - 1 ? "," : ""));
+            sb.Append("\n  ]\n}\n");
+            File.WriteAllText(ComponentScale.Path, sb.ToString());
+            Debug.Log($"[componentscale] wrote {po.Count} player-only of {defs.Where(d => !d.IsRobotPart).Select(d => d.id).Distinct().Count()} sortable definitions, smallest {smallest} mm");
+            if (Application.isBatchMode) EditorApplication.Exit(0);
         }
 
         /// <summary>progression.json: configuration rules, anti-exploit behaviour and a

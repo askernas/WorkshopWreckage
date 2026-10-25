@@ -26,6 +26,11 @@ namespace WorkshopWreckage
         public Color variantColor = Color.white;
         public string geometryKey;
         public float meshScaleMm, visualScale, worldScale;
+        /// <summary>world_scale as the catalogue has it (mesh_scale_mm × visual_scale), and the component
+        /// rescale factor on top (ComponentScale): worldScale = baseWorldScale × componentScale.</summary>
+        public float baseWorldScale, componentScale = 1f;
+        /// <summary>Within the robots' 80 % of definitions (ComponentScale); not a promise that a robot can lift it.</summary>
+        public bool robotCarry = true;
         public RestMode restMode;
 
         public string CategoryName => CategoryNames[category];
@@ -67,7 +72,7 @@ namespace WorkshopWreckage
             def.storageCategory = Json.Str(d, "storage_category", def.CategoryName);
             if (ColorUtility.TryParseHtmlString(Json.Str(d, "color", "#ffffff"), out var c)) def.variantColor = c;
             def.visualScale = (float)Json.Num(d, "visual_scale", def.IsRobotPart ? 1.0 : defaultVisualScale);
-            def.worldScale = def.meshScaleMm / 1000f * def.visualScale;
+            def.worldScale = def.baseWorldScale = def.meshScaleMm / 1000f * def.visualScale;
             return def;
         }
     }

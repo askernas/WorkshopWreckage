@@ -453,8 +453,12 @@ namespace WorkshopWreckage
     public static class SaveSystem
     {
         /// <summary>2: every saved part also records its definition id (item_defs), so a save
-        /// survives catalog changes (SaveMigration). Version 1 saves still load unchanged.</summary>
-        public const int Version = 2;
+        /// survives catalog changes (SaveMigration). Version 1 saves still load unchanged.
+        /// 3: component rescale (ComponentScale). Loose parts are saved with their size, and every
+        /// version loads them at their definition's current size (ApplyItems), so older saves get the new
+        /// sizes once and a save never scales twice. A robot carrying a part that is player-only now sets
+        /// it down (Robot.AdoptCarried).</summary>
+        public const int Version = 3;
         public static readonly string[] Slots = { "quick", "slot1", "slot2", "slot3" };
         public static string Dir => System.IO.Path.Combine(Application.persistentDataPath, "saves");
         public static string PathOf(string slot) => System.IO.Path.Combine(Dir, slot + ".json");
@@ -548,7 +552,7 @@ namespace WorkshopWreckage
                 {
                     var m = new Matrix4x4();
                     for (int k = 0; k < 16; k++) m[k] = (float)(double)e[3 + k];
-                    inst.transform = m;
+                    inst.transform = ComponentScale.Resize(m, w.DefOf(inst.id));
                     inst.moved = true;
                 }
             }

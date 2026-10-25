@@ -144,6 +144,7 @@ namespace WorkshopWreckage
                   .Append($"\"id\": {d.id}, \"name\": {S(d.displayName)}, \"category\": {S(d.CategoryName)}, \"robot_part\": {(d.IsRobotPart ? "true" : "false")}, ")
                   .Append($"\"subcategory\": {S(d.subcategory)}, \"shape\": {S(d.shape)}, \"material\": {S(d.material)}, \"finish\": {S(d.finish)}, ")
                   .Append($"\"geometry_key\": {S(d.geometryKey)}, \"mesh_scale_mm\": {F(d.meshScaleMm)}, \"visual_scale\": {F(d.visualScale)}, \"world_scale\": {d.worldScale.ToString("R", Inv)}, ")
+                  .Append($"\"base_world_scale\": {d.baseWorldScale.ToString("R", Inv)}, \"component_scale\": {d.componentScale.ToString("R", Inv)}, \"robot_carry\": {(d.robotCarry ? "true" : "false")}, ")
                   .Append($"\"rest_mode\": {S(d.restMode.ToString().ToLowerInvariant())}, ")
                   .Append($"\"size_mm\": [{F(w.x)}, {F(w.y)}, {F(w.z)}], \"size_inspect_mm\": [{F(i.x)}, {F(i.y)}, {F(i.z)}], ")
                   .Append($"\"weight_g\": {F(d.weightG)}, \"diameter_mm\": {F(d.diameterMm)}, \"length_mm\": {F(d.lengthMm)}, \"thread_size\": {S(d.threadSize)}, \"thread_pitch_mm\": {F(d.threadPitchMm)}, ")

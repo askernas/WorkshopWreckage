@@ -81,6 +81,7 @@ namespace WorkshopWreckage
                 if (definitions.ContainsKey(def.id)) { errors.Add($"Duplicate item id {def.id}"); continue; }
                 definitions[def.id] = def;
                 order.Add(def.id);
+                ComponentScale.Apply(def);
             }
             foreach (var u in Json.Arr(sto["units"]))
             {
@@ -118,6 +119,10 @@ namespace WorkshopWreckage
         }
 
         public ItemDefinition Get(int id) => definitions.TryGetValue(id, out var d) ? d : null;
+
+        /// <summary>Is this definition within the robots' 80 % (ComponentScale)? Robots still need to
+        /// reach, grip and lift the part: this is only the upper limit.</summary>
+        public bool CanRobotCarry(int id) => Get(id) is ItemDefinition d && !d.IsRobotPart && d.robotCarry;
 
         public int BoxCapacity(string id)
         {

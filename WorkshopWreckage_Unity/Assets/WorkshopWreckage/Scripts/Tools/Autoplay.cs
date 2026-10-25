@@ -195,7 +195,8 @@ namespace WorkshopWreckage
             bool repeats = _events.Skip(evLoad).Any(e => e.kind is GameEventKind.PartSorted or GameEventKind.RobotActivated or GameEventKind.PartStaged || (e.kind == GameEventKind.LevelReached && e.count <= lvSaved));
             Check("gameplay counters survive save/load and loading repeats no event", statsSame && !repeats,
                   $"stats identical after load {statsSame}; after it: {string.Join(", ", _events.Skip(evLoad).Select(e => e.kind + (e.kind == GameEventKind.LevelReached ? " " + e.count : "")))} ({lvBefore} -> level {g.progression.level} xp {g.progression.xp})");
-            Check("save/load restores identical state", snap == after, $"{snap.GetHashCode()} vs {after.GetHashCode()}");
+            Check("save/load restores identical state", snap == after, snap == after ? $"{snap.GetHashCode()} vs {after.GetHashCode()}"
+                  : "differs: " + string.Join(" ", snap.Split('|').Except(after.Split('|')).Take(3)) + " -> " + string.Join(" ", after.Split('|').Except(snap.Split('|')).Take(3)));
             File.Delete(SaveSystem.PathOf("autotest"));
 
             // 6. Retrobot: assembly from 5 parts, activation, autonomous sorting
@@ -245,6 +246,8 @@ namespace WorkshopWreckage
                 File.Delete(SaveSystem.PathOf("autotest2"));
             }
 
+            // 9b. component rescale and the robot carry limit
+            yield return RescaleChecks();
             // 10. restoration: with its zone mostly restored the lathe runs again
             {
                 foreach (var r in g.robots) r.enabled = false;
@@ -290,6 +293,17 @@ namespace WorkshopWreckage
                 g.world.SetTransform(id, Matrix4x4.TRS(new Vector3(p.x, g.debris.At(p) + ItemDatabase.Extents(def)[2] * 0.5f + 0.01f, p.z), Quaternion.identity, Vector3.one * def.worldScale));
                 g.world.SetState(id, ItemState.InWorld, "world");
                 g.index.Insert(id);
+                // onto its real support (the rule a load settles by), not just the debris height
+                var b = g.index.WorldBounds(id);
+                float dy = b.min.y - g.interaction.SupportUnder(id, b, new Dictionary<int, float>());
+                if (dy > 0)
+                {
+                    var m = g.world.instances[id].transform;
+                    m.m13 -= dy;
+                    g.index.Remove(id);
+                    g.world.SetTransform(id, m);
+                    g.index.Insert(id);
+                }
             }
             return strays.Count;
         }
@@ -352,8 +366,9 @@ namespace WorkshopWreckage
                 float y0 = top.i.Position.y;
                 float Gap(int id) { var bb = g.index.WorldBounds(id); return bb.min.y - g.interaction.SupportUnder(id, bb, new Dictionary<int, float>()); }
                 // gaps that were there before (a long part bridging two supports reads as a gap
-                // under its middle) are not what this checks: only what the removal causes
-                var before = g.index.QuerySphere(top.i.Position, 0.5f).ToDictionary(o => o, Gap);
+                // under its middle) are not what this checks: only what the removal causes. Wider than the
+                // after-check: its centre (the top part) comes down, and the parts it then reaches were there before
+                var before = g.index.QuerySphere(top.i.Position, 1.0f).ToDictionary(o => o, Gap);
                 g.player.Teleport(top.i.Position + new Vector3(0.6f, -top.i.Position.y, 0.6f));
                 g.interaction.Pickup(top.under[0], false);
                 yield return new WaitForSeconds(1.2f);
@@ -723,7 +738,7 @@ namespace WorkshopWreckage
             var pr = g.progression;
             var retro = g.retrobot;
             bool High(string box) => g.db.boxes.TryGetValue(box, out var bd) && Json.Num(bd, "elevation_m") > 1.0;
-            bool Loose(ItemInstance i) => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && !g.world.DefOf(i.id).IsRobotPart && !i.owner.StartsWith("stage:");
+            bool Loose(ItemInstance i) => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && g.world.DefOf(i.id).robotCarry && !g.world.DefOf(i.id).IsRobotPart && !i.owner.StartsWith("stage:");
 
             // Scenario A/B: a part left in the staging zone below a high destination is stored by Hoverbot
             var staged = g.world.instances.FirstOrDefault(i => Loose(i) && i.Position.y < 0.4f && High(g.world.DefOf(i.id).storageBox) && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= hover.MaxItemSize);
@@ -755,7 +770,7 @@ namespace WorkshopWreckage
 
             // Scenario C: Spiderbot on an assignment that needs climbing
             var shelfPart = g.world.instances.Where(i => Loose(i) && i.Position.y > 0.55f && i.Position.y < spider.ReachHeight - 0.05f && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= spider.MaxItemSize
-                                                                && g.UnitAt(i.Position) != null && !g.Covered(i.id))   // an uncovered part: covered ones wait
+                                                                && g.UnitAt(i.Position) != null && !g.Covered(i.id) && spider.CanPick(i.id))   // an uncovered part it would take: covered ones wait
                 .OrderBy(i => (i.Position - spider.transform.position).sqrMagnitude).FirstOrDefault();
             if (shelfPart != null)
             {
@@ -770,7 +785,7 @@ namespace WorkshopWreckage
                     yield return null;
                 }
                 Time.timeScale = 1;
-                Check("Spiderbot climbs furniture to reach parts of its assignment", climbed, $"{g.world.DefOf(shelfPart.id).displayName} at {shelfPart.Position.y:0.00} m: {shelfPart.state}; {spider.Describe()}");
+                Check("Spiderbot climbs furniture to reach parts of its assignment", climbed, $"{g.world.DefOf(shelfPart.id).displayName} at {shelfPart.Position.y:0.00} m: {shelfPart.state} ({spider.PickHint(shelfPart.id)}); {spider.Describe()}");
             }
             else Check("Spiderbot climbs furniture to reach parts of its assignment", false, "no part on furniture in range");
 
@@ -861,8 +876,8 @@ namespace WorkshopWreckage
             foreach (var r in g.robots) r.enabled = false;   // keep robots out of the way while measuring
             bool Free(ItemInstance i) => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && !g.world.DefOf(i.id).IsRobotPart && i.Position.y < 0.6f;
 
-            // Handful: a part with a same-kind neighbour right next to it
-            var withPair = g.world.instances.Where(Free).FirstOrDefault(i => g.index.QuerySphere(i.Position, 0.2f).Any(o => o != i.id && g.world.instances[o].defId == i.defId && Free(g.world.instances[o])));
+            // Handful: a part with a same-kind neighbour right next to it (both uncovered: Handful leaves buried copies)
+            var withPair = g.world.instances.Where(i => Free(i) && !g.Covered(i.id)).FirstOrDefault(i => g.index.QuerySphere(i.Position, 0.2f).Any(o => o != i.id && g.world.instances[o].defId == i.defId && Free(g.world.instances[o]) && !g.Covered(o)));
             if (withPair != null)
             {
                 g.player.Teleport(withPair.Position + new Vector3(0.8f, -withPair.Position.y, 0.8f));
@@ -1372,6 +1387,107 @@ namespace WorkshopWreckage
             Check("an old save without part identities is refused with a clear message", SaveSystem.Check(save, g.db).Contains("older item catalog"), SaveSystem.Check(save, g.db));
             File.Delete(SaveSystem.PathOf("autotest_mig"));
         }
+
+        /// <summary>Component rescale and the robot carry limit (ComponentScale, docs/COMPONENT_RESCALE.md).</summary>
+        IEnumerator RescaleChecks()
+        {
+            var sortable = g.db.order.Select(g.db.Get).Where(d => !d.IsRobotPart).ToList();
+            bool on = ComponentScale.Enabled;
+            float largestBase = sortable.Max(d => ItemDatabase.Extents(d)[0] / d.componentScale), largest = sortable.Max(d => ItemDatabase.Extents(d)[0]);
+            Check("component rescale: factors 1x to the configured maximum by size, the largest parts keep their size, eligibility from the catalogue list",
+                  !on || sortable.All(d => d.componentScale >= 1f && d.componentScale <= ComponentScale.MaxFactor + 1e-4f) && largest <= largestBase + 1e-5f
+                      && sortable.All(d => d.robotCarry == !ComponentScale.PlayerOnly.Contains(d.id)) && ComponentScale.PlayerOnly.Count == 200,
+                  $"{(on ? "on" : "off")}: {sortable.Count(d => d.robotCarry)} of {sortable.Count} definitions robot-eligible in {g.presetId}, factor {sortable.Min(d => d.componentScale):0.00}-{sortable.Max(d => d.componentScale):0.00}, largest {largest * 1000:0.0} mm");
+            if (!on) yield break;
+
+            // a saved part at its old size takes the new size once, with its lowest point where it was
+            var small = g.world.instances.FirstOrDefault(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).componentScale > 1.2f);   // well scaled at any max factor in use
+            if (small != null)
+            {
+                var def = g.world.DefOf(small.id);
+                var m = small.transform;
+                var old = Matrix4x4.TRS(m.GetColumn(3), m.rotation, Vector3.one * def.baseWorldScale);
+                old = Matrix4x4.Translate(Vector3.up * (ComponentScale.LowestY(m, def) - ComponentScale.LowestY(old, def))) * old;
+                var r1 = ComponentScale.Resize(old, def);
+                var r2 = ComponentScale.Resize(r1, def);
+                float s1 = ((Vector3)r1.GetColumn(0)).magnitude;
+                bool same = Enumerable.Range(0, 16).All(k => Mathf.Abs(r1[k] - r2[k]) < 1e-6f);
+                Check("an old-size saved part loads at the new size once (never twice), resting where it lay",
+                      Mathf.Abs(s1 - def.worldScale) < def.worldScale * 1e-3f && Mathf.Abs(ComponentScale.LowestY(r1, def) - ComponentScale.LowestY(old, def)) < 0.001f && same,
+                      $"{def.displayName}: scale {def.baseWorldScale:0.0000} -> {s1:0.0000} (x{def.componentScale:0.00}), lowest point {ComponentScale.LowestY(old, def) * 100:0.00} -> {ComponentScale.LowestY(r1, def) * 100:0.00} cm, again unchanged {same}");
+            }
+
+            // a player-only part right in front of Retrobot: it is never picked up, Retrobot sorts on
+            var retro = g.retrobot;
+            var big = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && !g.world.DefOf(i.id).robotCarry && !i.owner.StartsWith("stage:")
+                                                  && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= retro.MaxItemSize)   // small enough for its claws: only the 80 % rule stops it
+                .OrderBy(i => (i.Position - retro.transform.position).sqrMagnitude).FirstOrDefault();
+            if (big != null && retro.Active)
+            {
+                var def = g.world.DefOf(big.id);
+                var p = retro.transform.position + retro.transform.forward * 0.45f;
+                p.y = g.debris != null ? g.debris.At(p) : 0;
+                var m0 = big.transform;
+                g.index.Remove(big.id);
+                var placed = Matrix4x4.TRS(p, Quaternion.Euler(0, 30, def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+                placed = Matrix4x4.Translate(Vector3.up * (p.y - ComponentScale.LowestY(placed, def))) * placed;
+                g.world.SetTransform(big.id, placed);
+                g.index.Insert(big.id);
+                int ev0 = _events.Count, picks0 = g.robots.Sum(r => r.pickCount);
+                foreach (var r in g.robots) { r.enabled = true; r.SetBattery(1); }
+                Time.timeScale = 4;
+                float g0 = Time.time, t0 = Time.realtimeSinceStartup;
+                while (Time.time - g0 < 40 && Time.realtimeSinceStartup - t0 < 40) yield return null;
+                Time.timeScale = 1;
+                int picks = g.robots.Sum(r => r.pickCount) - picks0;
+                Check("robots never pick up a player-only part, even within their claws' size, and keep sorting the rest",
+                      big.state == ItemState.InWorld && !g.robotReserved.Contains(big.id) && picks > 0,
+                      $"{def.displayName} ({ItemDatabase.Extents(def)[0] * 1000:0} mm, Retrobot lifts {retro.MaxItemSize * 1000:0}) left at {(big.Position - p).magnitude * 100:0} cm from where it was put; {picks} other parts picked meanwhile");
+                var spider = g.robots.FirstOrDefault(r => r.id == "spiderbot");
+                string said = spider != null && spider.Active ? spider.Assign(def.id, false) : retro.CommandFocus(def.id);
+                Check("a robot told to sort a player-only kind declines it", said.Contains("too big"), said);
+
+                // the player can still take it
+                bool room = g.inventory.Count < g.inventory.capacity;
+                bool took = room && g.interaction.Pickup(big.id, false);
+                Check("the player picks up player-only parts as before", !room || took && big.state == ItemState.Carried, room ? $"picked {took}" : "pockets full (skipped)");
+                if (took) g.inventory.Remove(big.id);
+
+                // an older save in which Retrobot carries it: Retrobot sets it down at its feet on loading
+                g.world.SetState(big.id, ItemState.InWorld, "world");
+                g.world.SetTransform(big.id, m0);
+                g.index.Insert(big.id);
+                foreach (var r in g.robots) r.enabled = false;
+                g.SaveGame("autotest_scale");
+                var save = SaveSystem.Read("autotest_scale");
+                var rows = Json.Arr(save["items"]);
+                var defs = Json.Arr(save["item_defs"]);
+                int k = rows.FindIndex(r => (int)(double)((List<object>)r)[0] == big.id);
+                var row = new List<object> { (double)big.id, (double)(int)ItemState.Carried, retro.Owner };
+                if (k >= 0) rows[k] = row; else { rows.Add(row); defs.Add((double)big.defId); }
+                save["version"] = 2.0;
+                SaveSystem.Write("autotest_scale", save);
+                int count0 = g.world.Count;
+                g.StartWorld(g.world.seed, null);
+                g.LoadGame("autotest_scale");
+                foreach (var r in g.robots) r.enabled = false;
+                yield return Frames(5);
+                var back = g.world.instances[big.id];
+                retro = g.retrobot;   // the loaded world's
+                float d = Flat(back.Position - retro.transform.position).magnitude;
+                Check("a robot that carried a now player-only part in a save sets it down at its feet (not deleted, not moved away)",
+                      back.state == ItemState.InWorld && !retro.carried.Contains(big.id) && d < 1.0f && g.world.Count == count0 && back.Position.y >= -0.01f,
+                      $"{back.state} {d * 100:0} cm from Retrobot, {g.world.Count} parts");
+                foreach (var r in g.robots) r.enabled = true;
+                File.Delete(SaveSystem.PathOf("autotest_scale"));
+            }
+            else Check("robots never pick up a player-only part, even within their claws' size, and keep sorting the rest", false, big == null ? "no candidate part" : "Retrobot is not active");
+            // over the whole run so far: no robot picked up or sorted a player-only part
+            var bad = _events.Where(e => (e.kind == GameEventKind.PartPickedUp || e.kind == GameEventKind.PartSorted) && e.actor.StartsWith("robot") && e.partDef >= 0 && !g.db.CanRobotCarry(e.partDef)).ToList();
+            Check("no robot handled a player-only part during the run", bad.Count == 0, bad.Count == 0 ? $"{_events.Count(e => e.kind == GameEventKind.PartPickedUp && e.actor.StartsWith("robot"))} robot pickups checked" : string.Join(", ", bad.Take(5).Select(e => e.actor + " " + e.partDef)));
+        }
+
+        static Vector3 Flat(Vector3 v) => new Vector3(v.x, 0, v.z);
 
         void Check(string name, bool ok, string detail)
         {

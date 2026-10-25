@@ -133,6 +133,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
             if (args.TryGetValue("robotwatch", out var rwatch)) { SetState("play"); StartCoroutine(RobotWatch(rwatch)); return; }
             if (args.TryGetValue("activatewatch", out var awatch)) { SetState("play"); StartCoroutine(ActivateWatch(awatch)); return; }
+            if (args.TryGetValue("lineup", out var lineup)) { SetState("play"); StartCoroutine(Lineup(lineup)); return; }
             if (args.TryGetValue("catalogue", out var catDir)) { SetState("play"); StartCoroutine(CatalogueExport.Run(this, catDir)); return; }   // QA: component catalogue (read-only)
             if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
@@ -641,6 +642,121 @@ namespace WorkshopWreckage
             }
             yield return Capture(Path.Combine(dir, $"act_{k++:00}.png"), 1);
             Debug.Log($"[activatewatch] {id}: mode {r.mode}, {k} frames, lowest point while crossing the bench: {lowest * 100:0.0} cm above the mat top");
+            Application.Quit();
+        }
+
+        /// <summary>QA (--lineup=dir --lineupids=0.09:a,b,c|0.2:d,e [--fullbox=SH3-1B]): before / after views for
+        /// the component rescale, with fixed placement and cameras (independent of the part sizes, so a build
+        /// with component_scale.json "enabled": false gives the same framing). Each row of the lineup is laid
+        /// out on cleared floor north of the spawn at its own fixed spacing (m) and shot on its own
+        /// (row0.png ...), then the 30 smallest kinds on a seeded grid (floor_close.png); before that the
+        /// generated world: overview, a floor heap, the workbench; last, one destination filled to capacity
+        /// (fullbox.png).</summary>
+        IEnumerator Lineup(string dir)
+        {
+            player.enabled = false;
+            interaction.enabled = false;   // no aim highlight on the part in the middle
+            hud.SetHudVisible(false);
+            Directory.CreateDirectory(dir);
+            for (int i = 0; i < 5; i++) yield return null;
+            builder.RefreshProbe();
+            var cam = player.cam.transform;
+            void Look(Vector3 from, Vector3 at, float fov) { player.cam.fieldOfView = fov; cam.SetPositionAndRotation(from, Quaternion.LookRotation(at - from)); }
+
+            PlaceCamera("0.6,1.65,3.6,0,-18");
+            player.cam.fieldOfView = 60;
+            yield return Capture(Path.Combine(dir, "overview.png"), 3);
+            var heap = layout.piles.First(p => p.kind == "heap" && p.surface == 0);
+            var hc = Shared.Pos(heap.center.x, 0, heap.center.y);
+            Look(hc + new Vector3(1.1f, 1.0f, 1.1f), hc, 50);
+            yield return Capture(Path.Combine(dir, "heap.png"), 3);
+            var (mat, matRot) = workbench.MatSpot(0);
+            var bf = matRot * Vector3.forward; bf.y = 0; bf.Normalize();
+            Look(mat + bf * 1.5f + Vector3.Cross(Vector3.up, bf) * 0.6f + Vector3.up * 0.7f, mat, 55);
+            yield return Capture(Path.Combine(dir, "workbench.png"), 3);
+
+            // the lineup: floor cleared (hidden) around the spot, parts on the floor at fixed spacing
+            var spot = Shared.Pos(layout.spawn.x, 0, layout.spawn.z - 1.6f);
+            var north = Shared.Pos(0, 0, -1); var east = Shared.Pos(1, 0, 0);
+            foreach (var inst in world.instances)
+                if (inst.state == ItemState.InWorld && Vector3.ProjectOnPlane(inst.Position - spot, Vector3.up).magnitude < 2.6f) renderer.SetHidden(inst.id, true);
+            var rows = (args.TryGetValue("lineupids", out var li) ? li : "").Split('|', StringSplitOptions.RemoveEmptyEntries);
+            var used = new HashSet<int>();
+            for (int r = 0; r < rows.Length; r++)
+            {
+                var parts = rows[r].Split(':');
+                float gap = float.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture);
+                var ids = parts[1].Split(',').Select(int.Parse).Where(d => db.Get(d) != null).ToList();
+                var placed = new List<int>();
+                for (int k = 0; k < ids.Count; k++)
+                {
+                    var def = db.Get(ids[k]);
+                    var inst = world.instances.FirstOrDefault(i => i.defId == def.id && !used.Contains(i.id));
+                    if (inst == null) continue;
+                    used.Add(inst.id);
+                    var p = spot + east * ((k - (ids.Count - 1) * 0.5f) * gap);
+                    var m = Matrix4x4.TRS(p, Quaternion.Euler(0, 20, def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+                    m = Matrix4x4.Translate(Vector3.up * -ComponentScale.LowestY(m, def)) * m;
+                    index.Remove(inst.id);
+                    world.SetState(inst.id, ItemState.InWorld, "world");
+                    world.SetTransform(inst.id, m);
+                    renderer.SetHidden(inst.id, false);
+                    renderer.Refresh(inst.id);
+                    placed.Add(inst.id);
+                }
+                float width = Mathf.Max(gap, (ids.Count - 1) * gap + gap);
+                float dist = width * 0.75f + 0.15f;
+                Look(spot - north * dist + Vector3.up * dist * 0.55f, spot + Vector3.up * gap * 0.15f, 45);
+                yield return Capture(Path.Combine(dir, $"row{r}.png"), 3);
+                Debug.Log($"[lineup] row{r}: " + string.Join(", ", placed.Select(id => $"{world.DefOf(id).id} {ItemDatabase.Extents(world.DefOf(id))[0] * 1000:0} mm")));
+                foreach (var id in placed) renderer.SetHidden(id, true);
+            }
+
+            // floor close-up: the 30 smallest kinds (by baseline size) scattered on a fixed 9 cm grid, seeded
+            {
+                var rng = new System.Random(7);
+                var small = db.order.Select(db.Get).Where(d => !d.IsRobotPart).OrderBy(ComponentScale.BaselineMm).ThenBy(d => d.id).ToList();
+                var placed = new List<int>();
+                foreach (var def in small)
+                {
+                    if (placed.Count >= 30) break;
+                    var inst = world.instances.FirstOrDefault(i => i.defId == def.id && !used.Contains(i.id) && i.state == ItemState.InWorld);
+                    if (inst == null) continue;
+                    used.Add(inst.id);
+                    int k = placed.Count;
+                    var p = spot + east * ((k % 6 - 2.5f) * 0.09f + (float)(rng.NextDouble() - 0.5) * 0.03f)
+                                 + north * ((k / 6 - 2f) * 0.09f + (float)(rng.NextDouble() - 0.5) * 0.03f);
+                    var m = Matrix4x4.TRS(p, Quaternion.Euler(0, (float)rng.NextDouble() * 360f, def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+                    m = Matrix4x4.Translate(Vector3.up * -ComponentScale.LowestY(m, def)) * m;
+                    index.Remove(inst.id);
+                    world.SetTransform(inst.id, m);
+                    renderer.SetHidden(inst.id, false);
+                    renderer.Refresh(inst.id);
+                    placed.Add(inst.id);
+                }
+                Look(spot - north * 0.55f + Vector3.up * 0.42f, spot, 45);
+                yield return Capture(Path.Combine(dir, "floor_close.png"), 3);
+                foreach (var id in placed) renderer.SetHidden(id, true);
+            }
+
+            // one destination filled to its capacity
+            if (args.TryGetValue("fullbox", out var fb) && db.boxes.TryGetValue(fb, out var bd))
+            {
+                var defs = db.order.Where(d => db.Get(d).storageBox == fb).ToList();
+                int cap = db.BoxCapacity(fb), n = 0;
+                foreach (var inst in world.instances.Where(i => defs.Contains(i.defId) && i.state == ItemState.InWorld).ToList())
+                {
+                    if (n++ >= cap) break;
+                    index.Remove(inst.id);
+                    storage.Deposit(fb, inst.id);
+                }
+                var unit = units[Json.Str(bd, "unit")];
+                var dp = unit.DestPoint(bd);
+                var front = Vector3.ProjectOnPlane(unit.transform.TransformDirection(new Vector3(0, 0, -1)), Vector3.up).normalized;   // units face Godot +Z
+                Look(dp + front * 0.9f + Vector3.up * 0.35f, dp, 50);
+                yield return Capture(Path.Combine(dir, "fullbox.png"), 3);
+                Debug.Log($"[lineup] fullbox {fb}: {storage.Stored(fb).Count} of {cap} stored");
+            }
             Application.Quit();
         }
 

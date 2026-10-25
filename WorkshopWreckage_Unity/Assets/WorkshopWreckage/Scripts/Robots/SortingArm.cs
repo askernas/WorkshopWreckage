@@ -184,7 +184,7 @@ namespace WorkshopWreckage
                     var i = _g.world.instances[id];
                     if (i.state != ItemState.InWorld || _g.robotReserved.Contains(id) || _g.interaction.busy.Contains(id)) continue;
                     var def = _g.world.DefOf(id);
-                    if (def.IsRobotPart || def.storageBox != box || i.Position.y > 0.7f || ItemDatabase.Extents(def)[0] > _r.MaxItemSize) continue;   // Wide Gripper raises the size
+                    if (!def.robotCarry || def.IsRobotPart || def.storageBox != box || i.Position.y > 0.7f || ItemDatabase.Extents(def)[0] > _r.MaxItemSize) continue;   // Wide Gripper raises the size
                     bool staged = i.owner == "stage:" + box || Vector3.ProjectOnPlane(i.Position - spot.Value, Vector3.up).magnitude <= 0.5f;
                     if (!staged) continue;
                     float d = (i.Position - socket.point).sqrMagnitude;

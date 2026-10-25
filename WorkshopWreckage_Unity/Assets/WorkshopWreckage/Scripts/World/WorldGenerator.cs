@@ -212,6 +212,11 @@ namespace WorkshopWreckage
                 foreach (var o in s.obstacles) surf.blockers.Add(o.rect);
                 surfaces.Add(surf);
             }
+            // the open spots near the start stay clear (no strays, no long part bridging over them) until
+            // Retrobot's parts and the starter set go down, last of all
+            int clear0 = surfaces[0].blockers.Count;
+            foreach (var c in layout.retroSpots.Append(layout.starterSpot)) surfaces[0].blockers.Add(new Rect(c - Vector2.one * 0.3f, Vector2.one * 0.6f));
+            int clearN = surfaces[0].blockers.Count - clear0;
 
             // pools of ordinary ids per category; copies of one definition stay adjacent
             var pools = new Dictionary<int, List<int>>();
@@ -284,6 +289,7 @@ namespace WorkshopWreckage
             }
             // last of all, so nothing lands on top: Retrobot's parts, one per open spot near
             // the start, and the starter set as a small tidy cluster
+            surfaces[0].blockers.RemoveRange(clear0, clearN);
             var starterSite = new PileSite { kind = "cluster", center = layout.starterSpot, sigma = new Vector2(0.09f, 0.09f), maxHeight = 0.2f };
             foreach (var id in starter)
                 if (!Place(world, surfaces[0], layout.surfaces[0], starterSite, id, layout) && !PlaceAnywhere(world, surfaces[0], layout, floorPile, id))

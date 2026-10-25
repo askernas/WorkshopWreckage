@@ -156,6 +156,11 @@ namespace WorkshopWreckage
             return false;
         }
         const float RaisePickHeight = 0.08f;   // parts above this (over the feet) are reached by raising the arms
+
+        /// <summary>Above this the arms rise to a part instead of the robot bending down: RaisePickHeight, or
+        /// lower where the claws already hang lower than that (Caterpillarbot), since bending only takes them
+        /// further down. Read before the reach starts, while the claws hang at rest.</summary>
+        float RaiseHeight() => _model.GripPoint is Vector3 gp ? Mathf.Min(RaisePickHeight, gp.y - transform.position.y + 0.01f) : RaisePickHeight;
         bool _planAhead;        // robots.json plan_ahead: choose the next part while walking to deliver
         float _decidePause;     // robots.json decide_pause: standing still after a delivery before setting off
         int _capacity, _types;
@@ -533,7 +538,22 @@ namespace WorkshopWreckage
                     carried.Add(inst.id);
                     ShowCarried(inst.id);
                 }
+            // a save from before the carry limit: a part that is player-only now is set down at its feet, once the
+            // robot stands where it was saved (LoadState; else on its first update)
+            _setDownPending = carried.Count > 0;
             if (carried.Count > 0) { _step = Step.ToDest; _path = null; }
+        }
+
+        bool _setDownPending;
+
+        void SetDownPlayerOnly()
+        {
+            _setDownPending = false;
+            var tooBig = carried.Where(i => !g.world.DefOf(i).robotCarry).ToList();
+            foreach (var i in tooBig) { SetDown(i); carried.Remove(i); }
+            if (tooBig.Count == 0) return;
+            Debug.Log($"[rescale] {id} sets down {tooBig.Count} player-only part(s) it carried in the save");
+            if (carried.Count == 0) { _step = Step.Choose; _path = null; }
         }
 
         // ---------------------------------------------------------------- commands
@@ -542,6 +562,7 @@ namespace WorkshopWreckage
         {
             if (!Active) return $"{displayName} isn't assembled yet ({status})";
             if (g.db.Get(defId).IsRobotPart) return $"{displayName} leaves robot parts to you";
+            if (!g.db.CanRobotCarry(defId)) return $"{displayName}: {g.db.Get(defId).displayName} is too big for robots — yours to sort";
             if (strategy == "assigned_definition") return Assign(defId, false);
             preferDef = defId;
             mode = Mode.Working;
@@ -556,6 +577,7 @@ namespace WorkshopWreckage
         {
             if (strategy != "assigned_definition") return $"{displayName} doesn't take assignments";
             if (defId >= 0 && g.db.Get(defId).IsRobotPart) return $"{displayName} leaves robot parts to you";
+            if (defId >= 0 && !g.db.CanRobotCarry(defId)) return $"{displayName}: {g.db.Get(defId).displayName} is too big for robots — yours to sort";
             assignedDef = defId;
             autoAssigned = auto;
             _unreachable.Clear();
@@ -611,6 +633,7 @@ namespace WorkshopWreckage
                 case "summoned": Summon(); break;
                 case "docked": DockAtSpot(); break;
             }
+            if (_setDownPending) SetDownPlayerOnly();
         }
 
         // ---------------------------------------------------------------- Modify Robot: summons and docking
@@ -788,6 +811,7 @@ namespace WorkshopWreckage
             {
                 if (carried.Count >= _capacity) break;
                 if (g.world.DefOf(itemId).IsRobotPart) continue;   // robot parts are the player's to deliver, personally
+                if (!g.world.DefOf(itemId).robotCarry) continue;   // player-only: the player keeps it
                 g.inventory.Remove(itemId);
                 g.world.SetState(itemId, ItemState.Carried, Owner);
                 carried.Add(itemId);
@@ -860,6 +884,7 @@ namespace WorkshopWreckage
             float dt = Time.deltaTime;
             _time += dt;
             if (Stationary) return;   // SortingArm drives the arm
+            if (_setDownPending) SetDownPlayerOnly();
             var fwd0 = transform.forward;
             if (_summonPending && Active && _step != Step.Picking && _step != Step.Depositing && !_climbing) BeginReturn();
             if (mode == Mode.Working) UpdateWork(dt);
@@ -971,7 +996,7 @@ namespace WorkshopWreckage
                     float fd = Flat(ip - transform.position).magnitude;
                     bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : ((!high && fd <= _reach * 0.75f) || (Steer(dt) && (fd <= _reach + 0.1f || (high && fd <= 1.0f) || (tray && fd <= 0.65f))));
                     if (arrived) { _step = Step.Picking; StartCoroutine(PickUp(targetId)); }
-                    else if (!Flies && _pathIdx >= _path.Count) { _unreachable.Add(targetId); Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; }
+                    else if (!Flies && _pathIdx >= _path.Count) { _unreachable.Add(targetId); Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; }   // a delivery plans its own path (the spent one would "arrive" with no destination)
                     break;
                 }
                 case Step.ToPlayer:
@@ -1326,13 +1351,17 @@ namespace WorkshopWreckage
         /// climber; Hoverbot not from under a heap), no bigger than it can lift, never robot
         /// parts, never parts another robot reserved; staged parts only if it can store
         /// them itself, and never parts it already left in front of a destination it can't reach.</summary>
+        /// <summary>QA: would it pick this part up now (ignoring an assignment), and if not, a hint why.</summary>
+        public bool CanPick(int id) { int a = assignedDef; assignedDef = -1; bool ok = Pickable(g.world.instances[id]); assignedDef = a; return ok; }
+        public string PickHint(int id) => _unreachable.Contains(id) ? "unreachable" : _deferredUntil.ContainsKey(id) ? "deferred" : g.robotReserved.Contains(id) ? "reserved" : CanPick(id) ? "pickable" : "not pickable";
+
         bool Pickable(ItemInstance i)
         {
             if (i.state != ItemState.InWorld || i.Position.y > ReachHeight || _unreachable.Contains(i.id) || g.robotReserved.Contains(i.id)) return false;
             if (_deferredUntil.Count > 0 && _deferredUntil.TryGetValue(i.id, out var deferredUntil) && _time < deferredUntil.until) return false;
             if (zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
             var def = g.db.Get(i.defId);
-            if (def.IsRobotPart || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;
+            if (!def.robotCarry || def.IsRobotPart || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;   // player-only: the largest 20 %
             if (strategy == "assigned_definition" && assignedDef >= 0 && i.defId != assignedDef) return false;
             if (Flies && g.debris != null && g.debris.At(i.Position) > i.Position.y + ItemDatabase.Extents(def)[2] * 0.5f + 0.05f) return false;   // buried
             bool staged = i.owner.StartsWith("stage:");
@@ -1454,7 +1483,7 @@ namespace WorkshopWreckage
             _reachY = Mathf.Clamp(ip.y - transform.position.y, -0.08f, _maxPickH);
             // a part higher than the hanging claws (on a pile's edge, a low shelf): the arms rise to it
             // instead of the robot bending down
-            bool raise = !Flies && !_climbing && _reachY > RaisePickHeight && _model.AimReach(_reachY) is float rr && rr >= 0;
+            bool raise = !Flies && !_climbing && _reachY > RaiseHeight() && _model.AimReach(_reachY) is float rr && rr >= 0;
             if (raise) yield return StepToGrip(ip, _model.AimReach(_reachY).Value);
             else if (!Flies && !_climbing && _model.GripReach(_reachY) is float grip) yield return StepToGrip(ip, grip);
             float h = Mathf.Clamp01(1 - (ip.y - transform.position.y) / (_height * 3f));
@@ -1477,6 +1506,7 @@ namespace WorkshopWreckage
                 yield return null;
             }
             if (raise) _aimW = 1;
+            if (claws) _clawOpen = 1;   // the reach ends fully open (the loop's last frame can stop short of u = 1)
             var inst = g.world.instances[itemId];
             bool fromTray = g.InTray(inst.Position);
             if (claws && !fromTray && inst.state == ItemState.InWorld && _model.GripPoint is Vector3 cp && (cp - inst.Position).magnitude > ContactMax)
@@ -1668,7 +1698,7 @@ namespace WorkshopWreckage
             // stray parts lying in the destination block it: leave the load in its staging zone
             if (!_destReachable || g.StraysIn(_destBox).Count > 0)
             {
-                if (Flies) Debug.Log($"[robotflight] {id} stages at {_destBox}: reachable {_destReachable}, strays {g.StraysIn(_destBox).Count}");
+                Debug.Log($"[{(Flies ? "robotflight" : "robotplan")}] {id} stages at {_destBox}: reachable {_destReachable} (elevation {Json.Num(g.db.boxes[_destBox], "elevation_m"):0.00} m of {ReachHeight:0.00}, physical {PhysicallyStorable(_destBox)}), strays {g.StraysIn(_destBox).Count}");
                 yield return StageBelow(here);
                 yield break;
             }
@@ -2045,22 +2075,25 @@ namespace WorkshopWreckage
             TripCheck();
         }
 
+        /// <summary>Puts one carried part down on the open floor in front of the robot (the caller takes it out of carried).</summary>
+        void SetDown(int itemId)
+        {
+            var def = g.world.DefOf(itemId);
+            var p = g.SafeDropPoint(transform.position + transform.forward * 0.3f + new Vector3(Random.Range(-0.1f, 0.1f), 0, Random.Range(-0.1f, 0.1f)), transform.position);
+            p.y = Mathf.Max(p.y, Ground(p));   // never under a shelf: open floor towards the robot
+            var b = MeshLibrary.UnitBounds(def.geometryKey).size * def.worldScale;
+            var m = Matrix4x4.TRS(new Vector3(p.x, p.y + Mathf.Min(b.x, b.y, b.z) * 0.5f, p.z), Quaternion.Euler(0, Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+            HideCarried(itemId);
+            g.world.SetTransform(itemId, m);
+            g.world.SetState(itemId, ItemState.InWorld, "world");
+            g.index.Insert(itemId);
+            _unreachable.Add(itemId);
+        }
+
         void DropCarried(string why)
         {
             if (Flies) Debug.Log($"[robotflight] {id} drops {string.Join(",", carried)}: {why}");
-            foreach (var itemId in carried.ToList())
-            {
-                var def = g.world.DefOf(itemId);
-                var p = g.SafeDropPoint(transform.position + transform.forward * 0.3f + new Vector3(Random.Range(-0.1f, 0.1f), 0, Random.Range(-0.1f, 0.1f)), transform.position);
-                p.y = Mathf.Max(p.y, Ground(p));   // never under a shelf: open floor towards the robot
-                var b = MeshLibrary.UnitBounds(def.geometryKey).size * def.worldScale;
-                var m = Matrix4x4.TRS(new Vector3(p.x, p.y + Mathf.Min(b.x, b.y, b.z) * 0.5f, p.z), Quaternion.Euler(0, Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
-                HideCarried(itemId);
-                g.world.SetTransform(itemId, m);
-                g.world.SetState(itemId, ItemState.InWorld, "world");
-                g.index.Insert(itemId);
-                _unreachable.Add(itemId);
-            }
+            foreach (var itemId in carried.ToList()) SetDown(itemId);
             carried.Clear();
             _path = null;
             _step = Step.Choose;
