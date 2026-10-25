@@ -2085,6 +2085,7 @@ namespace WorkshopWreckage
             var m = Matrix4x4.TRS(new Vector3(p.x, p.y + Mathf.Min(b.x, b.y, b.z) * 0.5f, p.z), Quaternion.Euler(0, Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
             HideCarried(itemId);
             g.world.SetTransform(itemId, m);
+            g.interaction.RestOnPile(itemId, transform.position);
             g.world.SetState(itemId, ItemState.InWorld, "world");
             g.index.Insert(itemId);
             _unreachable.Add(itemId);

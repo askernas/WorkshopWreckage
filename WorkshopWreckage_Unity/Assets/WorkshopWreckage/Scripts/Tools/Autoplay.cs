@@ -33,6 +33,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "pile")
+            {
+                yield return PileChecks();   // QA: dropped parts pile up
+                Finish();
+                yield break;
+            }
 
             // 0. keyboard turning: inject real Q / E key presses through the Input System
             var kb = UnityEngine.InputSystem.Keyboard.current ?? UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>();
@@ -213,6 +219,7 @@ namespace WorkshopWreckage
             yield return ArmChecks();
             // 7c. no part can end up out of reach (drops, integrity check, recover action)
             yield return ReachChecks();
+            yield return PileChecks();
             // 7d. a save survives a change of the item catalog (P1-4)
             yield return MigrationChecks();
             {
@@ -1564,6 +1571,36 @@ namespace WorkshopWreckage
                 Check("unreachable parts are detected and 'Recover unreachable parts' moves them to the sorting tray", found && moved >= 1 && g.InTray(g.world.instances[part.id].Position) && g.UnreachableParts().Count == 0,
                       $"found {found}, moved {moved}");
             }
+        }
+
+        /// <summary>Parts dropped on one spot pile up: no two share space (playtest 2026-10-25).</summary>
+        IEnumerator PileChecks()
+        {
+            var parts = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart && !g.robotReserved.Contains(i.id) && !g.interaction.busy.Contains(i.id))
+                .OrderBy(i => (i.Position - g.player.transform.position).sqrMagnitude).Take(8).Select(i => i.id).ToList();
+            var eye = g.player.transform.position + Vector3.up * PlayerController.Eye;
+            var fwd = g.player.transform.forward; fwd = new Vector3(fwd.x, 0, fwd.z).normalized;
+            LookFrom(eye, eye + fwd * 1.0f + Vector3.down * PlayerController.Eye);
+            foreach (var id in parts)
+            {
+                Take(id);
+                g.inventory.Select(g.world.DefOf(id).id);
+                g.interaction.DropHeld();
+                yield return new WaitForSeconds(0.3f);
+            }
+            yield return new WaitForSeconds(0.5f);
+            int clashes = 0; string worst = "";
+            for (int a = 0; a < parts.Count; a++)
+                for (int b = a + 1; b < parts.Count; b++)
+                {
+                    var ba = g.index.WorldBounds(parts[a]); var bb = g.index.WorldBounds(parts[b]);
+                    if (!Interaction.FootprintsMeet(ba, bb)) continue;
+                    float dy = Mathf.Min(ba.max.y, bb.max.y) - Mathf.Max(ba.min.y, bb.min.y);
+                    if (dy > 0.01f) { clashes++; worst = $"{g.world.DefOf(parts[a]).displayName} / {g.world.DefOf(parts[b]).displayName} share {dy * 100:0} cm"; }
+                }
+            float top = parts.Max(id => g.index.WorldBounds(id).max.y);
+            Check("parts dropped on one spot pile up instead of sharing space", parts.Count >= 4 && clashes == 0, $"{parts.Count} dropped, pile top {top:0.00} m, {clashes} overlapping pairs {worst}");
+            yield return g.Capture(Path.Combine(outDir, "07e_drop_pile.png"), 3);
         }
 
         /// <summary>Save migration: a save whose catalog differs is mapped by definition id.</summary>

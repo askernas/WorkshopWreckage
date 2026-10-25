@@ -549,6 +549,7 @@ namespace WorkshopWreckage
             var m = Matrix4x4.TRS(p + Vector3.up * halfH, rot, Vector3.one * def.worldScale);
             Inv.Remove(id);
             World.SetTransform(id, m);
+            m = RestOnPile(id, game.player.transform.position);
             World.SetState(id, ItemState.InWorld, "world");
             game.index.Insert(id);
             game.renderer.SetHidden(id, true);
@@ -699,6 +700,66 @@ namespace WorkshopWreckage
                 if (mb.center.y >= b.center.y - 0.005f) continue;   // beside or above, not under
                 if (!core.Overlaps(new Rect(mb.min.x, mb.min.z, mb.size.x, mb.size.z))) continue;
                 s = Mathf.Max(s, Mathf.Min(mb.max.y, b.min.y));
+            }
+            return s;
+        }
+
+        /// <summary>Parts pile up instead of sharing space: a part just set down (bottom on the
+        /// floor or a deck, not yet in the index) is lifted onto the highest part under its
+        /// footprint. Perched on top of a pile it rolls down the side to a clearly lower spot
+        /// close by (open floor towards `from`), so repeated drops build a heap, not a tower.</summary>
+        public Matrix4x4 RestOnPile(int id, Vector3 from)
+        {
+            var m = World.instances[id].transform;
+            var b0 = game.index.WorldBounds(id);
+            var b = b0;
+            float r = Mathf.Max(b.extents.x, b.extents.z);
+            float best = PileTop(id, b);
+            if (best - b.min.y > b.size.y * 0.5f)
+                for (int k = 0; k < 6; k++)
+                {
+                    var off = Quaternion.Euler(0, k * 60 + UnityEngine.Random.Range(0, 40f), 0) * Vector3.forward * (r + 0.04f) * 1.6f;
+                    var q = game.SafeDropPoint(b.center + off, from);
+                    var cb = new Bounds(new Vector3(q.x, q.y + b0.extents.y, q.z), b0.size);
+                    float top = PileTop(id, cb);
+                    if (top >= best - b0.size.y * 0.5f) continue;
+                    best = top;
+                    b = cb;   // later rolls are measured from the lower spot
+                }
+            m.m03 += b.center.x - b0.center.x;
+            m.m23 += b.center.z - b0.center.z;
+            m.m13 += best - b0.min.y;
+            World.SetTransform(id, m);
+            return m;
+        }
+
+        /// <summary>Footprints of two parts that touch enough for one to rest on the other
+        /// (both trimmed to 80 %, so a graze at the edge doesn't count; a long part lying
+        /// across a small one rests on it just as a small one on a long one).</summary>
+        public static bool FootprintsMeet(Bounds a, Bounds b)
+        {
+            static Rect Core(Bounds x) => new(x.center.x - x.extents.x * 0.8f, x.center.z - x.extents.z * 0.8f, x.extents.x * 1.6f, x.extents.z * 1.6f);
+            return Core(a).Overlaps(Core(b));
+        }
+
+        /// <summary>Where the bottom of a part at `b` comes to rest: on its deck, or on the
+        /// highest part under its footprint.</summary>
+        float PileTop(int id, Bounds b)
+        {
+            float s = b.min.y;
+            float r = Mathf.Max(b.extents.x, b.extents.z) + 0.3f;
+            for (int k = 0; k < 6; k++)   // a tall pile is searched upwards in steps
+            {
+                float before = s;
+                foreach (var o in game.index.QuerySphere(new Vector3(b.center.x, s + b.extents.y, b.center.z), r))
+                {
+                    if (o == id || World.instances[o].state != ItemState.InWorld) continue;
+                    var ob = game.index.WorldBounds(o);
+                    if (ob.max.y <= s + 0.003f || ob.min.y >= s + b.size.y) continue;   // under the rest point or clear above
+                    if (!FootprintsMeet(b, ob)) continue;
+                    s = ob.max.y;
+                }
+                if (s - before < 0.003f) break;
             }
             return s;
         }
