@@ -255,6 +255,7 @@ namespace WorkshopWreckage
             renderer.Build(world);
             index = new ItemSpatialIndex(world);
             if (save != null) SettleAfterLoad();
+            else piles.SettleWorld();   // nothing starts in mid-air
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
             piles.Clear();

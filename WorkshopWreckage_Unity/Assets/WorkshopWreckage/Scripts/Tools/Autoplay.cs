@@ -1588,6 +1588,28 @@ namespace WorkshopWreckage
         /// <summary>Parts dropped on one spot pile up: no two share space (playtest 2026-10-25).</summary>
         IEnumerator PileChecks()
         {
+            // a new world: the generated heaps have fallen into place, nothing hangs in the air
+            for (float t = 0; t < 15 && g.piles.Settling; t += Time.deltaTime) yield return null;
+            var loose = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.InTray(i.Position) && i.Position.y < Game.MaxDropDeck + 0.4f).Select(i => i.id).ToList();
+            var sample = loose.Where((id, k) => k % 8 == 0).ToList();
+            var air = new List<string>();
+            float deep0 = 0;
+            foreach (var id in sample)
+            {
+                var (supported, deep) = g.piles.Contact(id);
+                if (!supported) air.Add($"{g.world.DefOf(id).displayName} at {g.world.instances[id].Position}");
+                if (deep > 0.01f) Debug.Log($"[piles] start overlap {deep * 1000:0} mm: {g.piles.lastContact}");
+                deep0 = Mathf.Max(deep0, deep);
+            }
+            foreach (var a in air.Take(10)) Debug.Log("[piles] in the air at the start: " + a);
+            Check("a new world's parts all rest on something (nothing in mid-air at the start)", air.Count == 0,
+                  $"{sample.Count} of {loose.Count} loose parts checked, in the air: {air.Count}{(air.Count > 0 ? " (" + string.Join("; ", air.Take(3)) + ")" : "")}; deepest overlap {deep0 * 1000:0.0} mm; {g.piles.lastInfo}");
+            var hs = g.layout.piles.First(p => p.kind == "heap" && p.surface == 0);
+            var hc = new Vector3(hs.center.x, 0.3f, hs.center.y);
+            var toRoom = new Vector3(-hc.x, 0, -hc.z).normalized;
+            LookFrom(hc + toRoom * 1.3f + Vector3.up * 0.9f, hc + Vector3.down * 0.3f);
+            yield return g.Capture(Path.Combine(outDir, "07d_start_heap.png"), 3);
+
             var parts = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart && !g.robotReserved.Contains(i.id) && !g.interaction.busy.Contains(i.id))
                 .OrderBy(i => (i.Position - g.player.transform.position).sqrMagnitude).Take(8).Select(i => i.id).ToList();
             var eye = g.player.transform.position + Vector3.up * PlayerController.Eye;

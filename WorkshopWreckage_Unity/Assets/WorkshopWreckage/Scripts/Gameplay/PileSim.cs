@@ -154,7 +154,7 @@ namespace WorkshopWreckage
 
         /// <summary>Brings the parts around `c` into the simulation: the nearest ones (that may
         /// move) as sleeping bodies, the rest as colliders to land on.</summary>
-        void AddAround(Vector3 c, float wake, float reach, int skip)
+        void AddAround(Vector3 c, float wake, float reach, int skip, int max = MaxBodies)
         {
             int n = _bodies.Count;
             foreach (var nid in g.index.QuerySphere(c, reach).OrderBy(i => (g.world.instances[i].Position - c).sqrMagnitude))
@@ -167,7 +167,7 @@ namespace WorkshopWreckage
                     if (near && have.rb == null) { MakeDynamic(have, g.world.DefOf(nid)); have.rb.Sleep(); }
                     continue;
                 }
-                if (n++ >= MaxBodies) break;
+                if (n++ >= max) break;
                 var b = Make(nid, near);
                 if (b.rb != null) b.rb.Sleep();
             }
@@ -255,7 +255,8 @@ namespace WorkshopWreckage
             {
                 _scanT = 0.1f;
                 var rolling = _bodies.Where(kv => kv.Value.moved && kv.Value.rb != null && !kv.Value.rb.IsSleeping()).Select(kv => kv.Value.go.GetComponent<Collider>().bounds).ToList();
-                foreach (var bb in rolling) AddAround(bb.center, 0, Mathf.Max(bb.extents.x, bb.extents.z) + 0.3f, -1);
+                // what it reaches can fall too (a part rolling out from under another lets it down)
+                foreach (var bb in rolling) { float e = Mathf.Max(bb.extents.x, bb.extents.z); AddAround(bb.center, e + 0.15f, e + 0.3f, -1); }
             }
             _since += Time.deltaTime;
             _quiet = awake ? 0 : _quiet + Time.deltaTime;
@@ -281,6 +282,68 @@ namespace WorkshopWreckage
             }
             return awake;
         }
+
+        /// <summary>A new world: the generator only estimates where parts rest, so every loose
+        /// part (not the tray, not up on the storage units) falls once until the whole room is
+        /// at rest (playtest 2026-10-25: parts floating in the starting heaps).</summary>
+        public void SettleWorld()
+        {
+            if (g == null || g.layout == null) return;
+            EnsureScene();
+            Clear();
+            var t0 = Time.realtimeSinceStartup;
+            int n = 0, fixedParts = 0;
+            foreach (var i in g.world.instances)
+            {
+                if (i.state != ItemState.InWorld) continue;
+                bool loose = !g.InTray(i.Position) && i.Position.y < Game.MaxDropDeck + 0.4f;
+                var b = Make(i.id, loose);
+                if (loose)
+                {
+                    n++;
+                    // the whole room at once: a coarser solver (a drop in play keeps the fine one)
+                    b.rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+                    b.rb.solverIterations = 10;
+                    b.rb.solverVelocityIterations = 2;
+                    b.rb.sleepThreshold = 0.006f;
+                    b.rb.maxDepenetrationVelocity = 0.3f;
+                }
+                else fixedParts++;
+            }
+            const float Bulk = 1 / 120f;
+            var rbs = _bodies.Values.Where(b => b.rb != null).Select(b => b.rb).ToList();
+            // done when (nearly) nothing falls or slides any more: a big heap never quite sleeps,
+            // its parts only creep by millimetres a second, and a bolt may spin on its shank in place
+            bool Fast(Rigidbody r) => !r.IsSleeping() && r.linearVelocity.sqrMagnitude > 0.03f * 0.03f;
+            int steps = 0, awake = rbs.Count;
+            for (; steps < 480; steps++)   // up to 4 s simulated
+            {
+                _phys.Simulate(Bulk);
+                if (steps % 12 == 11 && (awake = rbs.Count(Fast)) <= rbs.Count / 1000) break;
+            }
+            int moved = 0;
+            foreach (var b in _bodies.Values)
+                if (b.rb != null && ((Vector3)b.start.GetColumn(3) - b.go.transform.position).sqrMagnitude > 1e-6f) { b.moved = true; moved++; }
+            var falling = _bodies.Where(kv => kv.Value.rb != null && Fast(kv.Value.rb)).Select(kv => (kv.Key, kv.Value.rb.linearVelocity)).ToList();
+            _quietCommit = true;
+            Commit();
+            _quietCommit = false;
+            // the few still under way finish falling in play, among the parts around them
+            foreach (var (id, v) in falling)
+            {
+                var p = g.world.instances[id].Position;
+                if (_bodies.Remove(id, out var old)) DestroyImmediate(old.go);
+                AddAround(p, WakeRadius, StaticRadius, id, _bodies.Count + 40);
+                var fb = Make(id, true);
+                fb.rb.WakeUp();
+                fb.rb.linearVelocity = v;
+                fb.moved = true;
+            }
+            _since = _quiet = 0;
+            Debug.Log($"[piles] world settled: {n} loose parts ({fixedParts} fixed), {moved} moved, {falling.Count} still falling (they finish in play), {steps * Bulk:0.0} s simulated in {(Time.realtimeSinceStartup - t0) * 1000:0} ms");
+        }
+
+        bool _quietCommit;
 
         /// <summary>Before a save: everything comes to rest now (up to 4 s simulated at once), so
         /// no part is saved in mid-air.</summary>
@@ -310,7 +373,7 @@ namespace WorkshopWreckage
                     var p = t.position;
                     bool lost = p.y < -0.05f || p.x < l.roomMin.x || p.x > l.roomMax.x || -p.z < l.roomMin.z || -p.z > l.roomMax.z || float.IsNaN(p.x);
                     var s0 = (Vector3)b.start.GetColumn(3);
-                    if (new Vector2(p.x - s0.x, p.z - s0.z).magnitude > 0.25f) Debug.Log($"[piles] {g.world.DefOf(id).displayName} travelled {s0} -> {p}");
+                    if (!_quietCommit && new Vector2(p.x - s0.x, p.z - s0.z).magnitude > 0.25f) Debug.Log($"[piles] {g.world.DefOf(id).displayName} travelled {s0} -> {p}");
                     if (lost) { reverted++; g.world.SetTransform(id, b.start); }
                     else g.world.SetTransform(id, Matrix4x4.TRS(p, t.rotation, Vector3.one * b.scale));
                     g.index.Insert(id);
