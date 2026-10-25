@@ -54,6 +54,8 @@ namespace WorkshopWreckage
 
         public static string StationOf(string type) => "RS-" + type;
         public static string OwnerOf(string robot) => "assembly:" + robot;
+        /// <summary>Owner of a head or arm item that became a module fitted straight to a built robot.</summary>
+        public const string ModulePrefix = "module:";
 
         // ---------------------------------------------------------------- setup
 
@@ -270,7 +272,39 @@ namespace WorkshopWreckage
         }
 
         /// <summary>An own part of p that another robot's head or arm now stands in for.</summary>
-        public bool Displaced(Project p, int id) => SlotOfKey(p.type, Robot.PartKey(_g.world.DefOf(id))) is ModuleSlot s && (DonorIn(p, s) >= 0 || Reserved(p, s) != null);
+        public bool Displaced(Project p, int id) => SlotOfKey(p.type, Robot.PartKey(_g.world.DefOf(id))) is ModuleSlot s && (DonorIn(p, s) >= 0 || Reserved(p, s) != null || Gone(p, s));
+
+        /// <summary>Its own head or arm was fitted to another robot before it was built (Modify robots): the
+        /// slot needs nothing; it is built without it unless another head or arm is fitted.</summary>
+        bool Gone(Project p, ModuleSlot s) => TakesDonors(p, s) && _g.modules is RobotModules mods && !mods.Built(p.id)
+            && mods.Get(RobotModules.IdOf(s, p.id)) is RobotModule m && m.location != RobotModules.FactoryLoc && m.location != RobotModules.BuildPrefix + p.id;
+
+        /// <summary>Found heads and arms not on any robot that could go in that slot: in the player's hands or a
+        /// holding tray, their module still at the factory.</summary>
+        public IEnumerable<(int id, RobotModule m)> LooseModules(ModuleSlot s)
+        {
+            if (_g.modules == null) yield break;
+            foreach (var id in Mains())
+            {
+                if (MainSlotOf(id) != s) continue;
+                var i = _g.world.instances[id];
+                bool have = (i.state == ItemState.Carried && i.owner == "player") || (i.state == ItemState.Stored && i.owner.StartsWith("box:RS-"));
+                if (have && _g.modules.Get(RobotModules.IdOf(s, OriginOf(id))) is RobotModule m && m.location == RobotModules.FactoryLoc) yield return (id, m);
+            }
+        }
+
+        /// <summary>Fits a found head or arm item to a built robot as its module; the item goes with it.</summary>
+        public bool FitLoose(Robot r, int id, ModuleSlot s)
+        {
+            var (_, m) = LooseModules(s).FirstOrDefault(x => x.id == id);
+            if (m == null || !_g.modules.FitFactory(m.id, r.id, s, _g.playTime)) return false;
+            var i = _g.world.instances[id];
+            if (i.state == ItemState.Carried) _g.inventory.Remove(id);
+            else _g.storage.Remove(i.owner.Substring(4), id);
+            _g.world.SetState(id, ItemState.Installed, ModulePrefix + m.id);
+            Refresh();
+            return true;
+        }
 
         /// <summary>The parts p is built from now: its own, less those a donor head or arm stands in for,
         /// plus the donors.</summary>

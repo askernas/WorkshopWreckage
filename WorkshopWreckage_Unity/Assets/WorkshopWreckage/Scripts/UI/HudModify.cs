@@ -137,7 +137,8 @@ namespace WorkshopWreckage
             // what can go in the chosen slot: a spare from the bench, or another docked robot's module
             var fits = mods.Spares.Where(x => RobotModules.Fits(x, sel.id, _mdSlot)).ToList();
             var others = robots.Where(r => r != sel && RobotModules.SlotsOf(r.id).Contains(_mdSlot) && mods.At(r.id, _mdSlot) is RobotModule om && RobotModules.Fits(om, sel.id, _mdSlot)).ToList();
-            var head = Para(_mdOptions, $"<b>For its {RobotModules.SlotName(_mdSlot)}:</b>" + (fits.Count + others.Count == 0 ? $"  <color={Hex(Muted)}>nothing on the bench fits; take one off another docked robot</color>" : ""), 15, Cream, 22);
+            var loose = _g.workbench.LooseModules(_mdSlot).Where(x => RobotModules.Fits(x.m, sel.id, _mdSlot)).ToList();
+            var head = Para(_mdOptions, $"<b>For its {RobotModules.SlotName(_mdSlot)}:</b>" + (fits.Count + others.Count + loose.Count == 0 ? $"  <color={Hex(Muted)}>nothing fits: find one, take one off another docked robot, or bring it to the workbench</color>" : ""), 15, Cream, 22);
             head.alignment = TextAnchor.MiddleLeft;
             RectTransform line = null;
             int n = 0;
@@ -151,6 +152,13 @@ namespace WorkshopWreckage
                 var spare = x;
                 Option($"Fit {spare.Name}", () => ModifyEdit(NeedDock(sel) is var nd && nd != "" ? nd : mods.CanInstall(spare.id, sel.id),
                     () => mods.Install(spare.id, sel.id, _g.playTime), $"{spare.Name} fitted to {sel.displayName}", sel));
+            }
+            foreach (var (lid, lm) in loose)
+            {
+                int item = lid;
+                var mod = lm;
+                Option($"Fit {mod.Name} (found)", () => ModifyEdit(NeedDock(sel) is var nd && nd != "" ? nd : mods.CanFitFactory(mod.id, sel.id, _mdSlot),
+                    () => _g.workbench.FitLoose(sel, item, _mdSlot), $"{mod.Name} fitted to {sel.displayName}", sel));
             }
             foreach (var o in others)
             {

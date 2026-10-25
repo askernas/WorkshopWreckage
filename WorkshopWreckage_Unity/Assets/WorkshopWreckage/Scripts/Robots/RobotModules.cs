@@ -283,6 +283,36 @@ namespace WorkshopWreckage
             return true;
         }
 
+        /// <summary>Why a module still at the factory (its head or arm item found, not on any robot) cannot
+        /// be fitted straight to a built robot, or "".</summary>
+        public string CanFitFactory(string moduleId, string robotId, ModuleSlot s)
+        {
+            var m = Get(moduleId);
+            if (m == null || m.location != FactoryLoc) return "That part is already on a robot";
+            if (!Built(robotId)) return "That robot is not built yet";
+            if (!Fits(m, robotId, s)) return "It does not fit that robot";
+            if (At(robotId, s) != null && FreeBenchSlot() < 0) return "The workbench spare slots are full: take something off first";
+            return "";
+        }
+
+        /// <summary>Fits a factory module (playtest 2026-10-25: found heads and arms go straight on a docked
+        /// robot). A module already in the slot goes to a spare slot in the same step.</summary>
+        public bool FitFactory(string moduleId, string robotId, ModuleSlot s, double playTime)
+        {
+            if (CanFitFactory(moduleId, robotId, s) != "") return false;
+            var m = Get(moduleId);
+            var old = At(robotId, s);
+            bool wasComplete = Complete(robotId);
+            if (old != null) old.location = "bench:" + FreeBenchSlot();
+            m.location = "robot:" + robotId;
+            _waiting.Remove(m.id);
+            GameEvents.Raise(GameEventKind.ModuleFitted, "player", TypeOf(robotId), -1, m.id, robotId);
+            if (old != null) GameEvents.Raise(GameEventKind.ModuleRemoved, "player", TypeOf(robotId), -1, old.id, robotId);
+            NoteBenchTransfer(m, robotId);
+            if (!wasComplete && Complete(robotId)) NoteBuilt(robotId, false, playTime);
+            return true;
+        }
+
         /// <summary>Why the two robots cannot exchange the modules in that slot, or "".</summary>
         public string CanSwap(string robotA, string robotB, ModuleSlot s)
         {

@@ -39,6 +39,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "loose")
+            {
+                yield return LooseChecks();   // QA: found heads and arms go straight on a built robot (Modify robots)
+                Finish();
+                yield break;
+            }
             if (section == "strip")
             {
                 yield return StripChecks();   // QA: an arm stripped off a built robot goes on one being assembled
@@ -492,6 +498,69 @@ namespace WorkshopWreckage
                 }
             g.interaction.enabledInput = false;
             Check("the aimed-at part shows its highlight (screenshots 34_outline_*)", shown >= 4, $"{shown} of 6 aimed shots show a highlight");
+        }
+
+        /// <summary>Playtest 2026-10-25 ("I should be able to choose not installed parts and put on the robot if
+        /// I remove something"): Retrobot is built with Unibot's left arm, its own waits in the tray. Under Modify
+        /// robots Unibot's arm comes off and Retrobot's own goes on from the tray; Unibot's head, found and
+        /// carried, replaces Retrobot's (which goes to the bench); unbuilt Unibot then needs no head; nothing is
+        /// duplicated or lost, and it survives save/load.</summary>
+        IEnumerator LooseChecks()
+        {
+            var wb = g.workbench;
+            var retro = wb.P("retrobot");
+            var uni = wb.P("unibot");
+            var m = g.modules;
+            g.player.enabled = false;
+            int Part(string robot, string key) => wb.PartIds(wb.P(robot)).First(i => Robot.PartKey(g.world.DefOf(i)) == key);
+            int uArm = Part("unibot", "left arm"), rArm = Part("retrobot", "left arm"), uHead = Part("unibot", "head shell");
+            LevelTo(2);
+            wb.selected = "retrobot";
+            Take(uArm); g.interaction.DepositStation(uArm);
+            foreach (var id in wb.PartIds(retro).Where(id => id != rArm).ToList()) { Take(id); g.interaction.DepositStation(id); }
+            wb.InstallAll(retro);
+            Take(rArm); g.interaction.DepositStation(rArm);   // its own: nowhere to go, waits in the tray
+            g.SetState("play");
+            g.player.enabled = false;
+            bool act = wb.Activate(retro);
+            float t0 = Time.realtimeSinceStartup;
+            while (!g.retrobot.Active && Time.realtimeSinceStartup - t0 < 12) { LookAtRobot(1.0f, 0.9f, 0.4f); yield return null; }
+            bool donorOn = m.At("retrobot", ModuleSlot.ArmL)?.id == "arm_l.unibot";
+            // Modify: take Unibot's arm off, Retrobot's own from the tray goes on
+            var off = m.Remove("retrobot", ModuleSlot.ArmL);
+            bool listed = wb.LooseModules(ModuleSlot.ArmL).Any(x => x.id == rArm && x.m.id == "arm_l.retrobot");
+            bool fit = wb.FitLoose(g.retrobot, rArm, ModuleSlot.ArmL);
+            g.retrobot.ApplyModules();
+            bool ownOn = m.At("retrobot", ModuleSlot.ArmL)?.id == "arm_l.retrobot" && g.world.instances[rArm].state == ItemState.Installed && m.Complete("retrobot");
+            bool intact = PartsIntact(out var pi);
+            Check("a found arm waiting in the tray goes straight on a built robot once its slot is free",
+                  act && donorOn && off != null && listed && fit && ownOn && m.Audit().Count == 0 && intact,
+                  $"built with Unibot's arm {donorOn}; off {off?.id}; listed {listed}; fitted {fit}; own arm on {ownOn}; audit {(m.Audit().Count == 0 ? "clean" : string.Join("; ", m.Audit()))}; {pi}");
+            // a found head carried by the player replaces the fitted one, which goes to the bench
+            int need0 = wb.Required(uni);
+            Take(uHead);
+            bool fit2 = wb.FitLoose(g.retrobot, uHead, ModuleSlot.Head);
+            g.retrobot.ApplyModules();
+            bool headOn = m.At("retrobot", ModuleSlot.Head)?.id == "head.unibot" && m.Get("head.retrobot").BenchSlot >= 0 && !g.inventory.items.Contains(uHead);
+            int need1 = wb.Required(uni);
+            bool intact2 = PartsIntact(out var pi2);
+            Check("a found head in the player's hands replaces a robot's head (the old one goes to the bench); its own robot, unbuilt, then needs no head",
+                  fit2 && headOn && need1 == need0 - 3 && m.Audit().Count == 0 && intact2,
+                  $"fitted {fit2}; head {m.At("retrobot", ModuleSlot.Head)?.id}, Retrobot's own at {m.Get("head.retrobot").location}; Unibot needs {need0} -> {need1}; {pi2}");
+            LookAtRobot(0.7f, 0.45f, 0.15f);
+            yield return g.Capture(Path.Combine(outDir, "35_loose_parts_fitted.png"), 3);
+            string State() => $"{Json.Write(m.ToDict()["locations"])}|{Json.Write(m.ToDict()["waiting"])}|{g.world.instances[rArm].owner}|{g.world.instances[uHead].owner}|{wb.Required(wb.P("unibot"))}";
+            var before = State();
+            g.SaveGame("autotest_loose");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_loose");
+            g.player.enabled = false;
+            yield return Frames(4);
+            m = g.modules; wb = g.workbench;
+            var after = State();
+            Check("found parts fitted as modules survive save/load, audit clean", before == after && m.Audit().Count == 0,
+                  before == after ? $"same; audit {(m.Audit().Count == 0 ? "clean" : string.Join("; ", m.Audit()))}" : $"{before}  vs  {after}");
+            File.Delete(SaveSystem.PathOf("autotest_loose"));
         }
 
         /// <summary>Playtest 2026-10-25: strip a built robot and fit the part to another. Retrobot is
