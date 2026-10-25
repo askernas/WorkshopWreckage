@@ -263,6 +263,9 @@ namespace WorkshopWreckage
             if (milestones.Add(key)) Milestone?.Invoke(key, text);
         }
 
+        /// <summary>A saved once-per-game flag without a toast (tutorials). True the first time.</summary>
+        public bool MarkOnce(string key) => milestones.Add(key);
+
         public void Discover(int defId)
         {
             if (discovered.Add(defId)) Discovered?.Invoke(defId);

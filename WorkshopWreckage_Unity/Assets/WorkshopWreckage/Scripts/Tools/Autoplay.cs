@@ -33,6 +33,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "tutorial")
+            {
+                yield return TutorialChecks();   // QA: the one-time robot-part tutorial
+                Finish();
+                yield break;
+            }
             if (section == "start")
             {
                 yield return StartAreaChecks();   // QA: starter assortment, Retrobot chassis, mixing, determinism
@@ -351,6 +357,45 @@ namespace WorkshopWreckage
         void EmptyHands()
         {
             foreach (var id in g.inventory.items.ToList()) if (!g.interaction.DropInTray(id, false)) { g.inventory.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); }
+        }
+
+        /// <summary>The robot-part tutorial: not for a robot's pickup or a robot-themed spare part,
+        /// shown on the player's first real robot part, never again, and the flag is saved.</summary>
+        IEnumerator TutorialChecks()
+        {
+            var w = g.world;
+            var robotParts = w.instances.Where(i => i.state == ItemState.InWorld && w.DefOf(i.id).IsRobotPart).Select(i => i.id).ToList();
+            var spare = w.instances.Where(i => i.state == ItemState.InWorld && !w.DefOf(i.id).IsRobotPart
+                                               && w.DefOf(i.id).category >= 7).Select(i => i.id).DefaultIfEmpty(-1).First();
+            if (spare < 0) spare = w.instances.First(i => i.state == ItemState.InWorld && !w.DefOf(i.id).IsRobotPart).id;
+            bool before = !g.progress.milestones.Contains(Game.RobotPartTutorialKey) && !g.hud.TutorialShowing;
+            // a robot picks up a robot part, the player an ordinary part: nothing
+            w.SetState(robotParts[0], ItemState.Carried, "robot:retrobot");
+            g.index.Remove(robotParts[0]);
+            w.SetState(spare, ItemState.Carried, "player");
+            g.index.Remove(spare);
+            yield return Frames(2);
+            bool quiet = !g.hud.TutorialShowing && !g.progress.milestones.Contains(Game.RobotPartTutorialKey);
+            // the player's first robot part: shown
+            w.SetState(robotParts[1], ItemState.Carried, "player");
+            g.index.Remove(robotParts[1]);
+            yield return Frames(2);
+            bool shown = g.hud.TutorialShowing && g.progress.milestones.Contains(Game.RobotPartTutorialKey);
+            yield return g.Capture(Path.Combine(outDir, "07g_tutorial_robot_part.png"), 3);
+            // dismissed, then a second robot part: not again
+            g.hud.DismissTutorial();
+            w.SetState(robotParts[2], ItemState.Carried, "player");
+            g.index.Remove(robotParts[2]);
+            yield return Frames(2);
+            bool once = !g.hud.TutorialShowing;
+            // the flag is in the save and comes back with it
+            var saved = Json.Write(g.progress.ToDict());
+            var reloaded = new ProgressTracker(w, g.layout.zones.Select(z => z.name).ToList());
+            reloaded.Load(Json.Obj(Json.Parse(saved)));
+            bool persisted = reloaded.milestones.Contains(Game.RobotPartTutorialKey) && !reloaded.MarkOnce(Game.RobotPartTutorialKey);
+            Check("the robot-part tutorial: not for a robot's pickup or an ordinary part, shown on the player's first robot part, once, saved",
+                  before && quiet && shown && once && persisted,
+                  $"before {before}; robot pickup + {w.DefOf(spare).displayName}: quiet {quiet}; first robot part ({w.DefOf(robotParts[1]).displayName}): shown {shown}; second: not again {once}; saved {persisted}");
         }
 
         /// <summary>The start: a starter assortment (different large parts, one copy each, the

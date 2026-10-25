@@ -573,6 +573,30 @@ namespace WorkshopWreckage
             while (_toasts.childCount > 4) DestroyImmediate(_toasts.GetChild(0).gameObject);
         }
 
+        RectTransform _tutorial;
+        float _tutorialT;
+
+        /// <summary>A tutorial card below the aim text: stays 12 s, [Enter] dismisses it.
+        /// Not modal, so play and the cursor are untouched.</summary>
+        public void ShowTutorial(string title, string body)
+        {
+            if (_tutorial != null) Destroy(_tutorial.gameObject);
+            _tutorial = At("Tutorial", _hud, new Vector2(0.5f, 1), new Vector2(-330, -330), new Vector2(660, 165));   // between the aim text and the hotbar
+            Panel(_tutorial, new Color(0.16f, 0.11f, 0.06f, 0.94f), Brass);
+            Label(_tutorial, "h", 26, Brass, TextAnchor.UpperCenter, Vector2.zero, Vector2.one, new Vector2(18, 0), new Vector2(-18, -14)).text = $"<b>{title}</b>";
+            Label(_tutorial, "b", 18, Cream, TextAnchor.MiddleCenter, Vector2.zero, Vector2.one, new Vector2(24, 22), new Vector2(-24, -50)).text = body;
+            Label(_tutorial, "k", 13, Muted, TextAnchor.LowerCenter, Vector2.zero, Vector2.one, new Vector2(18, 8), new Vector2(-18, 0)).text = "[Enter] dismiss";
+            _tutorialT = 12f;
+        }
+
+        public bool TutorialShowing => _tutorial != null;
+
+        public void DismissTutorial()
+        {
+            if (_tutorial != null) Destroy(_tutorial.gameObject);
+            _tutorial = null;
+        }
+
         public void ShowInspect(bool active, ItemDefinition def)
         {
             _inspect.gameObject.SetActive(active);
@@ -618,6 +642,8 @@ namespace WorkshopWreckage
                 _feedbackT -= Time.deltaTime;
                 var c = _feedback.color; c.a = Mathf.Clamp01(_feedbackT / 0.6f); _feedback.color = c;
             }
+            if (_tutorial != null && ((_tutorialT -= Time.unscaledDeltaTime) <= 0 || (Keyboard.current != null && Keyboard.current.enterKey.wasPressedThisFrame)))
+                DismissTutorial();
             if (_g == null || _g.world == null) return;
             var p = _g.progress;
             var pr = _g.progression;

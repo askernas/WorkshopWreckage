@@ -221,6 +221,19 @@ namespace WorkshopWreckage
             return (gen.Generate(db, layout, seed), gen);
         }
 
+        public const string RobotPartTutorialKey = "tutorial_robot_part";
+
+        /// <summary>The first time the player picks up a real robot component (not a robot's
+        /// pickup, not a robot-themed spare part), once per game; the flag is saved.</summary>
+        void RobotPartTutorial(ItemInstance inst, ItemState old)
+        {
+            if (old != ItemState.InWorld || inst.state != ItemState.Carried || inst.owner != "player") return;
+            if (!world.DefOf(inst.id).IsRobotPart || !progress.MarkOnce(RobotPartTutorialKey)) return;
+            hud.ShowTutorial("ROBOT PART DISCOVERED!",
+                "You've found a part of a robot! Keep an eye out for more robot components and visit the Robot Workshop to see what you can build.");
+            Sfx.Play("milestone", null, -6);
+        }
+
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
             migrationReport = "";
@@ -297,6 +310,7 @@ namespace WorkshopWreckage
             progress.Milestone += (key, text) => { hud.Toast(text, key.StartsWith("zone") || key == "first_pickup"); Sfx.Play("milestone", null, -6); };
             progress.DefinitionCompleted += id => Sfx.Play("complete", null, -4);   // the toast comes with the level point (StartProgression)
             progress.Discovered += id => { _labelsDirty.Add(db.Get(id).storageBox); Sfx.Play("discover", null, -12); };
+            world.StateChanged += RobotPartTutorial;
             int lastCount = inventory.items.Count;
             inventory.Changed += () =>
             {
