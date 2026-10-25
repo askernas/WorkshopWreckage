@@ -372,6 +372,12 @@ namespace WorkshopWreckage
             ToggleRow(st, "V-Sync", QualitySettings.vSyncCount > 0, on => QualitySettings.vSyncCount = on ? 1 : 0);
             ToggleRow(st, "Fullscreen", UnityEngine.Screen.fullScreen, on => UnityEngine.Screen.fullScreen = on);
             ToggleRow(st, "Invert mouse Y", false, on => _g.player.invertY = on);
+            ToggleRow(st, "Robot part afterglow (blinks once after you look away)", Interaction.Afterglow, on =>
+            {
+                Interaction.Afterglow = on;
+                PlayerPrefs.SetInt("ww_part_afterglow", on ? 1 : 0);
+                PlayerPrefs.Save();
+            });
             ToggleRow(st, "Show performance stats", false, on => _debug.transform.parent.gameObject.SetActive(on));
             {
                 // part shadows: the main GPU cost on Massive; "off" for slower PCs

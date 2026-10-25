@@ -502,6 +502,41 @@ namespace WorkshopWreckage
                     if (g.interaction.targetType == "item") shown++;
                     yield return g.Capture(Path.Combine(outDir, $"34_outline_{n++}_{g.world.DefOf(p.id).displayName.Replace(' ', '_').Replace('/', '_')}_{dist:0.00}m.png"), 2);
                 }
+            // robot part afterglow (playtest 2026-10-26): looking away from a robot part makes it blink once
+            var rp = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsRobotPart && i.Position.y < 0.4f)
+                .OrderBy(i => (i.Position - eye).sqrMagnitude).FirstOrDefault();
+            if (rp != null)
+            {
+                bool keep = Interaction.Afterglow;
+                IEnumerator AimAway(bool on)
+                {
+                    Interaction.Afterglow = on;
+                    var from = rp.Position + new Vector3(0.6f, 0.75f, 0.5f).normalized * 0.7f;
+                    LookFrom(from, rp.Position);
+                    yield return Frames(2);
+                    g.interaction.UpdateTarget();
+                    yield return Frames(1);
+                    LookFrom(from, from + Vector3.up);   // look at the ceiling: nothing aimed
+                    yield return Frames(1);
+                    g.interaction.UpdateTarget();
+                }
+                yield return AimAway(true);
+                bool started = g.interaction.afterglowId == rp.id;
+                var fromPos = rp.Position + new Vector3(0.6f, 0.75f, 0.5f).normalized * 0.9f;
+                LookFrom(fromPos, rp.Position + Vector3.Cross(Vector3.up, rp.Position - fromPos).normalized * 0.35f + Vector3.up * 0.1f);   // watch it beside the crosshair
+                float t0 = Time.time;
+                while (Time.time - t0 < Interaction.AfterglowTime * 0.45f) yield return null;
+                bool aimedOff = g.interaction.targetItem != rp.id;
+                yield return g.Capture(Path.Combine(outDir, "36_afterglow_blink.png"), 1);
+                while (Time.time - t0 < Interaction.AfterglowTime + 0.2f) yield return null;
+                bool ended = g.interaction.afterglowId < 0;
+                yield return AimAway(false);
+                bool offNone = g.interaction.afterglowId < 0;
+                Interaction.Afterglow = keep;
+                Check("with the afterglow on, a robot part blinks once after the crosshair leaves it, and stops; with it off, nothing (screenshot 36)",
+                      started && ended && offNone, $"{g.world.DefOf(rp.id).displayName}: started {started}, still unaimed while watched {aimedOff}, ended {ended}, off: none {offNone}");
+            }
+            else Check("with the afterglow on, a robot part blinks once after the crosshair leaves it", false, "no robot part lying in the world");
             g.interaction.enabledInput = false;
             Check("the aimed-at part shows its highlight (screenshots 34_outline_*)", shown >= 4, $"{shown} of 6 aimed shots show a highlight");
         }

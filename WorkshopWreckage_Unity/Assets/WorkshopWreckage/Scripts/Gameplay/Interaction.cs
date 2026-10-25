@@ -30,6 +30,15 @@ namespace WorkshopWreckage
         public bool enabledInput = true;
         public string targetType = "none";
         public int targetItem = -1;
+        /// <summary>Robot part afterglow (Settings, PlayerPrefs "ww_part_afterglow", on by default): a robot
+        /// part blinks once after the crosshair leaves it, so it is easier to spot again (playtest 2026-10-26).</summary>
+        public static bool Afterglow = PlayerPrefs.GetInt("ww_part_afterglow", 1) == 1;
+        public const float AfterglowTime = 0.9f;
+        static readonly Color AfterglowColor = new(0.35f, 0.85f, 1f);
+        public int afterglowId = -1;
+        float _afterglowT;
+        int _lastHover = -1;
+        Material _afterglowMat;
         public string targetDest;
         public StorageUnit targetUnit;
         public bool inspecting;
@@ -62,6 +71,8 @@ namespace WorkshopWreckage
             var mr = _outline.AddComponent<MeshRenderer>();
             mr.shadowCastingMode = ShadowCastingMode.Off;
             _outline.SetActive(false);
+            _afterglowMat = new Material(EnvMaterials.Outline);
+            _afterglowMat.SetColor("_Color", AfterglowColor);
             _destMat = EnvMaterials.NewGhost();
             _destBox = GameObject.CreatePrimitive(PrimitiveType.Cube);
             Destroy(_destBox.GetComponent<Collider>());
@@ -94,6 +105,7 @@ namespace WorkshopWreckage
         void Update()
         {
             if (game == null || game.world == null) return;
+            DrawAfterglow();
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (!enabledInput) { HideHover(); return; }
@@ -185,8 +197,34 @@ namespace WorkshopWreckage
                 else if (st != null && st.destId.StartsWith("SOCKET:")) { targetType = "socket"; targetSocket = st.destId.Substring(7); }
                 else if (st != null) { targetType = "dest"; targetDest = st.destId; targetUnit = st.unit; }
             }
+            NoteHover();
             ShowHover();
             TargetChanged?.Invoke(Describe());
+        }
+
+        /// <summary>The crosshair left a robot part lying in the world: it blinks once.</summary>
+        void NoteHover()
+        {
+            int now = targetType == "item" ? targetItem : -1;
+            if (now >= 0 && now == afterglowId) afterglowId = -1;   // back on it: the normal highlight shows
+            if (_lastHover >= 0 && _lastHover != now && Afterglow && _lastHover < World.Count
+                && World.instances[_lastHover].state == ItemState.InWorld && World.DefOf(_lastHover).IsRobotPart)
+            { afterglowId = _lastHover; _afterglowT = Time.time; }
+            _lastHover = now;
+        }
+
+        /// <summary>One blink: the rim swells and fades over AfterglowTime.</summary>
+        void DrawAfterglow()
+        {
+            if (afterglowId < 0) return;
+            float k = (Time.time - _afterglowT) / AfterglowTime;
+            if (!Afterglow || k >= 1 || afterglowId >= World.Count || World.instances[afterglowId].state != ItemState.InWorld) { afterglowId = -1; return; }
+            float s = Mathf.Sin(k * Mathf.PI);
+            _afterglowMat.SetFloat("_Width", 2.5f * s);
+            _afterglowMat.SetFloat("_Glow", 9f * s);
+            var mesh = game.renderer.WorldMeshFor(afterglowId);
+            var rp = new RenderParams(_afterglowMat) { shadowCastingMode = ShadowCastingMode.Off };
+            for (int n = 0; n < mesh.subMeshCount; n++) Graphics.RenderMesh(rp, mesh, n, World.instances[afterglowId].transform);
         }
 
         void HideHover()
