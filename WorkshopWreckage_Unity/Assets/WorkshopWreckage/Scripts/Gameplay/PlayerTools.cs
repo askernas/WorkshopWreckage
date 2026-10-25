@@ -221,8 +221,6 @@ namespace WorkshopWreckage
                 var inst = g.world.instances[id];
                 if (inst.state != ItemState.InWorld) continue;
                 var mesh = g.renderer.WorldMeshFor(id);
-                var e = ItemDatabase.Extents(g.world.DefOf(id));
-                _mpb.SetFloat("_Grow", Mathf.Clamp(0.01f / Mathf.Max(0.002f, e[2] * 0.5f), 0.06f, 0.6f));
                 _mpb.SetColor("_Color", Color.Lerp(new Color(0.3f, 0.9f, 1f), Color.white, pulse * 0.4f));
                 for (int s = 0; s < mesh.subMeshCount; s++) Graphics.RenderMesh(rp, mesh, s, inst.transform);
             }

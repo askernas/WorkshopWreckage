@@ -226,14 +226,20 @@ namespace WorkshopWreckage
 
         /// <summary>The first time the player picks up a real robot component (not a robot's
         /// pickup, not a robot-themed spare part), once per game; the flag is saved.</summary>
+        /// <summary>A robot part picked up from the world: its own sound every time, and the
+        /// first time ever the tutorial card.</summary>
         void RobotPartTutorial(ItemInstance inst, ItemState old)
         {
             if (old != ItemState.InWorld || inst.state != ItemState.Carried || inst.owner != "player") return;
-            if (!world.DefOf(inst.id).IsRobotPart || !progress.MarkOnce(RobotPartTutorialKey)) return;
+            if (!world.DefOf(inst.id).IsRobotPart) return;
+            Sfx.Play("robot_part", null, -3, 0);   // always the same pitch: recognisable
+            if (!progress.MarkOnce(RobotPartTutorialKey)) return;
             hud.ShowTutorial("ROBOT PART DISCOVERED!",
                 "You've found a part of a robot! Keep an eye out for more robot components and visit the Robot Workshop to see what you can build.");
-            Sfx.Play("milestone", null, -6);
         }
+
+        /// <summary>QA: the generator of the current world (its pile record).</summary>
+        public WorldGenerator lastGen;
 
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
@@ -245,6 +251,7 @@ namespace WorkshopWreckage
             if (w == null) { hud.ShowFatal("World could not be generated:\n\n" + string.Join("\n", gen.errors.Take(20))); return false; }
             Debug.Log($"[world] preset {presetId}, seed {seed}: {w.Count} items in {gen.lastGenerationMs:0} ms ({layout.piles.Count} pile sites, {layout.surfaces.Count} surfaces, {units.Count} storage units)");
             world = w;
+            lastGen = gen;
             starterIds = gen.starterIds;
             if (renderer != null) Destroy(renderer.gameObject);
             renderer = new GameObject("Items").AddComponent<ItemRenderer>();
@@ -275,11 +282,13 @@ namespace WorkshopWreckage
             }
             renderer.Build(world);
             index = new ItemSpatialIndex(world);
+            // the previous world's simulation goes first: the settle hands its last falling parts
+            // on to play, and clearing after it froze them in mid-air
+            piles.Clear();
             if (save != null) SettleAfterLoad();
             else piles.SettleWorld();   // nothing starts in mid-air
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
-            piles.Clear();
             interaction.ResetState();
             tools.ResetState();
             StartProgression(seed, save);
@@ -378,6 +387,9 @@ namespace WorkshopWreckage
                 var b = index.WorldBounds(i.id);
                 float dy = b.min.y - interaction.SupportUnder(i.id, b, none);
                 if (dy < 0.012f) continue;
+                // the bounding-box estimate knows no pallet rim or box top: only a part the physics
+                // probe finds nothing under comes down (it would otherwise drop into the unit)
+                if (piles.Contact(i.id).supported) continue;
                 var m = i.transform;
                 m.m13 -= dy;
                 index.Remove(i.id);

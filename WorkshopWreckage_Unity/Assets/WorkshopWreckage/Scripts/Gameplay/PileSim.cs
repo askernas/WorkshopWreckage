@@ -97,9 +97,12 @@ namespace WorkshopWreckage
                 foreach (var (r, y) in decks)
                     if (y > 0.01f && y < low && r.Overlaps(b) && r.Contains(b.center)) { low = y; under = r; }
                 if (low == float.MaxValue) { Box(b, 0, 2.6f); continue; }
-                // only under the deck itself: the clearance margin round a unit is open floor, no
-                // invisible ledge for a part to come to rest on beside the bottom shelf
-                var c = Rect.MinMaxRect(Mathf.Max(b.xMin, under.xMin), Mathf.Max(b.yMin, under.yMin), Mathf.Min(b.xMax, under.xMax), Mathf.Min(b.yMax, under.yMax));
+                // the unit's own footprint (the blocker less its 6 cm clearance margin): the margin
+                // round a unit is open floor, no invisible ledge beside the bottom shelf, but nothing
+                // slips in under its edge either (a pallet's top is inset 5 cm from the pallet's side)
+                var foot = Rect.MinMaxRect(b.xMin + 0.06f, b.yMin + 0.06f, b.xMax - 0.06f, b.yMax - 0.06f);
+                var c = Rect.MinMaxRect(Mathf.Max(b.xMin, Mathf.Min(under.xMin, foot.xMin)), Mathf.Max(b.yMin, Mathf.Min(under.yMin, foot.yMin)),
+                                        Mathf.Min(b.xMax, Mathf.Max(under.xMax, foot.xMax)), Mathf.Min(b.yMax, Mathf.Max(under.yMax, foot.yMax)));
                 Box(c, 0, low - 0.03f);
             }
         }
@@ -256,7 +259,9 @@ namespace WorkshopWreckage
                 _scanT = 0.1f;
                 var rolling = _bodies.Where(kv => kv.Value.moved && kv.Value.rb != null && !kv.Value.rb.IsSleeping()).Select(kv => kv.Value.go.GetComponent<Collider>().bounds).ToList();
                 // what it reaches can fall too (a part rolling out from under another lets it down)
-                foreach (var bb in rolling) { float e = Mathf.Max(bb.extents.x, bb.extents.z); AddAround(bb.center, e + 0.15f, e + 0.3f, -1); }
+                // (room for them however many are moving already: the start hands on hundreds, and a
+                // fixed cap left the part lying on a rolling one in mid-air)
+                foreach (var bb in rolling) { float e = Mathf.Max(bb.extents.x, bb.extents.z); AddAround(bb.center, e + 0.15f, e + 0.3f, -1, Mathf.Max(MaxBodies, _bodies.Count + 24)); }
             }
             _since += Time.deltaTime;
             _quiet = awake ? 0 : _quiet + Time.deltaTime;
@@ -411,7 +416,7 @@ namespace WorkshopWreckage
                     lastContact = $"{g.world.DefOf(id).displayName} in {o.name} {g.world.DefOf(int.Parse(o.name.Substring(4))).displayName} at {o.transform.position}; sizes {pc.bounds.size * 1000} / {oc.bounds.size * 1000} mm, mesh {pc.sharedMesh.vertexCount}v {pc.sharedMesh.bounds.size}";
                 }
             }
-            var hits = new Collider[16];
+            var hits = new Collider[256];   // a long part in a dense heap overlaps dozens of bounding boxes
             var start = probe.go.transform.position;
             probe.go.transform.position = start + Vector3.down * 0.004f;
             Physics.SyncTransforms();

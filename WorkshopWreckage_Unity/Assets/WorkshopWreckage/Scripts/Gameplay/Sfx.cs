@@ -82,6 +82,7 @@ namespace WorkshopWreckage
             _clips["loop_rotor"] = Loop("rotor");
             _clips["loop_machine"] = Loop("machine");
             _clips["supermagnet"] = Sweep(0.9f, 140, 1250, 0.6f);
+            _clips["robot_part"] = RobotFind();
             for (int k = 0; k < 12; k++) _2d.Add(gameObject.AddComponent<AudioSource>());
             for (int k = 0; k < 10; k++)
             {
@@ -232,6 +233,42 @@ namespace WorkshopWreckage
                 s[i] = (Mathf.Sin(ph) * 0.6f + sq * 0.12f + Mathf.Sin(ph * 3.01f) * 0.1f) * env * amp;
             }
             return Make("sweep" + f0, s);
+        }
+
+        /// <summary>A robot part found (playtest 2026-10-25: its own unmistakable sound, every
+        /// time): three rising square-wave blips with a ring-modulated shimmer, then a short servo
+        /// whirr down, nothing like the chimes of a completed box.</summary>
+        static AudioClip RobotFind()
+        {
+            const float dur = 0.78f;
+            int n = (int)(dur * Rate);
+            var s = new float[n];
+            var notes = new[] { 659.25f, 987.77f, 1318.5f };   // E5 B5 E6
+            for (int k = 0; k < notes.Length; k++)
+            {
+                int start = (int)(k * 0.085f * Rate), len = (int)((k == 2 ? 0.3f : 0.075f) * Rate);
+                float ph = 0;
+                for (int i = 0; i < len && start + i < n; i++)
+                {
+                    float t = (float)i / Rate;
+                    ph += 2 * Mathf.PI * notes[k] / Rate;
+                    float sq = Mathf.Sin(ph) > 0 ? 1 : -1;
+                    float ring = Mathf.Sin(ph * 1.5f) * Mathf.Sin(2 * Mathf.PI * 37 * t);
+                    float env = Mathf.Min(1, t * 300) * Mathf.Exp(-t * (k == 2 ? 7f : 18f));
+                    s[start + i] += (sq * 0.16f + Mathf.Sin(ph) * 0.3f + ring * 0.14f) * env;
+                }
+            }
+            // servo tail under the last blip
+            int t0 = (int)(0.3f * Rate);
+            float sp = 0;
+            for (int i = t0; i < n; i++)
+            {
+                float t = (float)(i - t0) / Rate, u = t / (dur - 0.3f);
+                sp += 2 * Mathf.PI * Mathf.Lerp(420, 260, u) / Rate;
+                float env = Mathf.Min(1, t * 30) * Mathf.Min(1, (1 - u) * 6) * 0.12f;
+                s[i] += (Mathf.Sin(sp) + 0.4f * (Mathf.Sin(sp * 2) > 0 ? 1 : -1)) * env;
+            }
+            return Make("robot_part", s);
         }
 
         static AudioClip Buzz(float dur)

@@ -208,8 +208,6 @@ namespace WorkshopWreckage
                 for (int i = 0; i < mats.Length; i++) mats[i] = _outlineMat;
                 _outline.GetComponent<MeshRenderer>().sharedMaterials = mats;
                 SetMatrix(_outline.transform, inst.transform);
-                var e = ItemDatabase.Extents(World.DefOf(targetItem));
-                _outlineMat.SetFloat("_Grow", Mathf.Clamp(0.006f / Mathf.Max(0.002f, e[2] * 0.5f), 0.04f, 0.5f));
                 _outlineMat.SetColor("_Color", OutlineItem);
                 _outline.SetActive(true);
             }
@@ -382,7 +380,7 @@ namespace WorkshopWreckage
             if (animate) StartCoroutine(Fly(def, from, game.held.HandWorld(), 0.16f, null));
             game.tools?.OnManualPickup(id);   // Handful: nearby copies come along
             SettleNeighbours(from, def);
-            Sfx.Play(ItemDatabase.Extents(def)[0] > 0.24f ? "pickup_heavy" : "pickup", from.GetColumn(3), -2);
+            if (!def.IsRobotPart) Sfx.Play(ItemDatabase.Extents(def)[0] > 0.24f ? "pickup_heavy" : "pickup", from.GetColumn(3), -2);   // a robot part has its own (Game)
             lastActionMicros = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1e6 / System.Diagnostics.Stopwatch.Frequency;
             return true;
         }
