@@ -82,7 +82,7 @@ namespace WorkshopWreckage
             switch (key)
             {
                 case "mach:sprocket_hub": return Gear;
-                case "spec:hinge": case "spec:u_joint": case "spec:cam": case "spec:flywheel": case "spec:wheel_hub": case "spec:track_idler": return Pivot;
+                case "spec:u_joint": case "spec:flywheel": case "spec:wheel_hub": case "spec:track_idler": case "spec:rotor_hub": case "mach:leg_knee": return Pivot;
                 case "mach:drive_motor":
                     // dark ribs on most; ribs in the body colour on aluminium, aged, yellow (reads as a
                     // yellow motor, not a striped one) and some red motors
@@ -216,22 +216,19 @@ namespace WorkshopWreckage
             switch (key)
             {
                 case "mach:drive_motor":
-                case "mach:motor_housing":
                     // the rating plate carries the only label: maker plates, a warning on the yellow ones
                     plate = fam == Painted && def.finish == "yellow" ? Pick(new[] { Caution, HighVoltage }, id, 2)
                         : fam == Painted && def.finish == "blue" ? PlateNordhall : Pick(makers, id, 2);
                     if (fam == Rusty || fam == Warm) plate = PlateBrass;
                     break;
-                case "mach:gearbox":
-                    // the shafts cover most of the front: only the round rotation mark fits between them.
-                    // The lid tells the gearbox's history: maker plate when new, a refurbishment sticker
-                    // when overhauled, stencils when old; the caution sign only on the yellow ones
-                    body1 = clean && Hash01(id * 5 + 1) < 0.6f ? RotArrow : 0;
-                    body2 = fam == Painted && def.finish == "yellow" ? Caution
-                        : fam == Rusty ? Pick(new[] { StencilSerial, StencilOil, PlateBrass }, id, 2)
-                        : clean ? Pick(makers, id, 2)
-                        : old ? Pick(new[] { StencilSerial, StencilOil }, id, 2)
-                        : Pick(new[] { Refurb, QcSticker }, id, 2);
+                case "mach:claw_jaw":
+                case "mach:leg_knee":
+                    // a small part tag: inspection stickers when clean, a serial stencil when old
+                    plate = old ? StencilSerial : Pick(new[] { QcSticker, Calibrated, StencilSerial }, id, 3);
+                    if (fam == Painted && def.finish == "yellow") body1 = Caution;
+                    break;
+                case "elec:battery_cell":
+                    plate = Pick(new[] { HighVoltage, Stencil24V, Caution }, id, 12);   // the wrap band
                     break;
                 case "mach:reduction_cartridge":
                     plate = PlateRatio;
@@ -260,6 +257,7 @@ namespace WorkshopWreckage
                 case "elec:servo_controller":
                 case "elec:motor_driver":
                 case "elec:sensor_board":
+                case "elec:gyro_module":
                     body1 = -Pick(new[] { PcbGreen, PcbGreen, PcbBlue, PcbRed }, id, 10);   // the board face
                     break;
             }
