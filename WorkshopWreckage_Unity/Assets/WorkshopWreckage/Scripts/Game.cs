@@ -121,6 +121,7 @@ namespace WorkshopWreckage
             interaction.RobotInspectChanged += hud.ShowRobotInspect;
             workbench.Init(this);
 
+            if (args.TryGetValue("skins", out var sk)) ItemSkins.Enabled = sk != "0";   // QA: --skins=0 is the original salvage look (before / after)
             if (args.TryGetValue("items", out var n)) itemCount = int.Parse(n);
             int seed = args.TryGetValue("seed", out var sd) ? int.Parse(sd) : Json.Int(db.config, "default_seed", 1912);
             if (!StartWorld(seed, null)) return;

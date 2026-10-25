@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Unity.Profiling;
+using Unity.Profiling.LowLevel.Unsafe;
 using UnityEngine;
 
 namespace WorkshopWreckage
@@ -24,6 +25,17 @@ namespace WorkshopWreckage
             var sysMem = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
             var gfxMem = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Gfx Used Memory");
             var totalMem = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Total Used Memory");
+            var setPass = ProfilerRecorder.StartNew(ProfilerCategory.Render, "SetPass Calls Count");
+            var texMem = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Texture Memory");
+            var meshMem = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "Mesh Memory");
+            // render-thread / present markers: only readable in development builds (WW_DEV_BUILD=1)
+            if (g.args.ContainsKey("benchmarkerdump"))   // QA: every recorder this player offers
+            {
+                var hs = new List<ProfilerRecorderHandle>();
+                ProfilerRecorderHandle.GetAvailable(hs);
+                File.WriteAllLines(outPath + ".markers.txt", hs.Select(h => { var d = ProfilerRecorderHandle.GetDescription(h); return d.Category.Name + "	" + d.Name; }).OrderBy(x => x));
+            }
+            var markers = Markers(g.args.TryGetValue("benchmarkers", out var mk) ? mk.Split(';') : DefaultMarkers);
             yield return null;
             g.builder.RefreshProbe();
             var results = new Dictionary<string, object>
@@ -64,7 +76,8 @@ namespace WorkshopWreckage
                 float warm = 0;
                 while (warm < (float)Json.Num(cfg, "warmup_s", 1.5)) { yield return null; warm += Time.unscaledDeltaTime; }
                 var frames = new List<float>();
-                double dc = 0, bt = 0, tr = 0, gpu = 0, cpu = 0;
+                double dc = 0, bt = 0, tr = 0, gpu = 0, cpu = 0, rt = 0, pw = 0, cf = 0, sp = 0;
+                var mSum = new double[markers.Count];
                 int n = 0, gpuN = 0;
                 Robot.cpuMs = 0; Robot.worstMs = 0; SortingArm.cpuMs = 0;
                 var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -77,12 +90,16 @@ namespace WorkshopWreckage
                     long now = sw.ElapsedTicks;
                     frames.Add((float)((now - last) * 1000.0 / System.Diagnostics.Stopwatch.Frequency));
                     last = now;
-                    dc += draws.LastValue; bt += batches.LastValue; tr += tris.LastValue;
+                    dc += draws.LastValue; bt += batches.LastValue; tr += tris.LastValue; sp += setPass.LastValue;
+                    for (int k = 0; k < markers.Count; k++) mSum[k] += markers[k].rec.LastValue;
                     FrameTimingManager.CaptureFrameTimings();
                     if (FrameTimingManager.GetLatestTimings(1, timings) > 0 && timings[0].gpuFrameTime > 0)
                     {
                         gpu += timings[0].gpuFrameTime;
                         cpu += timings[0].cpuMainThreadFrameTime;
+                        rt += timings[0].cpuRenderThreadFrameTime;
+                        pw += timings[0].cpuMainThreadPresentWaitTime;
+                        cf += timings[0].cpuFrameTime;
                         gpuN++;
                     }
                     n++;
@@ -97,6 +114,13 @@ namespace WorkshopWreckage
                 e["triangles"] = System.Math.Round(tr / n);
                 e["gpu_ms"] = gpuN > 0 ? System.Math.Round(gpu / gpuN, 2) : -1.0;
                 e["cpu_main_ms"] = gpuN > 0 ? System.Math.Round(cpu / gpuN, 2) : -1.0;
+                e["cpu_render_ms"] = gpuN > 0 ? System.Math.Round(rt / gpuN, 2) : -1.0;
+                e["present_wait_ms"] = gpuN > 0 ? System.Math.Round(pw / gpuN, 2) : -1.0;
+                e["cpu_frame_ms"] = gpuN > 0 ? System.Math.Round(cf / gpuN, 2) : -1.0;
+                e["setpass_calls"] = System.Math.Round(sp / n);
+                var me = new Dictionary<string, object>();
+                for (int k = 0; k < markers.Count; k++) me[markers[k].name] = System.Math.Round(mSum[k] / n / 1e6, 3);   // ns -> ms per frame
+                if (markers.Count > 0) e["markers_ms"] = me;
                 e["gc_collections"] = (double)(System.GC.CollectionCount(0) - gc0);
                 e["managed_alloc_mb"] = System.Math.Round((System.GC.GetTotalMemory(false) - mem0) / 1048576.0, 1);
                 e["worst_frame_ms"] = System.Math.Round(frames.Max(), 1);
@@ -126,11 +150,43 @@ namespace WorkshopWreckage
             results["system_used_mem_mb"] = System.Math.Round(sysMem.LastValue / 1048576.0, 1);
             results["total_used_mem_mb"] = System.Math.Round(totalMem.LastValue / 1048576.0, 1);
             results["gfx_used_mem_mb"] = System.Math.Round(gfxMem.LastValue / 1048576.0, 1);
+            results["texture_mem_mb"] = System.Math.Round(texMem.LastValue / 1048576.0, 1);
+            results["mesh_mem_mb"] = System.Math.Round(meshMem.LastValue / 1048576.0, 1);
             results["process_working_set_mb"] = System.Math.Round(System.Diagnostics.Process.GetCurrentProcess().WorkingSet64 / 1048576.0, 1);
             File.WriteAllText(outPath, Json.Write(results));
             Debug.Log("[bench] wrote " + outPath);
             draws.Dispose(); batches.Dispose(); tris.Dispose(); sysMem.Dispose(); gfxMem.Dispose(); totalMem.Dispose();
+            setPass.Dispose(); texMem.Dispose(); meshMem.Dispose();
+            foreach (var m in markers) m.rec.Dispose();
             Application.Quit();
+        }
+
+        // main / render thread markers; "gpu:" = the marker's GPU time (development builds only)
+        static readonly string[] DefaultMarkers =
+        {
+            "PlayerLoop", "Gfx.WaitForGfxCommandsFromMainThread", "Gfx.WaitForPresentOnGfxThread", "Gfx.PresentFrame", "Device.Present",
+            "GfxDeviceD3D12.WaitForGPU", "RenderLoop.DrawSRPBatcher", "RenderLoop.ScheduleDraw", "Batch.DrawInstanced", "Gfx.UpdateBufferRanges",
+            "Inl_DrawOpaqueObjects", "Inl_Draw Main Light Shadowmap", "Inl_Draw Additional Lights Shadowmap",
+            "gpu:DrawOpaqueObjects", "gpu:Draw Main Light Shadowmap", "gpu:Draw Additional Lights Shadowmap", "gpu:DepthPrepass", "gpu:DrawDepthNormalPrepass", "gpu:SSAO",
+        };
+
+        /// <summary>Recorders for the named profiler markers that exist in this player (missing ones are skipped).</summary>
+        static List<(string name, ProfilerRecorder rec)> Markers(IEnumerable<string> names)
+        {
+            var handles = new List<ProfilerRecorderHandle>();
+            ProfilerRecorderHandle.GetAvailable(handles);
+            var byName = new Dictionary<string, ProfilerRecorderDescription>();
+            foreach (var h in handles) { var d = ProfilerRecorderHandle.GetDescription(h); byName[d.Name] = d; }
+            var list = new List<(string, ProfilerRecorder)>();
+            foreach (var n in names)
+            {
+                bool gpu = n.StartsWith("gpu:");
+                string m = gpu ? n.Substring(4) : n;
+                if (!byName.TryGetValue(m, out var d)) continue;
+                var opt = ProfilerRecorderOptions.Default | ProfilerRecorderOptions.SumAllSamplesInFrame | (gpu ? ProfilerRecorderOptions.GpuRecorder : 0);
+                list.Add((n, ProfilerRecorder.StartNew(d.Category, m, 1, opt)));
+            }
+            return list;
         }
 
         static Dictionary<string, object> Stats(List<float> frames)

@@ -404,6 +404,7 @@ namespace WorkshopWreckage
                     mesh.SetVertices(_v);
                     mesh.RecalculateBounds();
                 }
+                SkinUV.Apply(mesh, slots);   // skin coordinates (extra channels only)
                 mesh.UploadMeshData(false);
                 return new MeshLibrary.Entry { mesh = mesh, slots = slots, bounds = mesh.bounds };
             }

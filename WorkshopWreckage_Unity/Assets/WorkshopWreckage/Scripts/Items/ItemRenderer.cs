@@ -31,13 +31,13 @@ namespace WorkshopWreckage
         }
 
         public ItemWorld world;
-        readonly Dictionary<string, Group> _groups = new();
+        readonly Dictionary<(string, bool), Group> _groups = new();
         int[] _group;      // instance -> group index into _groupList
         int[] _slot;       // instance -> slot within group
         readonly List<Group> _groupList = new();
         readonly HashSet<int> _hidden = new();
         GraphicsBuffer _data;
-        Material _material;
+        Material _material, _skinMaterial;
         public int VisibleCount { get; private set; }
         public int GroupCount => _groupList.Count;
 
@@ -51,25 +51,30 @@ namespace WorkshopWreckage
             _material = new Material(ItemAppearance.Shader) { name = "ItemInstanced", enableInstancing = true };
             _material.EnableKeyword("_WW_INSTANCED");
             _material.SetTexture("_WearNoise", ItemAppearance.Noise);
+            _material.SetTexture("_Decals", ItemAppearance.Decals);
+            // skinned parts draw with their own variant, so neither look pays for the other's registers
+            _skinMaterial = new Material(_material) { name = "ItemInstancedSkin" };
+            _skinMaterial.EnableKeyword("_WW_SKIN");
             _group = new int[w.Count];
             _slot = new int[w.Count];
-            var members = new Dictionary<string, List<int>>();
+            var members = new Dictionary<(string key, bool skin), List<int>>();
             foreach (var inst in w.instances)
             {
-                var key = w.DefOf(inst.id).geometryKey;
+                var def = w.DefOf(inst.id);
+                var key = (def.geometryKey, ItemSkins.Applies(def));
                 if (!members.TryGetValue(key, out var l)) members[key] = l = new List<int>();
                 l.Add(inst.id);
             }
             // Instances are laid out in the data buffer group by group, so each
             // chunk's offset + instanceID addresses its own entries.
-            var data = new Vector4[w.Count * 2];
+            var data = new Vector4[w.Count * 4];   // per item: albedo, (metallic, roughness, wear, seed), skin A, skin B
             int offset = 0;
             foreach (var kv in members)
             {
-                var g = new Group { entry = MeshLibrary.Get(kv.Key, MeshLibrary.LodWorld) };
+                var g = new Group { entry = MeshLibrary.Get(kv.Key.key, MeshLibrary.LodWorld) };
                 g.radius = 0;
                 foreach (var id in kv.Value) g.radius = Mathf.Max(g.radius, g.entry.bounds.extents.magnitude * w.DefOf(id).worldScale);
-                g.mats = ItemAppearance.SlotMaterials(g.entry, _material);
+                g.mats = ItemAppearance.SlotMaterials(g.entry, kv.Key.skin ? _skinMaterial : _material);
                 var ids = kv.Value;
                 for (int c = 0; c < ids.Count; c += Chunk)
                 {
@@ -92,12 +97,17 @@ namespace WorkshopWreckage
                     var (albedo, custom) = ItemAppearance.Params(def);
                     float jitter = 0.9f + 0.2f * Rand01(id);
                     var lin = albedo * jitter;   // raw values, as Godot's instance colours
+                    if (ItemSkins.Applies(def)) lin = ItemSkins.Base(def, albedo) * (0.95f + 0.1f * Rand01(id));   // skins: linear colour
                     // salvage workshop: most parts are used and worn; ~15 % are new (clean, still matte)
                     bool fresh = Rand01(id * 31 + 5) < 0.15f;
                     custom.z = fresh ? custom.z * 0.15f : Mathf.Clamp01(0.45f + custom.z * 0.8f + 0.25f * Rand01(id * 7 + 3));
                     custom.w = Rand01(id * 13 + 1);
-                    data[(offset + k) * 2] = new Vector4(lin.r, lin.g, lin.b, ItemAppearance.SurfaceClass(def));
-                    data[(offset + k) * 2 + 1] = custom;
+                    float cond = ItemSkins.Applies(def) ? Mathf.Clamp01(ItemSkins.Condition(def) + 0.08f * (Rand01(id * 7 + 3) - 0.5f)) : custom.z;   // skins: the catalogue's condition, a little per instance
+                    var (sa, sb) = ItemSkins.For(def, cond);
+                    data[(offset + k) * 4] = new Vector4(lin.r, lin.g, lin.b, ItemAppearance.SurfaceClass(def));
+                    data[(offset + k) * 4 + 1] = custom;
+                    data[(offset + k) * 4 + 2] = sa;
+                    data[(offset + k) * 4 + 3] = sb;
                 }
                 offset += ids.Count;
                 _groups[kv.Key] = g;
@@ -105,7 +115,7 @@ namespace WorkshopWreckage
             }
             _data = new GraphicsBuffer(GraphicsBuffer.Target.Structured, data.Length, 16);
             _data.SetData(data);
-            _material.SetBuffer("_ItemData", _data);
+            foreach (var g in _groupList) foreach (var m in g.mats) m.SetBuffer("_ItemData", _data);
             foreach (var inst in w.instances) Refresh(inst.id);
             Recount();
             w.StateChanged += (inst, _) => { Refresh(inst.id); Recount(); };

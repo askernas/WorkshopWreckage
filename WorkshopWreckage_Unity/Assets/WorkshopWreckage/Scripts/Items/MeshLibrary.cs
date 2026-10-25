@@ -108,6 +108,7 @@ namespace WorkshopWreckage
                 slots[sub++] = kv.Key;
             }
             mesh.RecalculateBounds();
+            SkinUV.Apply(mesh, slots);   // skin coordinates (extra channels only)
             mesh.UploadMeshData(false);
             return new Entry { mesh = mesh, slots = slots, bounds = mesh.bounds };
         }

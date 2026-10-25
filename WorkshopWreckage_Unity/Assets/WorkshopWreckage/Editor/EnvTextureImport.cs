@@ -9,8 +9,24 @@ namespace WorkshopWreckage.EditorTools
     {
         void OnPreprocessTexture()
         {
-            if (!assetPath.Contains("/Resources/EnvTex/")) return;
             var ti = (TextureImporter)assetImporter;
+            if (assetPath.Contains("/Resources/ItemSkin/"))
+            {
+                // the component label atlas (tools/texgen/bake_item_decals.py): sRGB colour + coverage alpha,
+                // one shared 1024 texture for every part; clamped, the shader keeps samples inside a tile
+                ti.textureType = TextureImporterType.Default;
+                ti.sRGBTexture = true;
+                ti.alphaSource = TextureImporterAlphaSource.FromInput;
+                ti.alphaIsTransparency = true;
+                ti.mipmapEnabled = true;
+                ti.wrapMode = UnityEngine.TextureWrapMode.Clamp;
+                ti.filterMode = UnityEngine.FilterMode.Trilinear;
+                ti.anisoLevel = 4;
+                ti.maxTextureSize = 1024;
+                ti.textureCompression = TextureImporterCompression.CompressedHQ;
+                return;
+            }
+            if (!assetPath.Contains("/Resources/EnvTex/")) return;
             ti.mipmapEnabled = true;
             ti.wrapMode = UnityEngine.TextureWrapMode.Repeat;
             ti.filterMode = UnityEngine.FilterMode.Trilinear;

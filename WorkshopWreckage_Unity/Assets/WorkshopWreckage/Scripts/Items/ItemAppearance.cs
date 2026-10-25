@@ -54,7 +54,7 @@ namespace WorkshopWreckage
         public static (Color albedo, Vector4 custom) Params(ItemDefinition def)
         {
             var p = Materials.TryGetValue(def.material, out var m) ? m : Materials["steel"];
-            if (def.material == "painted") p.albedo = Vintage(def.variantColor) * 0.85f;   // worn enamel, never bright
+            if (def.material == "painted") p.albedo = ItemSkins.Applies(def) ? ItemSkins.PaintOf(def) : Vintage(def.variantColor) * 0.85f;   // skins: industrial enamel; robot parts: worn enamel
             if (def.material == "electronic") p.albedo = def.variantColor;
             switch (def.finish)
             {
@@ -106,10 +106,17 @@ namespace WorkshopWreckage
         public static Material For(ItemDefinition def)
         {
             var (albedo, c) = Params(def);
-            var key = def.material + "|" + def.finish + "|" + ColorUtility.ToHtmlStringRGB(albedo);
+            float wear = Mathf.Clamp01(0.45f + c.z * 0.8f);   // held / inspected: as worn as the parts on the floor
+            var (sa, sb) = ItemSkins.For(def, ItemSkins.Applies(def) ? ItemSkins.Condition(def) : wear);
+            var key = def.material + "|" + def.finish + "|" + ColorUtility.ToHtmlStringRGB(albedo) + "|" + sa + sb;
             if (_cache.TryGetValue(key, out var m)) return m;
             albedo.a = SurfaceClass(def);
-            m = Make(albedo, c.x, c.y, Mathf.Clamp01(0.45f + c.z * 0.8f));   // held / inspected: as worn as the parts on the floor
+            m = Make(albedo, c.x, c.y, wear);
+            if (sa.x > 0.5f) { var b = ItemSkins.Base(def, albedo); b.a = albedo.a; m.SetVector("_BaseColor", b); }   // linear, exactly as the instance buffer
+            if (sa.x > 0.5f) m.EnableKeyword("_WW_SKIN");
+            m.SetVector("_SkinA", sa);
+            m.SetVector("_SkinB", sb);
+            m.SetFloat("_Seed", (def.id * 0.618f) % 1f);
             _cache[key] = m;
             return m;
         }
@@ -122,6 +129,7 @@ namespace WorkshopWreckage
             m.SetFloat("_Roughness", roughness);
             m.SetFloat("_Wear", wear);
             m.SetTexture("_WearNoise", Noise);
+            m.SetTexture("_Decals", Decals);
             m.enableInstancing = true;
             return m;
         }
@@ -133,10 +141,40 @@ namespace WorkshopWreckage
         /// <summary>Materials for each submesh of an entry (slot 0 = part material).</summary>
         public static Material[] SlotMaterials(MeshLibrary.Entry e, Material primary)
         {
+            var (tin, accent) = SlotPair(primary);
             var mats = new Material[e.slots.Length];
             for (int i = 0; i < mats.Length; i++)
-                mats[i] = e.slots[i] == 0 ? primary : e.slots[i] == 1 ? Tin : Accent;
+                mats[i] = e.slots[i] == 0 ? primary : e.slots[i] == 1 ? tin : accent;
             return mats;
         }
+
+        static readonly Dictionary<Material, (Material tin, Material accent)> _slotPairs = new();
+
+        /// <summary>Tin / accent materials that go with a primary: the shared ones for the old look,
+        /// copies carrying the primary's skin (or reading the instance buffer) for skinned parts.
+        /// Cached per primary, so still one material per skin, never one per object.</summary>
+        static (Material, Material) SlotPair(Material primary)
+        {
+            // the old look keeps the two shared materials: per-primary copies cost ~70 SetPass calls a frame
+            // and ~35 MB even with every part unskinned (measured, docs/SKIN_FIRST_PHASE2_REPORT.md)
+            if (!primary.IsKeywordEnabled("_WW_SKIN")) return (Tin, Accent);
+            bool instanced = primary.IsKeywordEnabled("_WW_INSTANCED");
+            if (_slotPairs.TryGetValue(primary, out var pair)) return pair;
+            Material Copy(Material from, float slot)
+            {
+                var m = new Material(from) { enableInstancing = true };
+                m.SetFloat("_Slot", slot);
+                m.EnableKeyword("_WW_SKIN");
+                if (instanced) m.EnableKeyword("_WW_INSTANCED");
+                else { m.SetVector("_SkinA", primary.GetVector("_SkinA")); m.SetVector("_SkinB", primary.GetVector("_SkinB")); m.SetFloat("_Seed", primary.GetFloat("_Seed")); }
+                return m;
+            }
+            pair = (Copy(Tin, 1), Copy(Accent, 2));
+            _slotPairs[primary] = pair;
+            return pair;
+        }
+
+        static Texture2D _decals;
+        public static Texture2D Decals => _decals ??= Resources.Load<Texture2D>("ItemSkin/item_decals");
     }
 }

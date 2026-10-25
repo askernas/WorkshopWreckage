@@ -66,7 +66,8 @@ namespace WorkshopWreckage.EditorTools
                 scenes = new[] { "Assets/Scenes/SampleScene.unity" },
                 locationPathName = release ? ReleaseOutput : Output,
                 target = BuildTarget.StandaloneWindows64,
-                options = BuildOptions.None,
+                // QA profiling: WW_DEV_BUILD=1 makes a development build (profiler markers readable by --bench)
+                options = System.Environment.GetEnvironmentVariable("WW_DEV_BUILD") == "1" ? BuildOptions.Development : BuildOptions.None,
                 extraScriptingDefines = release ? new[] { "WW_RELEASE" } : null,
             };
             var report = BuildPipeline.BuildPlayer(opts);
