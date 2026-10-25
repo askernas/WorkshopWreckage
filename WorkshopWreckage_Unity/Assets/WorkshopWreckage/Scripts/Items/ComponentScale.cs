@@ -24,7 +24,10 @@ namespace WorkshopWreckage
 
         static bool _loaded;
         static bool _enabled;
-        static float _maxFactor = 2f, _smallestMm = 33.5f, _fullMm = 250f, _share = 0.8f;
+        /// <summary>The approved maximum (1.5×), used when component_scale.json has no max_factor.</summary>
+        public const float DefaultMaxFactor = 1.5f;
+
+        static float _maxFactor = DefaultMaxFactor, _smallestMm = 33.5f, _fullMm = 250f, _share = 0.8f;
         static HashSet<int> _playerOnly = new();
 
         static void Load()
@@ -36,7 +39,7 @@ namespace WorkshopWreckage
                 if (!System.IO.File.Exists(Path)) return;
                 var d = Shared.ReadObject(Path);
                 _enabled = Json.Bool(d, "enabled");
-                _maxFactor = (float)Json.Num(d, "max_factor", 2);
+                _maxFactor = (float)Json.Num(d, "max_factor", DefaultMaxFactor);
                 _smallestMm = (float)Json.Num(d, "smallest_mm", 33.5);
                 _fullMm = (float)Json.Num(d, "full_size_mm", 250);
                 _share = (float)Json.Num(d, "robot_share", 0.8);

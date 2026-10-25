@@ -146,7 +146,7 @@ namespace WorkshopWreckage.EditorTools
         {
             var cfg = Shared.ReadObject(ComponentScale.Path);
             var defs = ItemDatabase.Presets().SelectMany(p => ItemDatabase.LoadPreset(p.id).definitions.Values).ToList();
-            float full = (float)Json.Num(cfg, "full_size_mm", 250), max = (float)Json.Num(cfg, "max_factor", 2), share = (float)Json.Num(cfg, "robot_share", 0.8);
+            float full = (float)Json.Num(cfg, "full_size_mm", 250), max = (float)Json.Num(cfg, "max_factor", ComponentScale.DefaultMaxFactor), share = (float)Json.Num(cfg, "robot_share", 0.8);
             var (po, smallest) = ComponentScale.Rank(defs, full, max, share);
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             var sb = new System.Text.StringBuilder();
