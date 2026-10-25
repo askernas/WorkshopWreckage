@@ -214,6 +214,13 @@ namespace WorkshopWreckage
         /// <summary>What the last load had to convert (empty if the catalog was unchanged).</summary>
         public string migrationReport = "";
 
+        /// <summary>QA: the item layout a seed generates, before any physics (determinism check).</summary>
+        public (ItemWorld, WorldGenerator) GenerateOnly(int seed)
+        {
+            var gen = new WorldGenerator { forbidden = InsideContainerG };
+            return (gen.Generate(db, layout, seed), gen);
+        }
+
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
             migrationReport = "";
@@ -303,10 +310,7 @@ namespace WorkshopWreckage
             held.ShowHeld(inventory.HeldId() >= 0 ? world.DefOf(inventory.HeldId()) : null);
             hud.MarkHotbarDirty();
             if (save == null && starterIds.Count > 0)
-            {
-                var sd = world.DefOf(starterIds[0]);
-                hud.Toast($"Right in front of you: {starterIds.Count} × {sd.displayName} — they all go in {db.BoxLabel(sd.storageBox)}", true);
-            }
+                hud.Toast("A few parts lie right in front of you: pick one up and find where it belongs", true);
             if (save != null && save.TryGetValue("player", out var po))
             {
                 var pl = Json.Obj(po);

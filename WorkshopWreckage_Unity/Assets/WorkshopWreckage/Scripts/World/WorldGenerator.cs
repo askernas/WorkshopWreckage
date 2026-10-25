@@ -175,6 +175,8 @@ namespace WorkshopWreckage
     {
         public readonly List<string> errors = new();
         public double lastGenerationMs;
+        /// <summary>QA: the pile site each instance was placed in (-1: floor overflow, start area).</summary>
+        public int[] pileOf;
         /// <summary>See PileSurface.forbidden (set by the game from the built storage units).</summary>
         public System.Func<Vector3, float, bool> forbidden;
         System.Random _rng;
@@ -215,11 +217,10 @@ namespace WorkshopWreckage
             // the open spots near the start stay clear (no strays, no long part bridging over them) until
             // Retrobot's parts and the starter set go down, last of all
             int clear0 = surfaces[0].blockers.Count;
-            foreach (var c in layout.retroSpots.Append(layout.starterSpot)) surfaces[0].blockers.Add(new Rect(c - Vector2.one * 0.3f, Vector2.one * 0.6f));
+            foreach (var c in layout.retroSpots) surfaces[0].blockers.Add(new Rect(c - Vector2.one * 0.3f, Vector2.one * 0.6f));
+            surfaces[0].blockers.Add(new Rect(layout.starterSpot - Vector2.one * (StarterRing + 0.35f), Vector2.one * (StarterRing + 0.35f) * 2));
             int clearN = surfaces[0].blockers.Count - clear0;
 
-            // pools of ordinary ids per category; copies of one definition stay adjacent
-            var pools = new Dictionary<int, List<int>>();
             var robotIds = new List<int>();
             var groups = new Dictionary<int, List<int>>();
             foreach (var inst in world.instances)
@@ -229,26 +230,18 @@ namespace WorkshopWreckage
                 if (!groups.TryGetValue(def.id, out var g)) groups[def.id] = g = new List<int>();
                 g.Add(inst.id);
             }
-            var keys = groups.Keys.ToList();
-            Shuffle(keys);
-            foreach (var key in keys)
-            {
-                int cat = db.Get(key).category;
-                if (!pools.TryGetValue(cat, out var pl)) pools[cat] = pl = new List<int>();
-                pl.AddRange(groups[key]);
-            }
-
             int ordinary = world.Count - robotIds.Count;
             var caps = Capacities(layout, ordinary);
-            var assign = new List<List<int>>();
-            for (int p = 0; p < layout.piles.Count; p++) assign.Add(Draw(layout.piles[p], caps[p], pools));
-            // the starter set: one small definition whose destination is low, open and close
-            // to the spawn, all its copies together in plain sight for a quick first box
-            var starter = StarterSet(db, layout, world);
-            if (starter.Count > 0) foreach (var a in assign) a.RemoveAll(starter.Contains);
-            // robot parts: Retrobot's lie alone on open floor near the start; the others on
-            // top of their piles (placed last), so they can be seen, never buried
-            var retro = robotIds.Where(id => world.DefOf(id).craftingPurpose == "robot:retrobot").ToList();
+            var assign = Distribute(layout, caps, groups, db);
+            // the starter assortment: one copy each of a few different large parts in plain
+            // sight by the spawn (their other copies stay in the piles)
+            var starter = StarterAssortment(db, world, assign);
+            foreach (var a in assign) a.RemoveAll(starter.Contains);
+            // robot parts: Retrobot's lie alone on open floor near the start, the chassis (torso)
+            // on the spot straight ahead; the others on top of their piles (placed last), so they
+            // can be seen, never buried
+            var retro = robotIds.Where(id => world.DefOf(id).craftingPurpose == "robot:retrobot")
+                .OrderBy(id => world.DefOf(id).shape == "Torso" ? 0 : 1).ThenBy(id => id).ToList();
             foreach (var id in robotIds.Except(retro.Take(layout.retroSpots.Count)))
             {
                 var robot = world.DefOf(id).craftingPurpose.Split(':').ElementAtOrDefault(1) ?? "";
@@ -265,6 +258,7 @@ namespace WorkshopWreckage
             }
 
             var leftovers = new List<int>();
+            pileOf = Enumerable.Repeat(-1, world.Count).ToArray();
             for (int p = 0; p < layout.piles.Count; p++)
             {
                 var pile = layout.piles[p];
@@ -274,6 +268,7 @@ namespace WorkshopWreckage
                     bool centered = first && pile.kind == "feature";
                     first = false;
                     if (!Place(world, surfaces[pile.surface], layout.surfaces[pile.surface], pile, id, layout, centered)) leftovers.Add(id);
+                    else pileOf[id] = p;
                 }
             }
             var floorPile = new PileSite
@@ -290,15 +285,24 @@ namespace WorkshopWreckage
             // last of all, so nothing lands on top: Retrobot's parts, one per open spot near
             // the start, and the starter set as a small tidy cluster
             surfaces[0].blockers.RemoveRange(clear0, clearN);
-            var starterSite = new PileSite { kind = "cluster", center = layout.starterSpot, sigma = new Vector2(0.09f, 0.09f), maxHeight = 0.2f };
-            foreach (var id in starter)
-                if (!Place(world, surfaces[0], layout.surfaces[0], starterSite, id, layout) && !PlaceAnywhere(world, surfaces[0], layout, floorPile, id))
-                    errors.Add($"Could not place instance {id}");
+            var nearStart = new PileSite { kind = "cluster", center = layout.starterSpot, sigma = new Vector2(0.6f, 0.6f), maxHeight = 0.3f };
+            for (int k = 0; k < starter.Count; k++)
+            {
+                // a ring, each part on its own patch of floor, nothing on top
+                float a = k * Mathf.PI * 2 / starter.Count + 0.3f;
+                var site = new PileSite { kind = "feature", center = layout.starterSpot + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * StarterRing, sigma = new Vector2(0.06f, 0.06f), maxHeight = 0.3f };
+                if (!Place(world, surfaces[0], layout.surfaces[0], site, starter[k], layout, true) && !PlaceAnywhere(world, surfaces[0], layout, nearStart, starter[k])
+                    && !PlaceAnywhere(world, surfaces[0], layout, floorPile, starter[k]))
+                    errors.Add($"Could not place instance {starter[k]}");
+            }
             starterIds = starter;
-            var retroPlaced = retro.Take(layout.retroSpots.Count).ToList();
+            // the spots nearest straight ahead of the spawn first: the chassis gets the most visible one
+            var sp = new Vector2(layout.spawn.x, layout.spawn.z);
+            var spots = layout.retroSpots.OrderBy(s => Mathf.Abs(Mathf.DeltaAngle(-90f, Mathf.Atan2(s.y - sp.y, s.x - sp.x) * Mathf.Rad2Deg))).ToList();
+            var retroPlaced = retro.Take(spots.Count).ToList();
             for (int k = 0; k < retroPlaced.Count; k++)
             {
-                var site = new PileSite { kind = "feature", center = layout.retroSpots[k], sigma = new Vector2(0.05f, 0.05f) };
+                var site = new PileSite { kind = "feature", center = spots[k], sigma = new Vector2(0.05f, 0.05f) };
                 if (!Place(world, surfaces[0], layout.surfaces[0], site, retroPlaced[k], layout, true) && !PlaceAnywhere(world, surfaces[0], layout, floorPile, retroPlaced[k]))
                     errors.Add($"Could not place instance {retroPlaced[k]}");
             }
@@ -312,18 +316,80 @@ namespace WorkshopWreckage
             return false;
         }
 
-        /// <summary>Instance ids of the starter set (empty if none fits).</summary>
+        /// <summary>Instance ids of the starter assortment (one copy each of different parts).</summary>
         public List<int> starterIds = new();
 
-        static List<int> StarterSet(ItemDatabase db, WorkshopLayout layout, ItemWorld world)
+        const int StarterCount = 6;
+        const float StarterRing = 0.65f;
+
+        /// <summary>One copy each of up to six different large, recognisable parts (gears,
+        /// bearings, electronics, machine parts... a different category where possible), never a
+        /// definition's only or last copies: the rest stay mixed into the piles. Seeded.</summary>
+        List<int> StarterAssortment(ItemDatabase db, ItemWorld world, List<List<int>> assign)
         {
-            var sp = new Vector2(layout.spawn.x, layout.spawn.z);
-            var best = db.order.Select(db.Get)
-                .Where(d => !d.IsRobotPart && d.spawnCount >= 3 && d.spawnCount <= 6 && world.TotalOf(d.id) == d.spawnCount && db.boxes.TryGetValue(d.storageBox, out var b)
-                            && db.IsOpenKind(d.storageBox) && Json.Num(b, "elevation_m") <= 1.2 && layout.units.ContainsKey(Json.Str(b, "unit")) && Radius(d) < 0.15f)
-                .OrderBy(d => { var u = WorkshopLayout.V(layout.units[Json.Str(db.boxes[d.storageBox], "unit")]["pos"]); return Vector2.Distance(new Vector2(u.x, u.z), sp); })
-                .FirstOrDefault();
-            return best == null ? new List<int>() : world.IdsOf(best.id).ToList();
+            var big = db.order.Select(db.Get)
+                .Where(d => !d.IsRobotPart && world.TotalOf(d.id) >= 3 && d.category >= 3 && Radius(d) >= 0.08f && Radius(d) <= 0.24f)
+                .ToList();
+            Shuffle(big);
+            var o = new List<int>();
+            var cats = new HashSet<int>();
+            foreach (var pass in new[] { true, false })
+                foreach (var d in big)
+                {
+                    if (o.Count >= StarterCount) break;
+                    if (pass && !cats.Add(d.category)) continue;
+                    if (o.Any(id => world.instances[id].defId == d.id)) continue;
+                    o.Add(world.IdsOf(d.id)[0]);
+                }
+            return o;
+        }
+
+        /// <summary>Spreads every definition's copies over 2-3 neighbouring piles: a primary pile
+        /// picked by its remaining room times the square root of the pile's category bias (heaps
+        /// still lean to machine parts, clusters to fasteners, but nothing becomes one-kind), then
+        /// the nearest piles with room. Each pile is shuffled, so no runs of one part. Seeded.</summary>
+        List<List<int>> Distribute(WorkshopLayout layout, int[] caps, Dictionary<int, List<int>> groups, ItemDatabase db)
+        {
+            int n = layout.piles.Count;
+            var o = Enumerable.Range(0, n).Select(_ => new List<int>()).ToList();
+            var room = (int[])caps.Clone();
+            var centers = layout.piles.Select(p => p.kind == "scatter" ? p.rect.center : p.center).ToArray();
+            var keys = groups.Keys.ToList();
+            Shuffle(keys);
+            keys = keys.OrderByDescending(k => groups[k].Count).ToList();   // big sets first, while there is room near their pile
+            var w = new float[n];
+            foreach (var key in keys)
+            {
+                var ids = groups[key];
+                int cat = db.Get(key).category;
+                float total = 0;
+                for (int p = 0; p < n; p++) { w[p] = room[p] * Mathf.Sqrt(layout.piles[p].bias.GetValueOrDefault(cat, 1f)); total += w[p]; }
+                if (total <= 0) for (int p = 0; p < n; p++) total += w[p] = room[p];
+                float x = (float)_rng.NextDouble() * total;
+                int primary = 0;
+                while (primary < n - 1 && (x >= w[primary] || room[primary] == 0)) { x -= w[primary]; primary++; }
+                int spread = Mathf.Min(ids.Count, Mathf.Clamp(ids.Count / 4 + 1, 2, 3));
+                var near = Enumerable.Range(0, n).Where(p => p != primary && room[p] > 0)
+                    .OrderBy(p => (centers[p] - centers[primary]).sqrMagnitude).Take(3).ToList();
+                Shuffle(near);
+                var chosen = new List<int> { primary };
+                chosen.AddRange(near.Take(spread - 1));
+                for (int c = 0, k = 0; c < ids.Count; k++)
+                {
+                    int p = chosen[k % chosen.Count];
+                    if (room[p] <= 0)
+                    {
+                        // full: the nearest pile that still has room
+                        p = Enumerable.Range(0, n).Where(q => room[q] > 0).OrderBy(q => (centers[q] - centers[primary]).sqrMagnitude).DefaultIfEmpty(-1).First();
+                        if (p < 0) p = primary;
+                        chosen[k % chosen.Count] = p;
+                    }
+                    o[p].Add(ids[c++]);
+                    room[p]--;
+                }
+            }
+            foreach (var l in o) Shuffle(l);
+            return o;
         }
 
         static float Radius(ItemDefinition d)
@@ -352,36 +418,6 @@ namespace WorkshopWreckage
             int assigned = caps.Sum(), i = 0;
             while (assigned < total) { caps[i++ % caps.Length]++; assigned++; }
             return caps;
-        }
-
-        List<int> Draw(PileSite pile, int capacity, Dictionary<int, List<int>> pools)
-        {
-            var o = new List<int>();
-            var cats = pools.Keys.ToList();
-            bool clustered = pile.kind != "scatter";
-            var weights = new float[cats.Count];
-            while (o.Count < capacity)
-            {
-                float total = 0;
-                for (int i = 0; i < cats.Count; i++)
-                {
-                    weights[i] = pools[cats[i]].Count * pile.bias.GetValueOrDefault(cats[i], 1f);
-                    total += weights[i];
-                }
-                if (total <= 0) break;
-                float x = (float)_rng.NextDouble() * total;
-                int ci = 0;
-                while (ci < cats.Count - 1 && x >= weights[ci]) { x -= weights[ci]; ci++; }
-                var pool = pools[cats[ci]];
-                int run = clustered ? _rng.Next(1, 5) : 1;
-                for (int r = 0; r < run && pool.Count > 0 && o.Count < capacity; r++)
-                {
-                    int k = clustered ? pool.Count - 1 : _rng.Next(pool.Count);
-                    o.Add(pool[k]);
-                    pool.RemoveAt(k);
-                }
-            }
-            return o;
         }
 
         Vector2 SamplePosition(PileSite pile, float spread)

@@ -55,7 +55,7 @@ namespace WorkshopWreckage
         public readonly List<string> placementErrors = new();
         public readonly Dictionary<string, List<int>> robotPartPiles = new();
         /// <summary>Open floor near the spawn: Retrobot's parts lie here in plain sight, and
-        /// one small starter set sits at starterSpot for a quick first completed box.</summary>
+        /// the starter assortment (a few different parts) lies around starterSpot.</summary>
         public readonly List<Vector2> retroSpots = new();
         public Vector2 starterSpot;
         public Vector3 repairBayPos;
@@ -309,12 +309,11 @@ namespace WorkshopWreckage
             foreach (var robot in new[] { "unibot", "spiderbot", "caterpillarbot", "hoverbot" })
                 robotPartPiles[robot] = floorPiles.OrderBy(_ => rng.Next()).Take(4).ToList();
 
-            // open spots near the start, away from every heap: Retrobot's parts and the starter set
+            // open spots near the start, away from every heap: Retrobot's parts (the middle of the fan,
+            // straight ahead, first: the chassis goes there) and then the starter assortment beside them
             var sp = new Vector2(spawn.x, spawn.z);
             var taken = piles.Where(p => p.kind != "scatter").Select(p => p.center).ToList();
-            starterSpot = OpenSpot(sp + new Vector2(0, -1.7f), 0, 2.5f, taken) ?? sp + new Vector2(0, -1.4f);
-            taken.Add(starterSpot);
-            for (int k = 0; k < 5; k++)
+            foreach (int k in new[] { 2, 1, 3, 0, 4 })
             {
                 float a = -Mathf.PI / 2 + (k - 2) * 0.62f;   // a fan in front of the spawn (Godot -z = north = ahead)
                 var s = OpenSpot(sp + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * (2.6f + 0.5f * (k % 2)), 0, 3f, taken);
@@ -322,6 +321,8 @@ namespace WorkshopWreckage
                 retroSpots.Add(s.Value);
                 taken.Add(s.Value);
             }
+            taken.Add(sp);   // not under the player's feet
+            starterSpot = OpenSpot(sp + new Vector2(1.5f, -0.9f), 0, 2.5f, taken) ?? sp + new Vector2(1.4f, -0.6f);
 
             CheckReachable();
 

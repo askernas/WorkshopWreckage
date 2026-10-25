@@ -33,6 +33,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "start")
+            {
+                yield return StartAreaChecks();   // QA: starter assortment, Retrobot chassis, mixing, determinism
+                Finish();
+                yield break;
+            }
             if (section == "dest")
             {
                 yield return DestinationChecks();   // QA: exact destination counts and destination levels
@@ -347,6 +353,85 @@ namespace WorkshopWreckage
             foreach (var id in g.inventory.items.ToList()) if (!g.interaction.DropInTray(id, false)) { g.inventory.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); }
         }
 
+        /// <summary>The start: a starter assortment (different large parts, one copy each, the
+        /// rest in the piles) and Retrobot's chassis in the open straight ahead, not in your pockets.</summary>
+        IEnumerator StartAreaChecks()
+        {
+            var w = g.world;
+            var sp = Shared.Pos(g.layout.spawn.x, 0, g.layout.spawn.z);
+            var starter = g.starterIds;
+            var defs = starter.Select(i => w.instances[i].defId).ToList();
+            bool distinct = defs.Distinct().Count() == defs.Count;
+            bool notAll = defs.All(d => w.IdsOf(d).Count(i => (w.instances[i].Position - sp).magnitude < 4.5f) < w.TotalOf(d));
+            int cats = starter.Select(i => w.DefOf(i).category).Distinct().Count();
+            Check("a starter assortment by the start: different large parts, one copy each, their other copies elsewhere",
+                  starter.Count >= 5 && distinct && notAll && cats >= 4 && starter.All(i => w.instances[i].state == ItemState.InWorld && (w.instances[i].Position - sp).magnitude < 4.5f),
+                  string.Join(", ", starter.Select(i => $"{w.DefOf(i).displayName} ({w.DefOf(i).CategoryName}, 1 of {w.TotalOf(w.instances[i].defId)}) {(w.instances[i].Position - sp).magnitude:0.0} m")));
+            var torso = g.workbench.PartIds(g.workbench.P("retrobot")).Select(id => w.instances[id]).FirstOrDefault(i => w.DefOf(i.id).shape == "Torso");
+            var d = torso != null ? torso.Position - sp : Vector3.zero;
+            float off = Mathf.Abs(Vector2.SignedAngle(new Vector2(0, -1), new Vector2(d.x, -d.z)));   // Unity +z = Godot -z = ahead
+            var tb = torso == null ? default : g.index.WorldBounds(torso.id);
+            var top = torso == null ? -1 : g.index.QuerySphere(tb.center, tb.extents.magnitude + 0.1f).Where(o => o != torso.id && w.instances[o].state == ItemState.InWorld)
+                .Where(o => g.index.WorldBounds(o) is var ob && ob.min.y > tb.max.y - 0.01f && ob.min.x < tb.max.x && ob.max.x > tb.min.x && ob.min.z < tb.max.z && ob.max.z > tb.min.z).DefaultIfEmpty(-1).First();
+            Check("Retrobot's chassis (torso) lies in the open straight ahead of the start, not in the inventory, exactly one",
+                  torso != null && torso.state == ItemState.InWorld && !g.inventory.items.Contains(torso.id) && d.magnitude < 4f && off < 25 && top < 0 && w.TotalOf(torso.defId) == 1,
+                  torso == null ? "no torso" : $"{w.DefOf(torso.id).displayName} {d.magnitude:0.0} m from the spawn, {off:0} deg off ahead, {(top < 0 ? "nothing on it" : $"under {w.DefOf(top).displayName} (its bounds {g.index.WorldBounds(top).min.y:0.000}-{g.index.WorldBounds(top).max.y:0.000} m at {w.instances[top].Position}, the torso's {tb.min.y:0.000}-{tb.max.y:0.000} m at {torso.Position} size {tb.size})")}");
+            // mixing: what lies around a part is rarely the same part, and a set is spread over a few piles
+            var loose = w.instances.Where(i => i.state == ItemState.InWorld && !w.DefOf(i.id).IsRobotPart).ToList();
+            int samples = 0;
+            double sameDef = 0, sameCat = 0;
+            for (int k = 0; k < loose.Count; k += 8)
+            {
+                var i = loose[k];
+                var nb = g.index.QuerySphere(i.Position, 0.4f).Where(o => o != i.id && w.instances[o].state == ItemState.InWorld).ToList();
+                if (nb.Count == 0) continue;
+                samples++;
+                sameDef += nb.Count(o => w.instances[o].defId == i.defId) / (double)nb.Count;
+                sameCat += nb.Count(o => w.DefOf(o).category == w.DefOf(i.id).category) / (double)nb.Count;
+            }
+            var spans = g.db.order.Where(x => !g.db.Get(x).IsRobotPart && w.TotalOf(x) >= 4).Select(x =>
+            {
+                var ps = w.IdsOf(x).Select(i => w.instances[i].Position).ToList();
+                return ps.Max(a => ps.Max(b => (a - b).magnitude));
+            }).OrderBy(x => x).ToList();
+            float median = spans.Count > 0 ? spans[spans.Count / 2] : 0;
+            sameDef /= Mathf.Max(1, samples); sameCat /= Mathf.Max(1, samples);
+            // per pile site (the generator's own record): how much of a pile is its biggest category,
+            // and in how many piles a set's copies lie
+            var (a1, gen1) = g.GenerateOnly(w.seed);
+            var (a2, _) = g.GenerateOnly(w.seed);
+            bool same = a1 != null && a2 != null && a1.instances.Zip(a2.instances, (x, y) => x.transform == y.transform).All(x => x);
+            double dominant = 0, onePile = 0, pilesPerSet = 0;
+            int placed = 0, sets = 0;
+            if (a1 != null)
+            {
+                foreach (var grp in a1.instances.Where(i => gen1.pileOf[i.id] >= 0 && !a1.DefOf(i.id).IsRobotPart).GroupBy(i => gen1.pileOf[i.id]))
+                {
+                    int n = grp.Count();
+                    dominant += grp.GroupBy(i => a1.DefOf(i.id).category).Max(c => c.Count());
+                    placed += n;
+                }
+                foreach (var x in g.db.order.Where(x => !g.db.Get(x).IsRobotPart && a1.TotalOf(x) >= 3))
+                {
+                    int piles = a1.IdsOf(x).Select(i => gen1.pileOf[i]).Distinct().Count();
+                    sets++;
+                    pilesPerSet += piles;
+                    if (piles == 1) onePile++;
+                }
+                dominant /= Mathf.Max(1, placed); pilesPerSet /= Mathf.Max(1, sets); onePile /= Mathf.Max(1, sets);
+            }
+            Check("parts are mixed: no pile is mostly one category, a set's copies lie in several piles, few neighbours are the same part",
+                  dominant < 0.4 && onePile < 0.15 && pilesPerSet >= 2 && sameDef < 0.12,
+                  $"biggest category per pile {dominant:P0} of its parts; sets of 3+ in one pile only {onePile:P0}, piles per set {pilesPerSet:0.0}; {samples} parts sampled: neighbours within 0.4 m the same part {sameDef:P1}, the same category {sameCat:P1}; median span of a set's copies {median:0.0} m");
+            Check("world generation is deterministic from the seed", same, a1 == null ? "generation failed" : $"{a1.Count} parts");
+            // what a new game shows: the chassis ahead, the assortment to the right
+            g.player.Teleport(sp);
+            g.player.SetView(0, -0.5f);
+            yield return g.Capture(Path.Combine(outDir, "07e_start_ahead.png"), 3);
+            g.player.SetView(-0.75f, -0.6f);
+            yield return g.Capture(Path.Combine(outDir, "07f_start_right.png"), 3);
+        }
+
         /// <summary>Playtest feedback: a fair, readable workshop.</summary>
         IEnumerator PlaytestChecks()
         {
@@ -378,10 +463,7 @@ namespace WorkshopWreckage
             }
             Check("Retrobot's parts lie in the open near the start (nothing on top of them)", retro.All(i => i.state == ItemState.InWorld && (i.Position - sp).magnitude < 7f && !Buried(i)),
                   string.Join(", ", retro.Select(i => $"{(i.Position - sp).magnitude:0.0} m{(Buried(i) ? " buried" + OnTop(i) : "")}")));
-            var starter = g.starterIds;
-            var sdef = starter.Count > 0 ? w.DefOf(starter[0]) : null;
-            Check("a small starter set lies together right by the start, its box nearby", sdef != null && starter.Count == w.TotalOf(sdef.id) && starter.All(i => (w.instances[i].Position - sp).magnitude < 4.5f) && g.db.IsOpenKind(sdef.storageBox),
-                  sdef == null ? "none" : $"{starter.Count} × {sdef.displayName} at {starter.Max(i => (w.instances[i].Position - sp).magnitude):0.0} m → {g.db.BoxLabel(sdef.storageBox)}");
+            yield return StartAreaChecks();
 
             // nothing floats: take a part that carries another; the one on top comes down onto what is below
             var top = loose.Where(i => i.Position.y > 0.1f && i.Position.y < 1.0f && !g.db.Get(i.defId).IsRobotPart)
