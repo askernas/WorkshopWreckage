@@ -132,6 +132,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("itemdebug", out var idm)) Shader.SetGlobalFloat("_WWItemDebug", float.Parse(idm, System.Globalization.CultureInfo.InvariantCulture));
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
             if (args.TryGetValue("robotwatch", out var rwatch)) { SetState("play"); StartCoroutine(RobotWatch(rwatch)); return; }
+            if (args.TryGetValue("activatewatch", out var awatch)) { SetState("play"); StartCoroutine(ActivateWatch(awatch)); return; }
             if (args.TryGetValue("catalogue", out var catDir)) { SetState("play"); StartCoroutine(CatalogueExport.Run(this, catDir)); return; }   // QA: component catalogue (read-only)
             if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
@@ -599,6 +600,47 @@ namespace WorkshopWreckage
                 if (FrameTimingManager.GetLatestTimings(1, timings) > 0 && timings[0].gpuFrameTime > 0) { gpu += timings[0].gpuFrameTime; cpu += timings[0].cpuMainThreadFrameTime; gpuN++; }
             }
             Debug.Log(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[robotbench] frame {0:0.000} ms, gpu {1:0.000} ms, cpu main {2:0.000} ms over {3} frames", frame / n, gpuN > 0 ? gpu / gpuN : -1, gpuN > 0 ? cpu / gpuN : -1, n));
+            Application.Quit();
+        }
+
+        /// <summary>QA (--activatewatch=hoverbot --watchdir=dir): the robot is assembled on its mat and
+        /// activated; frames from the side (act_00.png ...) follow it off the bench to its charging mat.
+        /// The log gives the lowest point of the model above the bench top while it is over the bench.</summary>
+        IEnumerator ActivateWatch(string id)
+        {
+            var r = robots.Find(x => x.id == id);
+            if (r == null) { Application.Quit(); yield break; }
+            player.enabled = false;
+            hud.SetHudVisible(false);
+            workbench.ForceInstall(workbench.P(id));
+            for (int i = 0; i < 5; i++) yield return null;
+            string dir = args.TryGetValue("watchdir", out var wd) ? wd : Path.Combine(Application.temporaryCachePath, "activate");
+            Directory.CreateDirectory(dir);
+            var start = r.transform.position;
+            float matY = workbench.MatSpot(workbench.P(id).mat).pos.y;
+            // from the room side of the bench (the robot faces the player on its mat), a little above the top
+            var fwd = r.transform.forward; fwd.y = 0; fwd.Normalize();
+            var at = start + Vector3.up * 0.2f;
+            var from = at + fwd * 1.3f + Vector3.Cross(Vector3.up, fwd) * 0.5f + Vector3.up * 0.25f;
+            var cam = player.cam.transform;
+            player.cam.fieldOfView = 60;
+            cam.SetPositionAndRotation(from, Quaternion.LookRotation(at - from));
+            float hang = float.MaxValue;
+            foreach (var rd in r.GetComponentsInChildren<Renderer>()) if (rd.enabled) hang = Mathf.Min(hang, rd.bounds.min.y - matY);
+            Debug.Log($"[activatewatch] {id}: on the mat at {start}, home {r.home}; lowest point before activation {hang * 100:0.0} cm above the mat top");
+            r.BeginActivation();
+            float lowest = float.MaxValue, t0 = Time.time, next = 0;
+            int k = 0;
+            while (r.mode == Robot.Mode.Activating && Time.time - t0 < 20)
+            {
+                var off = r.transform.position - start; off.y = 0;
+                if (off.magnitude > 0.03f && off.magnitude < 0.45f)   // moving across, still over the bench and its tray
+                    foreach (var rd in r.GetComponentsInChildren<Renderer>()) if (rd.enabled) lowest = Mathf.Min(lowest, rd.bounds.min.y - matY);
+                if (Time.time >= next) { next = Time.time + 0.25f; yield return Capture(Path.Combine(dir, $"act_{k++:00}.png"), 1); }
+                yield return null;
+            }
+            yield return Capture(Path.Combine(dir, $"act_{k++:00}.png"), 1);
+            Debug.Log($"[activatewatch] {id}: mode {r.mode}, {k} frames, lowest point while crossing the bench: {lowest * 100:0.0} cm above the mat top");
             Application.Quit();
         }
 

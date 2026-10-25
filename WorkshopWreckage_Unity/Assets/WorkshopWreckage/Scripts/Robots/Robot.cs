@@ -343,6 +343,7 @@ namespace WorkshopWreckage
             _model.SetEyes(false);
             var (pos, rot) = g.workbench.MatSpot(p.mat);
             transform.SetPositionAndRotation(pos, rot);
+            if (Flies) transform.position = pos + Vector3.up * Mathf.Max(0, LowestHang());   // a Hoverbot's hanging claws rest on the mat, not in the bench
             int total = g.workbench.Required(p);
             status = g.workbench.Complete(p) ? "ready for activation" : $"{g.workbench.InstalledCount(p)}/{total} parts installed";
         }
@@ -402,6 +403,14 @@ namespace WorkshopWreckage
             AdoptCarried();
         }
 
+        /// <summary>How far the model reaches below the robot's origin (a Hoverbot's hanging arms), in metres.</summary>
+        float LowestHang()
+        {
+            float low = transform.position.y;
+            foreach (var r in _model.GetComponentsInChildren<Renderer>()) if (r.enabled) low = Mathf.Min(low, r.bounds.min.y);
+            return transform.position.y - low;
+        }
+
         IEnumerator Activate()
         {
             mode = Mode.Activating;
@@ -419,13 +428,30 @@ namespace WorkshopWreckage
             }
             _model.EndAssembly();   // the clamp lets go, the ghosts are gone
             _model.SetEyes(true);
+            // a Hoverbot lifts off the mat first, until its hanging arms clear the bench top
+            float helloAlt = 0;
+            if (Flies)
+            {
+                var start = transform.position;
+                float lift = LowestHang() + 0.12f;
+                for (float t = 0; t < 0.8f; t += Time.deltaTime)
+                {
+                    _time += Time.deltaTime;
+                    helloAlt = lift * Mathf.SmoothStep(0, 1, t / 0.8f);
+                    transform.position = start + Vector3.up * helloAlt;
+                    _model.Animate(new RobotAnim { dt = Time.deltaTime, gait = 0.3f, phase = t * 9, active = true, time = _time, altitude = helloAlt });
+                    yield return null;
+                }
+                helloAlt = lift;
+                transform.position = start + Vector3.up * lift;
+            }
             // a little "hello": the model wiggles in its own way while it looks around
             for (float t = 0; t < 1.2f; t += Time.deltaTime)
             {
                 _time += Time.deltaTime;
                 _model.Animate(new RobotAnim
                 {
-                    dt = Time.deltaTime, gait = 0.6f * Mathf.Sin(t / 1.2f * Mathf.PI), phase = t * 9, active = true, time = _time, altitude = 0,
+                    dt = Time.deltaTime, gait = 0.6f * Mathf.Sin(t / 1.2f * Mathf.PI), phase = t * 9, active = true, time = _time, altitude = helloAlt,
                     lookAt = transform.position + Quaternion.Euler(0, Mathf.Sin(t * 6) * 50, 0) * transform.forward, lookWeight = 1,
                 });
                 yield return null;
@@ -446,7 +472,32 @@ namespace WorkshopWreckage
             }
             var from = transform.position;
             var to = home + (Flies ? Vector3.up * 0.6f : Vector3.zero);
-            float dur = Flies ? 1.6f : 0.9f;
+            if (Flies)
+            {
+                // up, across and down: over the bench and the holding tray, never through them
+                float apex = Mathf.Max(from.y, to.y) + 0.25f;
+                var up = new Vector3(from.x, apex, from.z);
+                var over = new Vector3(to.x, apex, to.z);
+                var legs = new (Vector3 a, Vector3 b, float dur)[]
+                {
+                    (from, up, 0.5f),
+                    (up, over, Mathf.Clamp(Flat(over - up).magnitude / 0.9f, 0.6f, 3f)),
+                    (over, to, 0.9f),
+                };
+                foreach (var (a, b, legDur) in legs)
+                    for (float t = 0; t < legDur; t += Time.deltaTime)
+                    {
+                        _time += Time.deltaTime;
+                        var p = Vector3.Lerp(a, b, Mathf.SmoothStep(0, 1, t / legDur));
+                        transform.position = p;
+                        transform.rotation = Quaternion.RotateTowards(transform.rotation, homeRot, _turn * Time.deltaTime);
+                        _altitude = p.y - Ground(p);
+                        _model.Animate(new RobotAnim { dt = Time.deltaTime, gait = 0.3f, phase = t * 9, active = true, time = _time, altitude = _altitude });
+                        yield return null;
+                    }
+                from = to;   // the settle below only finishes the heading
+            }
+            float dur = Flies ? 0.3f : 0.9f;
             for (float t = 0; t < dur; t += Time.deltaTime)
             {
                 float u = t / dur;
@@ -455,7 +506,7 @@ namespace WorkshopWreckage
                 if (!Flies) p.y += Mathf.Sin(u * Mathf.PI) * 0.35f;
                 transform.position = p;
                 transform.rotation = Quaternion.Slerp(transform.rotation, homeRot, u);
-                if (Flies) _altitude = Mathf.Lerp(0.05f, 0.6f, u);
+                if (Flies) _altitude = p.y - Ground(p);
                 _model.Animate(new RobotAnim { dt = Time.deltaTime, gait = Flies ? 0.3f : 0, phase = t * 9, active = true, time = _time, altitude = _altitude, armReach = Flies ? 0 : Mathf.Sin(u * Mathf.PI) });
                 yield return null;
             }
