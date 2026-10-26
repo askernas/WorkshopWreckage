@@ -861,7 +861,7 @@ namespace WorkshopWreckage
                 t += $"{_g.layout.zones[z].name}:  {p.ZonePercent(z):0}%  ·  {p.ZoneSorted(z)} sorted, {p.ZoneRemaining(z)} still to sort\n";
             t += $"\nRobot components found: {p.robotPartsFound} / {db.RobotPartIds().Count}\n";
             foreach (var pj in _g.workbench.projects.Where(x => !x.crafted))
-                t += $"   {pj.name}: {_g.workbench.InstalledCount(pj)} / {_g.workbench.Required(pj)} installed, {_g.workbench.DeliveredIds(pj).Count} in the holding tray  ·  {RobotWorkbench.StatusText(_g.workbench.StatusOf(pj))}\n";
+                t += $"   {pj.name}: {_g.workbench.InstalledCount(pj)} / {_g.workbench.Required(pj)} installed, {_g.workbench.DeliveredIds(pj).Count} in the parts pool  ·  {RobotWorkbench.StatusText(_g.workbench.StatusOf(pj))}\n";
             t += InventoryAudit.Report(_g);
             _logText.text = t;
         }

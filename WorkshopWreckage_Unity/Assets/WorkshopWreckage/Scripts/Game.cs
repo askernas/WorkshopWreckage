@@ -247,7 +247,7 @@ namespace WorkshopWreckage
             {
                 if (progress.MarkOnce("tutorial_part_radar"))
                     hud.ShowTutorial(world.DefOf(inst.id).IsRadarBattery ? "RADAR BATTERY FOUND!" : "PART RADAR COMPONENT FOUND!",
-                        "Parts of an old Part Radar lie about the workshop: a housing, two handles, a pulse button, a selector dial, an LED module and two antennas. Bring one of each to the Robot Workbench and it is built. It runs on batteries, and those are found half-used.");
+                        "Parts of an old Part Radar lie about the workshop: a housing, two handles, a pulse button, a selector dial, an LED module and two antennas. Bring them to the robot parts pool at the Robot Workbench and buy the Part Radar plans (2 skill points, [K]): with one of each it is built. It runs on batteries, and those are found half-used.");
                 return;
             }
             if (!progress.MarkOnce(RobotPartTutorialKey)) return;
@@ -1367,6 +1367,7 @@ namespace WorkshopWreckage
         {
             if (!progression.Unlock(id)) return false;
             ApplySkills();
+            radar?.TryAssemble();   // the Part Radar plans: built at once if its parts are already in the pool
             if (progression.Has("reveal_totals")) foreach (var d in progress.discovered) progress.revealed.Add(d);   // Inventory Manifest
             telemetry.SkillUnlocked(id, playTime);
             hud.Toast("Skill unlocked: " + progression.Skill(id).name, true);

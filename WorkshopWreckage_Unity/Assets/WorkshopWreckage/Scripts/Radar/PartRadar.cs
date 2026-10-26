@@ -160,25 +160,41 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- the workbench
 
-        /// <summary>A tool item handed over at the Robot Workbench: components go into the Part Radar bin
-        /// (the radar is built as soon as one of each type is there; spares stay in the bin for good),
-        /// a spent battery goes there to be disposed of; a battery with charge left is kept.</summary>
+        /// <summary>The Part Radar plans (skill "part_radar_plans", 2 skill points, playtest 2026-10-26): without
+        /// them its parts only collect in the robot parts pool.</summary>
+        public bool HasPlans => g.progression != null && g.progression.Has("part_radar_plans");
+
+        /// <summary>Builds the radar if the plans are bought and one of each part is in the pool (after buying the plans).</summary>
+        public bool TryAssemble()
+        {
+            if (assembled || !HasPlans || TypesDelivered().Count < PartRadarModel.Parts.Length) return false;
+            Assemble();
+            g.hud.Toast("PART RADAR ASSEMBLED  ·  [Y] take it out", true);
+            return true;
+        }
+
+        /// <summary>A tool item handed over at the Robot Workbench: components go into the robot parts pool
+        /// (the radar is built as soon as one of each type is there and the plans are bought; spares stay in
+        /// the pool for good), a spent battery is disposed of there; a battery with charge left is kept.</summary>
         public (bool ok, string text) Deliver(int id)
         {
             var def = g.world.DefOf(id);
             if (def.IsRadarBattery && Charges(id) > 0) return (false, $"That battery still has {Charges(id)} of {cfg.maxCharges} charges — keep it for the Part Radar");
-            if (g.storage.Check(Station, id) != StorageSystem.Result.Ok) return (false, "The Part Radar bin is full");
+            if (g.storage.Check(Station, id) != StorageSystem.Result.Ok) return (false, "The robot parts pool has no room for it");
             g.inventory.Remove(id);
             g.storage.Deposit(Station, id);
             Sfx.Play("drop_drawer", g.workbench.transform.position, -4);
-            if (def.IsRadarBattery) return (true, "Spent radar battery disposed of in the Part Radar bin");
-            if (assembled) return (true, $"Spare radar part: {def.displayName} — kept in the Part Radar bin");
+            g.workbench.Refresh();
+            if (def.IsRadarBattery) return (true, "Spent radar battery disposed of at the workbench");
+            if (assembled) return (true, $"Spare radar part: {def.displayName} — kept in the robot parts pool");
             var have = TypesDelivered();
+            string plans = HasPlans ? "" : "  ·  buy the Part Radar plans (2 skill points, [K]) to build it";
             if (have.Count < PartRadarModel.Parts.Length)
             {
                 var missing = PartRadarModel.Parts.Where(p => !have.Contains(p)).Select(Name);
-                return (true, $"Part Radar: {def.shape} delivered  ({have.Count}/{PartRadarModel.Parts.Length})  ·  still missing: {string.Join(", ", missing)}");
+                return (true, $"Part Radar: {def.shape} → robot parts pool  ({have.Count}/{PartRadarModel.Parts.Length})  ·  still missing: {string.Join(", ", missing)}{plans}");
             }
+            if (!HasPlans) return (true, $"Part Radar: all {PartRadarModel.Parts.Length} parts are in the robot parts pool{plans}");
             Assemble();
             return (true, "PART RADAR ASSEMBLED  ·  [Y] take it out");
         }

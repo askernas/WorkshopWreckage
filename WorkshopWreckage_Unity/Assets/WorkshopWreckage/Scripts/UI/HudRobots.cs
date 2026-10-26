@@ -163,7 +163,7 @@ namespace WorkshopWreckage
                     string txt = ps switch
                     {
                         RobotWorkbench.PartState.Installed => $"<color={Hex(GoodC)}>installed</color>",
-                        RobotWorkbench.PartState.Delivered => $"<color={Hex(Brass)}>in the holding tray</color>" + (why != "" ? $" <color={Hex(Muted)}>— {why.ToLower()}</color>" : " — <b>ready to install</b>"),
+                        RobotWorkbench.PartState.Delivered => $"<color={Hex(Brass)}>in the parts pool</color>" + (why != "" ? $" <color={Hex(Muted)}>— {why.ToLower()}</color>" : " — <b>ready to install</b>"),
                         RobotWorkbench.PartState.Carried => $"<color={Hex(Cream)}>in your hands — deliver it</color>",
                         RobotWorkbench.PartState.Discovered => "<color=#d98a4a>discovered, still in the workshop</color>",
                         _ => $"<color=#8a7a6a>missing — not found yet</color>",
@@ -179,7 +179,7 @@ namespace WorkshopWreckage
 
             ClearChildren(_wbActions);
             int installable = p.crafted ? 0 : wb.InstallableCount(p);
-            var ib = MakeButton(_wbActions, installable > 0 ? $"Install delivered parts ({installable})" : "Install delivered parts", () =>
+            var ib = MakeButton(_wbActions, installable > 0 ? $"Build from the parts pool ({installable})" : "Build from the parts pool", () =>
             {
                 int n = wb.InstallAll(p);
                 OnFeedback(n > 0 ? $"Installed {n} part{(n == 1 ? "" : "s")} on {p.name}" : wb.Summary(p), n > 0);
@@ -201,6 +201,18 @@ namespace WorkshopWreckage
             }
             // a head or arm stripped off a built robot (Modify robots → Take off) goes on here too
             ClearChildren(_wbSpares);
+            // the shared pool: any robot's head or arm in it can go on this one instead (the player's choice)
+            foreach (var id in wb.PoolDonors(p).Take(6).ToList())
+            {
+                var part = id;
+                var fb = MakeButton(_wbSpares, $"From the pool: {RobotModules.OriginName(wb.OriginOf(part))}'s {RobotModules.SlotName(wb.MainSlotOf(part).Value)}", () =>
+                {
+                    bool ok = wb.Install(p, part);
+                    OnFeedback(ok ? $"{_g.world.DefOf(part).displayName} fitted to {p.name} ({wb.InstalledCount(p)}/{wb.Required(p)})" : wb.CanInstall(p, part), ok);
+                    RefreshWorkbench();
+                });
+                fb.GetComponent<LayoutElement>().preferredWidth = 300;
+            }
             if (!p.crafted && _g.modules != null)
             {
                 foreach (var m in _g.modules.Spares.Where(m => wb.CanFitSpare(p, m) == "").ToList())

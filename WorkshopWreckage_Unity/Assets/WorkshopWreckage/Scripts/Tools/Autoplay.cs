@@ -117,6 +117,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "radarplans")
+            {
+                yield return RadarPlanChecks();   // QA: the robot parts pool and the Part Radar plans (playtest 2026-10-26)
+                Finish();
+                yield break;
+            }
             if (section == "settings")
             {
                 SettingsChecks();   // QA: graphics presets and the sound categories
@@ -477,19 +483,21 @@ namespace WorkshopWreckage
             Take(torso); g.interaction.DepositStation(torso);
             int pulled = wb.InstallAll(retro);
             bool armOn = wb.DonorIn(retro, ModuleSlot.ArmL) == uArm;
-            // Hoverbot's head with the torso in: fitted at once
+            // Hoverbot's head with the torso in: into the parts pool, offered on the bench screen, fitted by choice
             Take(hHead); var (_, headMsg) = wb.Deliver(hHead);
-            bool headOn = wb.DonorIn(retro, ModuleSlot.Head) == hHead;
+            bool pooled = g.world.instances[hHead].state == ItemState.Stored && wb.PoolContents().Contains(hHead) && wb.PoolDonors(retro).Contains(hHead);
+            bool headOn = pooled && wb.Install(retro, hHead) && wb.DonorIn(retro, ModuleSlot.Head) == hHead;
             // Retrobot's own left arm and head now have nowhere on Retrobot
             Take(rArm); g.interaction.DepositStation(rArm);
             Take(rHead); g.interaction.DepositStation(rHead);
             string ownWhy = wb.CanInstall(retro, rArm);
             bool ownRefused = g.world.instances[rArm].state == ItemState.Stored && ownWhy.Contains("Unibot");
             foreach (var key in new[] { "right arm", "leg assembly" }) { int id = Part("retrobot", key); Take(id); g.interaction.DepositStation(id); }
+            wb.InstallAll(retro);   // "Build from the parts pool"
             yield return Frames(2);
             bool complete = wb.Complete(retro) && wb.Required(retro) == 5;
             var froms = rb.ModelFroms;
-            Check("another robot's head and arm go on Retrobot: an arm before the torso waits in the tray and goes on with the torso, a head is fitted at once; Retrobot's own then waits",
+            Check("another robot's head and arm go on Retrobot: delivered parts wait in the parts pool until built on; a pooled head is fitted by choice; Retrobot's own then waits",
                   waited && pulled >= 1 && armOn && headOn && ownRefused && complete && froms.h == "hoverbot" && froms.l == "unibot",
                   $"waited {waited}; pulled {pulled}, arm on {armOn}; head: {headMsg}; own arm: {ownWhy}; complete {complete} ({wb.InstalledCount(retro)}/{wb.Required(retro)}); bench model {froms}");
             var (spot, _) = wb.MatSpot(0);
@@ -515,12 +523,12 @@ namespace WorkshopWreckage
             wb.selected = "unibot";
             int uTorso = Part("unibot", "torso");
             Take(uTorso); g.interaction.DepositStation(uTorso);
-            int got = wb.InstallAll(uni);
-            // Retrobot's spare head goes on too (Unibot's head shell with its eye and antennas then waits)
-            bool uniArm = wb.DonorIn(uni, ModuleSlot.ArmL) == rArm && wb.DonorIn(uni, ModuleSlot.Head) == rHead && got == 2 && wb.Required(uni) == 9 - 1 - 3 + 2;
+            int got = wb.InstallAll(uni);   // its torso from the pool, and Retrobot's spare arm and head
+            // Retrobot's spare head goes on too (Unibot's head shell then waits)
+            bool uniArm = wb.DonorIn(uni, ModuleSlot.ArmL) == rArm && wb.DonorIn(uni, ModuleSlot.Head) == rHead && got == 3 && wb.Required(uni) == 9 - 1 - 1 + 2;   // its own head shell and left arm out, the two donors in
             bool intact = PartsIntact(out var pi);
-            Check("Retrobot's own left arm and head, waiting in the tray, go on Unibot (its own left arm is on Retrobot)",
-                  uniArm && intact, $"installed {got}; Unibot left arm slot: {(wb.DonorIn(uni, ModuleSlot.ArmL) is int x && x >= 0 ? g.world.DefOf(x).displayName : "empty")}; {wb.InstalledCount(uni)}/{wb.Required(uni)}; {pi}");
+            Check("Retrobot's own left arm and head, waiting in the parts pool, go on Unibot (its own left arm is on Retrobot)",
+                  uniArm && intact, $"installed {got}; Unibot left arm slot: {(wb.DonorIn(uni, ModuleSlot.ArmL) is int x && x >= 0 ? g.world.DefOf(x).displayName : "empty")}; {wb.InstalledCount(uni)}/{wb.Required(uni)}; head slot {wb.DonorIn(uni, ModuleSlot.Head)} (Retrobot's {rHead}); installed [{string.Join(", ", wb.InstalledIds(uni).Select(i => g.world.DefOf(i).displayName))}]; {pi}");
             // save / load keeps all of it
             string State() => $"{string.Join(",", wb.InstalledIds(retro))}|{string.Join(",", wb.InstalledIds(uni))}|{Json.Write(m.ToDict()["locations"])}|{Json.Write(m.ToDict()["waiting"])}";
             var before = State();
@@ -1695,6 +1703,33 @@ namespace WorkshopWreckage
             Check("robot parts are unique, each in one place", PartsIntact(out var detail), detail);
         }
 
+        /// <summary>Radar parts collect in the robot parts pool; the radar is built only once its plans
+        /// (2 skill points) are bought, at once if all eight parts are already there.</summary>
+        IEnumerator RadarPlanChecks()
+        {
+            var wb = g.workbench;
+            var radar = g.radar;
+            g.player.enabled = false;
+            var parts = g.world.instances.Where(i => g.world.DefOf(i.id).IsToolItem && !g.world.DefOf(i.id).IsRadarBattery && i.state == ItemState.InWorld)
+                         .GroupBy(i => g.world.DefOf(i.id).ToolType).Select(gr => gr.First().id).ToList();
+            var plans = g.progression.skills.FirstOrDefault(s => s.id == "part_radar_plans");
+            string last = "";
+            foreach (var id in parts) { Take(id); last = radar.Deliver(id).text; }
+            yield return Frames(2);
+            bool waits = !radar.assembled && !radar.HasPlans && parts.All(id => wb.PoolContents().Contains(id)) && last.Contains("plans");
+            Check("radar parts go into the robot parts pool; without the plans the radar is not built",
+                  parts.Count == PartRadarModel.Parts.Length && waits && plans != null && plans.cost == 2,
+                  $"{parts.Count} part types, assembled {radar.assembled}, pool {wb.PoolContents().Count}; plans cost {plans?.cost}; \"{last}\"");
+            LevelTo(Mathf.Max(2, plans?.unlockLevel ?? 2));
+            g.progression.skillPoints = Mathf.Max(g.progression.skillPoints, 2);
+            int sp = g.progression.skillPoints;
+            bool bought = g.UnlockSkill("part_radar_plans");
+            yield return Frames(2);
+            Check("buying the Part Radar plans (2 skill points) builds it from the pool at once",
+                  bought && radar.assembled && g.progression.skillPoints == sp - 2 && !parts.Any(id => wb.PoolContents().Contains(id)),
+                  $"bought {bought}, assembled {radar.assembled}, points {sp} → {g.progression.skillPoints}");
+        }
+
         /// <summary>A preset sets the pipeline, the look and the shadows; one changed value makes it Custom;
         /// every clip plays at its category's volume. (Automated runs never write the saved values.)</summary>
         void SettingsChecks()
@@ -1784,7 +1819,7 @@ namespace WorkshopWreckage
             wb.InstallAll(a1, false);
             Check("Sorting Arm #2's kit builds Sorting Arm #1, the arm on the mat", wb.Complete(a1) && wb.InstalledIds(a1).All(kit2.Contains), wb.Summary(a1));
             Take(kit1[0]); g.interaction.DepositStation(kit1[0]);
-            Check("Sorting Arm #1's own part then waits in the holding tray", g.world.instances[kit1[0]].state == ItemState.Stored && wb.CanInstall(a1, kit1[0]) != "", wb.CanInstall(a1, kit1[0]));
+            Check("Sorting Arm #1's own part then waits in the parts pool", g.world.instances[kit1[0]].state == ItemState.Stored && wb.CanInstall(a1, kit1[0]) != "", wb.CanInstall(a1, kit1[0]));
             foreach (var id in kit1.Skip(1)) { Take(id); g.interaction.DepositStation(id); }
             wb.RobotOf(a1).SetOperational();
             wb.InstallAll(a2, false);
@@ -2230,7 +2265,7 @@ namespace WorkshopWreckage
             // Retrobot: three parts delivered at level 1 wait in the tray
             foreach (var id in parts.Take(3)) { Take(id); g.interaction.DepositStation(id); }
             yield return Frames(2);
-            Check("parts delivered before the blueprint wait in the holding tray", wb.DeliveredIds(retro).Count == 3 && wb.InstalledCount(retro) == 0 && wb.StatusOf(retro) == RobotWorkbench.Status.AwaitingBlueprint,
+            Check("parts delivered before the blueprint wait in the parts pool", wb.DeliveredIds(retro).Count == 3 && wb.InstalledCount(retro) == 0 && wb.StatusOf(retro) == RobotWorkbench.Status.AwaitingBlueprint,
                   wb.Summary(retro));
             yield return AimAtBench(0);
             g.hud.SetHudVisible(true);
@@ -2277,7 +2312,7 @@ namespace WorkshopWreckage
             yield return Frames(4);
             rb = g.retrobot;
             var wbAfter = Bench();
-            Check("partial assembly and the holding tray survive save/load", wbBefore == wbAfter && PartsIntact(out _), $"{wbBefore}  vs  {wbAfter}");
+            Check("partial assembly and the parts pool survive save/load", wbBefore == wbAfter && PartsIntact(out _), $"{wbBefore}  vs  {wbAfter}");
             File.Delete(SaveSystem.PathOf("autotest_wb"));
             // 13. a part can't be delivered twice
             var again = g.interaction.DepositStation(parts[0]);

@@ -8,10 +8,14 @@ namespace WorkshopWreckage
     /// physical bench where every robot is built. Building a robot needs BOTH its
     /// blueprint (player level, robots.json blueprint_level) and its parts, carried here
     /// by the player personally:
-    ///  · a unique robot part can be found, carried and delivered at any level; until
-    ///    the blueprint unlocks it waits in that robot's holding tray (state Stored in
-    ///    station "RS-&lt;type&gt;");
-    ///  · once unlocked, delivered parts are installed (state Installed, owner
+    ///  · a unique robot part can be found, carried and delivered at any level; it goes into the one
+    ///    shared robot parts pool along the front of the bench (playtest 2026-10-26: "all robot parts in
+    ///    one big pile ... shared before assigned"). Inside, each part keeps its type's station
+    ///    "RS-&lt;type&gt;" (state Stored), which only says what it fits;
+    ///  · nothing is assigned on delivery: building at the bench takes the fitting parts out of the
+    ///    pool (the same fit rules as ever: any head on any mobile robot, arms on their own side, the
+    ///    rest only on their own type, any Sorting Arm's part on any Sorting Arm);
+    ///  · once unlocked, pooled parts are installed (state Installed, owner
     ///    "assembly:&lt;robot&gt;"), in any order except real mechanical dependencies
     ///    (robots.json assembly.requires); each one visibly appears on the robot;
     ///  · when every part is installed the player activates the robot (it hops off the
@@ -50,12 +54,31 @@ namespace WorkshopWreckage
         public string selected = "retrobot";
         readonly HashSet<string> _announced = new();
         Game _g;
-        readonly Dictionary<int, Transform> _trays = new();
+        Transform _pool;
         TextAtlas _labels;
         Renderer[] _boards = new Renderer[Types.Length];
         public event System.Action Changed;
 
         public static string StationOf(string type) => "RS-" + type;
+
+        /// <summary>Everything in the robot parts pool: every robot type's parts and the Part Radar's.</summary>
+        public List<int> PoolContents() => Types.SelectMany(t => _g.storage.Stored(StationOf(t))).Concat(_g.storage.Stored(PartRadar.Station)).ToList();
+
+        /// <summary>Which robots a pooled part can go on, in words.</summary>
+        public string FitsText(int id)
+        {
+            var d = _g.world.DefOf(id);
+            if (d.IsToolItem) return "a Part Radar part";
+            string origin = OriginOf(id);
+            var p = P(origin);
+            if (MainSlotOf(id) is ModuleSlot s) return $"fits any robot as its {RobotModules.SlotName(s)}";
+            if (IsPooled(p)) return $"fits any {p.name.Split(' ')[0]}";
+            return $"fits {p?.name ?? origin} only";
+        }
+
+        /// <summary>Another robot's head or arm in the pool that p can take now (the player's choice at the bench).</summary>
+        public List<int> PoolDonors(Project p) => p.crafted || !ModuleParts.ContainsKey(p.type) ? new List<int>()
+            : Mains().Where(id => OriginOf(id) != p.id && _g.world.instances[id].state == ItemState.Stored && CanInstall(p, id) == "").ToList();
         public static string OwnerOf(string robot) => "assembly:" + robot;
         /// <summary>Owner of a head or arm item that became a module fitted straight to a built robot.</summary>
         public const string ModulePrefix = "module:";
@@ -394,10 +417,10 @@ namespace WorkshopWreckage
             return o;
         }
 
-        /// <summary>Parts in the trays that can go on p now (its own, and other robots' heads and arms).</summary>
+        /// <summary>Parts in the pool that go on p now: its own, and other robots' heads and arms their own robot can't take.</summary>
         public int InstallableCount(Project p) => DeliveredIds(p).Count(id => CanInstall(p, id) == "") + DonorCandidates(p).Count();
 
-        /// <summary>Its own delivered parts (the units of a type share one holding tray; a pooled type: all of them).</summary>
+        /// <summary>Its own parts in the pool (a pooled type: every unit's).</summary>
         public List<int> DeliveredIds(Project p) => p.crafted ? new List<int>() : _g.storage.Stored(StationOf(p.type)).Where(id => OriginOf(id) == p.id || IsPooled(p)).ToList();
 
         public int Required(Project p) => p.crafted ? p.materials.Values.Sum() : NeededIds(p).Count;
@@ -466,7 +489,7 @@ namespace WorkshopWreckage
                     default: found++; break;
                 }
             bits.Add($"{p.name}: {inst} of {ids.Count} components installed.");
-            if (deliv > 0) bits.Add(Unlocked(p) ? $"{deliv} delivered, waiting to be installed." : $"{deliv} waiting in the holding tray.");
+            if (deliv > 0) bits.Add(Unlocked(p) ? $"{deliv} in the parts pool, ready to install." : $"{deliv} waiting in the parts pool.");
             if (found > 0) bits.Add($"{found} discovered but not delivered.");
             if (missing > 0) bits.Add($"{missing} still missing.");
             return string.Join(" ", bits);
@@ -481,7 +504,7 @@ namespace WorkshopWreckage
             if (Operational(p)) return $"{p.name} is already operational";
             var i = _g.world.instances[id];
             string origin = OriginOf(id);
-            if (i.state != ItemState.Stored || i.owner != "box:" + StationOf(TypeOf(origin))) return "Deliver it to the workbench first";
+            if (i.state != ItemState.Stored || i.owner != "box:" + StationOf(TypeOf(origin))) return "Bring it to the parts pool at the workbench first";
             if (IsPooled(p) && TypeOf(origin) == p.type)
             {
                 // any Sorting Arm's part goes on the arm being built, in the same place
@@ -585,10 +608,9 @@ namespace WorkshopWreckage
             return n;
         }
 
-        /// <summary>The player personally delivers a carried part. Robot parts go to the
-        /// holding tray and are installed at once if the blueprint allows; recipe
-        /// materials are built into the crafted robot. Returns the feedback text, and
-        /// whether it was accepted.</summary>
+        /// <summary>The player personally delivers a carried part. Robot parts go into the
+        /// parts pool (installed later, at the bench); recipe materials are built into the
+        /// crafted robot. Returns the feedback text, and whether it was accepted.</summary>
         public (bool ok, string text) Deliver(int id)
         {
             var inst = _g.world.instances[id];
@@ -629,28 +651,18 @@ namespace WorkshopWreckage
         }
 
         /// <summary>A robot part arrives at the workbench (the player's inventory or a robot's hands; `by` is who
-        /// brought it): into its type's holding tray, then onto its robot if it can go on now.</summary>
+        /// brought it): into the shared parts pool. Nothing is assigned yet: the player builds from the pool.</summary>
         public (bool ok, string text) Receive(int id, string by = "player")
         {
             var def = _g.world.DefOf(id);
             var p = ProjectFor(id);
             if (p == null || !def.IsRobotPart) return (false, "Unknown robot part");
             _g.storage.Deposit(StationOf(p.type), id, by);
-            if (Install(p, id)) return (true, $"Installed on {p.name}: {def.displayName}  ({InstalledCount(p)}/{Required(p)})");
-            // a Sorting Arm part goes on whichever arm is on the mat (the kits are copies)
-            if (IsPooled(p))
-                foreach (var q in projects.Where(q => q.type == p.type && q != p && OnBench(q)))
-                    if (Install(q, id)) return (true, $"Installed on {q.name}: {def.displayName}  ({InstalledCount(q)}/{Required(q)})");
-            // a head or arm its own robot cannot take now goes on the robot being built (the one
-            // selected at the bench first), as any robot takes any head and arms
-            if (MainSlotOf(id) != null)
-                foreach (var q in projects.OrderBy(q => q.id == selected ? 0 : 1).ThenBy(q => q.mat))
-                    if (q != p && OnBench(q) && Install(q, id))
-                        return (true, $"Fitted to {q.name}: {def.displayName} as its {RobotModules.SlotName(MainSlotOf(id).Value)}  ({InstalledCount(q)}/{Required(q)})");
             Refresh();
             Sfx.Play("drop_drawer", transform.position, -4);
-            string why = CanInstall(p, id);
-            return (true, $"{def.displayName} is in the holding tray — {why}");
+            var ready = projects.Where(q => OnBench(q) && CanInstall(q, id) == "").Select(q => q.name).Take(3).ToList();
+            string next = ready.Count > 0 ? $"build it onto {string.Join(" or ", ready)} at the workbench" : FitsText(id);
+            return (true, $"{def.displayName} → robot parts pool ({PoolContents().Count})  ·  {next}");
         }
 
         /// <summary>QA and tests only (--robotview, autoplay): installs a robot's parts
@@ -724,7 +736,7 @@ namespace WorkshopWreckage
                 if (!Unlocked(p) || !_announced.Add(p.id)) continue;
                 if (!announce) continue;
                 var bits = p.crafted ? $"Blueprint: {p.name} — bring its materials to the Robot Workbench" :
-                    DeliveredIds(p).Count > 0 ? $"Blueprint unlocked: {p.name} — {DeliveredIds(p).Count} part(s) in the holding tray can be installed" : $"Blueprint unlocked: {p.name} — bring its parts to the Robot Workbench";
+                    DeliveredIds(p).Count > 0 ? $"Blueprint unlocked: {p.name} — {DeliveredIds(p).Count} of its part(s) in the parts pool can be installed" : $"Blueprint unlocked: {p.name} — bring its parts to the Robot Workbench";
                 _g.hud.Toast(bits, true);
                 Sfx.Play("milestone", null, -6);
             }
@@ -843,8 +855,17 @@ namespace WorkshopWreckage
             }
             var title = TextAtlas.RenderSingle("ROBOT WORKBENCH", 1024, 128, new Color(0.3f, 0.2f, 0.13f), new Color(0.82f, 0.63f, 0.32f), 72, true);
             b.Quad(new Vector3(0, 1.88f, -Bench.z / 2 + 0.045f), new Vector2(1.6f, 0.2f), EnvMaterials.Atlas(title), new Rect(0, 0, 1, 1));
-            var trayTex = TextAtlas.RenderSingle("HOLDING TRAY", 512, 64, new Color(0.62f, 0.5f, 0.3f), new Color(0.18f, 0.12f, 0.07f), 40, true);
+            var trayTex = TextAtlas.RenderSingle("ROBOT PARTS POOL", 512, 64, new Color(0.62f, 0.5f, 0.3f), new Color(0.18f, 0.12f, 0.07f), 40, true);
             var trayLabel = EnvMaterials.Atlas(trayTex);
+            // the robot parts pool: one long tray along the front, every delivered part in one pile
+            float tw = Bench.x - 0.1f;
+            b.Box(new Vector3(0, Bench.y + 0.006f, TrayZ), new Vector3(tw, 0.012f, 0.16f), dark);
+            foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(0, Bench.y + 0.02f, TrayZ + sz * 0.08f), new Vector3(tw, 0.03f, 0.012f), steel);
+            foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(sx * tw / 2, Bench.y + 0.02f, TrayZ), new Vector3(0.012f, 0.03f, 0.16f), steel);
+            foreach (var lx in new[] { -tw / 4, tw / 4 }) b.Quad(new Vector3(lx, Bench.y + 0.022f, TrayZ + 0.087f), new Vector2(0.4f, 0.05f), trayLabel, new Rect(0, 0, 1, 1));
+            _pool = new GameObject("PartsPool").transform;
+            _pool.SetParent(transform, false);
+            _pool.localPosition = Batch.G(0, Bench.y + 0.012f, TrayZ);
             _labels = new TextAtlas(Types.Length, new Vector2Int(200, 80), new Color(0.3f, 0.2f, 0.13f));
             var lm = EnvMaterials.Atlas(_labels.texture);
             float w = Bench.x / Types.Length;
@@ -854,16 +875,7 @@ namespace WorkshopWreckage
                 // assembly mat with alignment marks
                 b.Box(new Vector3(x, Bench.y + 0.003f, -0.04f), new Vector3(w - 0.06f, 0.006f, 0.6f), EnvMaterials.Plain(new Color(0.14f, 0.24f, 0.18f), 0, 0.1f));
                 foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(x + sx * 0.12f, Bench.y + 0.0065f, RobotZ), new Vector3(0.008f, 0.001f, 0.4f), EnvMaterials.Plain(new Color(0.75f, 0.7f, 0.5f), 0, 0.1f));
-                // holding tray at the front of the mat
-                b.Box(new Vector3(x, Bench.y + 0.006f, TrayZ), new Vector3(w - 0.1f, 0.012f, 0.16f), dark);
-                foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(x, Bench.y + 0.02f, TrayZ + sz * 0.08f), new Vector3(w - 0.1f, 0.03f, 0.012f), steel);
-                foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(x + sx * (w / 2 - 0.05f), Bench.y + 0.02f, TrayZ), new Vector3(0.012f, 0.03f, 0.16f), steel);
-                b.Quad(new Vector3(x, Bench.y + 0.022f, TrayZ + 0.087f), new Vector2(0.2f, 0.025f), trayLabel, new Rect(0, 0, 1, 1));
                 b.Quad(new Vector3(x, 1.2f, -Bench.z / 2 + 0.046f), new Vector2(0.4f, 0.16f), lm, _labels.CellUV(i));
-                var tray = new GameObject("Tray_" + Types[i]).transform;
-                tray.SetParent(transform, false);
-                tray.localPosition = Batch.G(x, Bench.y + 0.012f, TrayZ);
-                _trays[i] = tray;
             }
             b.colliders.Add((Batch.G(0, Bench.y / 2, 0), new Vector3(Bench.x, Bench.y, Bench.z), Quaternion.identity));
             b.Build(transform, "RobotWorkbench");
@@ -884,7 +896,7 @@ namespace WorkshopWreckage
             tgo.AddComponent<StorageTarget>().station = true;
         }
 
-        /// <summary>Redraws the status labels, blueprint boards and holding trays.</summary>
+        /// <summary>Redraws the status labels, blueprint boards and the parts pool.</summary>
         public void Refresh()
         {
             if (_g?.world == null || _labels == null) return;
@@ -897,19 +909,21 @@ namespace WorkshopWreckage
                 string code = s == Status.AwaitingBlueprint && _g.progression != null && _g.progression.level < p.level ? "LV " + p.level : $"{InstalledCount(p)}/{Required(p)}";
                 _labels.Set(i, code, p.name.ToUpper(), word, s != Status.AwaitingBlueprint);
                 if (_boards[i] != null) _boards[i].sharedMaterial = EnvMaterials.Blueprint(Unlocked(p) ? 1 : 2);
-                var tray = _trays[i];
-                foreach (Transform c in tray) Destroy(c.gameObject);
-                var ids = _g.storage.Stored(StationOf(Types[i]));   // every unit's parts of that type
-                for (int k = 0; k < ids.Count; k++)
-                {
-                    var def = _g.world.DefOf(ids[k]);
-                    var mi = HeldView.MakeModel(def);
-                    mi.transform.SetParent(tray, false);
-                    var rot = Quaternion.Euler(0, -23f * k, 0) * (def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, -90) : Quaternion.identity);
-                    mi.transform.localRotation = rot;
-                    mi.transform.localScale = Vector3.one * def.worldScale * 0.55f;
-                    mi.transform.localPosition = Batch.G(-0.2f + (k % 7) * 0.066f, 0.025f + (k / 14) * 0.03f, -0.04f + (k / 7 % 2) * 0.075f);
-                }
+            }
+            // the pool: every part in one pile, grouped by what it fits (spent radar batteries are disposed of, not shown)
+            foreach (Transform c in _pool) Destroy(c.gameObject);
+            var ids = PoolContents().Where(id => !_g.world.DefOf(id).IsRadarBattery).OrderBy(id => _g.world.DefOf(id).storageBox).ThenBy(id => id).ToList();
+            int perRow = Mathf.FloorToInt((Bench.x - 0.2f) / 0.066f);
+            for (int k = 0; k < ids.Count; k++)
+            {
+                var def = _g.world.DefOf(ids[k]);
+                var mi = HeldView.MakeModel(def);
+                mi.transform.SetParent(_pool, false);
+                var rot = Quaternion.Euler(0, -23f * k, 0) * (def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, -90) : Quaternion.identity);
+                mi.transform.localRotation = rot;
+                mi.transform.localScale = Vector3.one * def.worldScale * 0.55f;
+                int col = k % perRow, row = k / perRow % 2, layer = k / (perRow * 2);
+                mi.transform.localPosition = Batch.G(-(perRow - 1) * 0.033f + col * 0.066f, 0.025f + layer * 0.03f, -0.035f + row * 0.07f);
             }
             _labels.Redraw();
             Changed?.Invoke();
