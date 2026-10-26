@@ -176,6 +176,9 @@ namespace WorkshopWreckage
         int _searchRank, _routeRank, _stagingRank;
         /// <summary>Bought robot intelligence (design v1.0 §6): zero means the base nearest-feasible robot.</summary>
         int _persistRank, _setRank, _strategistRank, _handoffRank;
+        /// <summary>Robot Part Retrieval (Retrobot, playtest 2026-10-26): it also carries robot parts to the workbench.</summary>
+        int _retrieveRank;
+        bool _benchTrip;   // the current delivery goes to the workbench (robot parts), not a storage destination
         bool Fleet => g.progression?.Has("fleet_coordination") ?? false;
         bool Orders => g.progression?.Has("destination_orders") ?? false;
         int _lastDef = -1;              // Local Persistence: the kind it last picked up, where and when
@@ -309,6 +312,7 @@ namespace WorkshopWreckage
             _depositTime = (float)Json.Num(c, "deposit_time", 0.9) * pick;
             _searchRank = R("search_efficiency"); _routeRank = R("route_planning"); _stagingRank = R("staging_priority");
             _persistRank = R("local_persistence"); _setRank = R("set_awareness"); _strategistRank = R("completion_strategist"); _handoffRank = R("courier_handoff");
+            _retrieveRank = R("part_retrieval");
         }
 
         /// <summary>Base value of a stat from robots.json (for "base → upgraded" displays).</summary>
@@ -1205,7 +1209,7 @@ namespace WorkshopWreckage
                 if (strategy == "opportunistic")
                     // the nearest part first; one it can store itself is worth 0.4 m of walking more than one for a high
                     // destination (playtest 2026-10-25: "pick up what is nearest")
-                    score = i => (i.Position - me).magnitude + (ReachableDest(g.db.Get(i.defId).storageBox) ? 0 : 0.4f);
+                    score = i => (i.Position - me).magnitude + (g.db.Get(i.defId).IsRobotPart ? -1.5f : ReachableDest(g.db.Get(i.defId).storageBox) ? 0 : 0.4f);
                 if (strategy == "multi_stop") pool = OneDestination(pool, tray, me, ref score);
             }
             // bought intelligence only (design v1.0 §7.2): switch penalty and set focus are exactly 0 without it
@@ -1547,9 +1551,13 @@ namespace WorkshopWreckage
             if (_deferredUntil.Count > 0 && _deferredUntil.TryGetValue(i.id, out var deferredUntil) && _time < deferredUntil.until) return false;
             if (!tray && zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
             var def = g.db.Get(i.defId);
-            if (!def.robotCarry || def.IsRobotPart || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;   // player-only: the largest 20 %
+            // Robot Part Retrieval: robot parts go to the workbench, never in one trip with ordinary parts
+            bool part = def.IsRobotPart;
+            if (part ? _retrieveRank <= 0 || carried.Count > 0 && !_benchLoad : carried.Count > 0 && _benchLoad) return false;
+            if (!part && !def.robotCarry || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;   // player-only: the largest 20 %
             if (!tray && strategy == "assigned_definition" && assignedDef >= 0 && i.defId != assignedDef) return false;
             if (Flies && g.debris != null && g.debris.At(i.Position) > i.Position.y + ItemDatabase.Extents(def)[2] * 0.5f + 0.05f) return false;   // buried
+            if (part) return true;
             bool staged = i.owner.StartsWith("stage:");
             if (staged && Blocked(def.storageBox)) return false;   // waits until someone clears the strays out of its destination
             if (ReachableDest(def.storageBox) || tray) return true;   // the tray is always emptied, staging caps or not
@@ -1869,6 +1877,17 @@ namespace WorkshopWreckage
         bool PlanDelivery()
         {
             var me = transform.position;
+            _benchTrip = _benchLoad;
+            if (_benchTrip)
+            {
+                var spot = g.workbench.DropOffSpot(carried[0]);
+                if (Flies) { _hoverTarget = spot + Vector3.up * 0.6f; _path = new List<Vector3>(); return true; }
+                var b = _nav.NearestFree(spot, 0.5f) ?? _nav.NearestFree(spot, 1.5f);
+                if (b == null) return false;
+                _path = _nav.Path(me, b.Value);
+                _pathIdx = 0;
+                return _path != null;
+            }
             var boxes = carried.Select(c => g.world.DefOf(c).storageBox).Distinct()
                 .Where(b => g.db.boxes.ContainsKey(b) && g.units.ContainsKey(Json.Str(g.db.boxes[b], "unit")))
                 .OrderBy(b => ((StagingSpot(b) ?? me) - me).sqrMagnitude).ToList();
@@ -1893,8 +1912,50 @@ namespace WorkshopWreckage
             return _path != null;
         }
 
+        /// <summary>Carrying robot parts (Robot Part Retrieval): the load is for the workbench.</summary>
+        bool _benchLoad => carried.Count > 0 && g.world.DefOf(carried[0]).IsRobotPart;
+
+        /// <summary>Hands the carried robot parts over at the workbench: each goes into its holding tray or
+        /// straight onto its robot (RobotWorkbench.Receive), as if the player had brought it.</summary>
+        IEnumerator DeliverToBench()
+        {
+            var bench = g.workbench.transform.position;
+            for (float t = 0; t < _depositTime * 0.5f; t += Time.deltaTime)
+            {
+                FaceTowards(bench, Time.deltaTime * 2);
+                _armLift = Mathf.SmoothStep(0, 0.9f, t / (_depositTime * 0.5f));
+                if (Flies) HoverHold(Time.deltaTime, _altitude);
+                yield return null;
+            }
+            foreach (var itemId in carried.ToList())
+            {
+                var (ok, text) = g.workbench.Receive(itemId, Owner);
+                if (!ok) continue;
+                HideCarried(itemId);
+                carried.Remove(itemId);
+                delivered++;
+                _tripParts++;
+                if (Vector3.Distance(transform.position, g.player.transform.position) < 12f) g.hud.Toast($"{displayName}: {text}", true);
+                yield return new WaitForSeconds(0.12f);
+            }
+            for (float t = 0; t < _depositTime * 0.5f; t += Time.deltaTime)
+            {
+                _armLift = Mathf.Lerp(0.9f, 0, t / (_depositTime * 0.5f));
+                yield return null;
+            }
+            _armLift = 0;
+            _path = null;
+            _benchTrip = false;
+            if (carried.Count > 0) DropCarried($"{displayName} couldn't hand that part over");
+            _step = Step.Choose;
+            _idleT = _decidePause;
+            TripCheck();
+            MaybeGesture();
+        }
+
         IEnumerator Deposit()
         {
+            if (_benchTrip) { yield return DeliverToBench(); yield break; }
             var here = carried.Where(c => g.world.DefOf(c).storageBox == _destBox).ToList();
             if (!Stows || here.Count == 0) { yield return DepositParts(here, true); yield break; }
             // a stowing robot takes each part out of its hold with the grippers and delivers it on its own

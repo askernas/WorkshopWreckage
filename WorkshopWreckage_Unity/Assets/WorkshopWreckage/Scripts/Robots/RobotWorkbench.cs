@@ -558,6 +558,12 @@ namespace WorkshopWreckage
             var inst = _g.world.instances[id];
             var def = _g.world.DefOf(id);
             if (inst.state != ItemState.Carried || inst.owner != "player") return (false, "Carry the part here yourself");
+            if (def.IsRobotPart)
+            {
+                if (ProjectFor(id) == null) return (false, "Unknown robot part");
+                _g.inventory.Remove(id);
+                return Receive(id);
+            }
             var p = ProjectFor(id);
             if (p == null) return (false, def.IsRobotPart ? "Unknown robot part"
                 : !_g.progress.IsComplete(def.id) ? $"Not yet — recipes only use parts of a completed destination ({_g.progress.AcceptedOf(def.id)}/{_g.world.TotalOf(def.id)} {def.displayName} stored)"
@@ -572,7 +578,27 @@ namespace WorkshopWreckage
                 Sfx.Play(Complete(p) ? "complete" : "servo", transform.position, -6);
                 return (true, $"Built into {p.name}: {def.displayName}  ({InstalledCount(p)}/{Required(p)})");
             }
-            _g.storage.Deposit(StationOf(p.type), id);
+            return Receive(id);
+        }
+
+        /// <summary>Where a robot (Robot Part Retrieval) hands a robot part over: on the floor in front of
+        /// the mat of the part's robot type.</summary>
+        public Vector3 DropOffSpot(int id)
+        {
+            var p = P(TypeOf(OriginOf(id))) ?? projects[0];
+            var (sp, _) = MatSpot(p.mat);
+            var s = sp + Front * (Bench.z * 0.5f + 0.35f);
+            return new Vector3(s.x, 0, s.z);
+        }
+
+        /// <summary>A robot part arrives at the workbench (the player's inventory or a robot's hands; `by` is who
+        /// brought it): into its type's holding tray, then onto its robot if it can go on now.</summary>
+        public (bool ok, string text) Receive(int id, string by = "player")
+        {
+            var def = _g.world.DefOf(id);
+            var p = ProjectFor(id);
+            if (p == null || !def.IsRobotPart) return (false, "Unknown robot part");
+            _g.storage.Deposit(StationOf(p.type), id, by);
             if (Install(p, id)) return (true, $"Installed on {p.name}: {def.displayName}  ({InstalledCount(p)}/{Required(p)})");
             // a head or arm its own robot cannot take now goes on the robot being built (the one
             // selected at the bench first), as any robot takes any head and arms
