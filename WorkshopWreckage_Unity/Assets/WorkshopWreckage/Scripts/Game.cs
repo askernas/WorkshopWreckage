@@ -1491,10 +1491,17 @@ namespace WorkshopWreckage
             if (kb.escapeKey.wasPressedThisFrame)
             {
                 if (state == "play") { if (interaction.inspecting) interaction.EndInspect(); else SetState("paused"); }
+                else if (state == "paused" && hud.DirectScreen != null) SetState("play");
                 else if (state == "paused" || state == "inventory" || state == "workbench" || state == "exit") { if (!hud.BackFromSubScreen()) SetState("play"); }
                 else if (state == "menu") hud.BackFromSubScreen();
             }
             else if (kb.tabKey.wasPressedThisFrame && (state == "play" || state == "inventory")) SetState(state == "play" ? "inventory" : "play");
+            else if (MenuKeyPressed(kb) is string screen && (state == "play" || state == "paused"))
+            {
+                // K / U (unlocks.json menu_keys): Skills / Robots straight from play; the same key closes it
+                if (state == "play" && !interaction.inspecting) { SetState("paused"); hud.OpenDirect(screen); }
+                else if (state == "paused" && hud.DirectScreen == screen) SetState("play");
+            }
             else if (kb.f5Key.wasPressedThisFrame && state == "play") SaveGame("quick");
             else if (kb.rKey.wasPressedThisFrame && state == "play" && !interaction.inspecting)
             {
@@ -1563,6 +1570,13 @@ namespace WorkshopWreckage
             }
             if (!focused) { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
             Debug.Log($"[input] focus {(focused ? "back" : "lost")}: state {state}, cursor {Cursor.lockState}{(Cursor.visible ? " visible" : " hidden")}, sound {(AudioListener.pause ? "paused" : "on")}");
+        }
+
+        static string MenuKeyPressed(Keyboard kb)
+        {
+            if (kb[Unlocks.MenuKey("skills", Key.K)].wasPressedThisFrame) return "skills";
+            if (kb[Unlocks.MenuKey("robots", Key.U)].wasPressedThisFrame) return "robots";
+            return null;
         }
 
         public void SetState(string s)

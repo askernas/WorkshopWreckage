@@ -1389,7 +1389,7 @@ namespace WorkshopWreckage
             pr.level = pr.maxLevel;
             pr.skillPoints = 99;
             foreach (var s in pr.skills.Where(s => s.Active).OrderBy(s => s.unlockLevel)) g.UnlockSkill(s.id);
-            Check("tool skills unlock (levels, points, prerequisites)", pr.Has("bulk_pickup_count") && pr.Has("magnet_range_m") && pr.Has("scan_radius_m") && pr.Has("supermagnet"),
+            Check("tool skills unlock (levels, points, prerequisites)", pr.Has("bulk_pickup_count") && pr.Has("magnet_level") && pr.Has("scan_radius_m") && pr.Has("supermagnet"),
                   $"{pr.unlocked.Count} skills, inventory capacity {g.inventory.capacity}");
             Check("Inventory Manifest reveals the totals of discovered parts", pr.Has("reveal_totals") && g.progress.discovered.All(g.progress.revealed.Contains),
                   $"{g.progress.revealed.Count} of {g.progress.discovered.Count} discovered parts show their total");
@@ -1452,17 +1452,24 @@ namespace WorkshopWreckage
                 g.player.Teleport(at + new Vector3(0, -at.y, -0.5f));
                 g.player.SetView(0, -0.6f);
                 int before = g.inventory.Count, lvl = g.tools.MagnetLevel;
-                for (float t = 0; t < 2.5f; t += Time.deltaTime) { g.tools.MagnetTick(Time.deltaTime); yield return null; }
+                for (float w = 0; w < 1.5f && g.interaction.busy.Count > 0; w += Time.deltaTime) yield return null;   // let the parts round the picked one settle
+                int pulledNow = g.tools.Glove();
+                float cdLeft = g.tools.CooldownLeft("magnetic_glove");
+                int again = g.tools.Glove();   // recharging: nothing
+                yield return g.Capture(Path.Combine(outDir, "37_skill_bar.png"), 2);
+                yield return Frames(30);
                 var got = g.inventory.items.Skip(before).ToList();
                 g.tools.ResetState();
                 // a part that isn't magnetic pulls nothing
                 EmptyHands();
                 var plain = g.world.instances.Where(Free).FirstOrDefault(i => !g.world.DefOf(i.id).magnetic);
                 int none = -1;
-                if (plain != null) { Take(plain.id); int b2 = g.inventory.Count; for (float t = 0; t < 0.6f; t += Time.deltaTime) { g.tools.MagnetTick(Time.deltaTime); yield return null; } none = g.inventory.Count - b2; }
-                Check("Magnetic glove level III pulls exactly 3 copies of the first slot's magnetic part, nothing else; a non-magnetic part pulls none",
-                      lvl == 3 && got.Count == 3 && got.All(i => g.world.instances[i].defId == mag.defId) && none == 0,
-                      $"level {lvl}: {got.Count} × {g.world.DefOf(mag.id).displayName} (all the same {got.All(i => g.world.instances[i].defId == mag.defId)}); non-magnetic {none}");
+                if (plain != null) { Take(plain.id); int b2 = g.inventory.Count; g.tools.Glove(); yield return Frames(10); none = g.inventory.Count - b2; }
+                float cd3 = PlayerTools.Tuned("magnetic_glove", "cooldown_s", 3, -1);
+                Check("Magnetic glove level III (key 1) pulls exactly 3 copies of the first slot's magnetic part, nothing else, then recharges (unlocks.json skill_tuning); a non-magnetic part pulls none",
+                      lvl == 3 && pulledNow == 3 && got.Count == 3 && got.All(i => g.world.instances[i].defId == mag.defId) && none == 0 && again == 0
+                      && Mathf.Abs(cdLeft - cd3) < 0.5f && g.tools.Slot("magnetic_glove") == 1,
+                      $"level {lvl}: {got.Count} × {g.world.DefOf(mag.id).displayName} (all the same {got.All(i => g.world.instances[i].defId == mag.defId)}); cooldown {cdLeft:0.0} s of {cd3}, used again {again}; non-magnetic {none}");
             }
             else Check("Magnetic glove level III pulls exactly 3 copies of the first slot's magnetic part", false, "no cluster of a magnetic part found");
             foreach (var id in glove) pr.unlocked.Add(id);
@@ -1472,8 +1479,9 @@ namespace WorkshopWreckage
             old["unlocked"] = ((List<object>)old["unlocked"]).Concat(new object[] { "filter_material", "filter_category" }).ToList();
             int pts = pr.skillPoints;
             pr.Load(old);
-            Check("the glove has ten levels (I-X); a save with the retired filter skills refunds their points", g.tools.MagnetLevel == 10 && pr.skillPoints == pts + 2 && !pr.unlocked.Contains("filter_material"),
-                  $"level {g.tools.MagnetLevel}, points {pts} -> {pr.skillPoints}");
+            Check("the glove has ten levels (I-X, level X: 10 parts, 30 s); a save with the retired filter skills refunds their points",
+                  g.tools.MagnetLevel == 10 && PlayerTools.Tuned("magnetic_glove", "pull_items", 10, 0) == 10 && g.tools.CooldownOf("magnetic_glove") == 30 && pr.skillPoints == pts + 2 && !pr.unlocked.Contains("filter_material"),
+                  $"level {g.tools.MagnetLevel}, pulls {PlayerTools.Tuned("magnetic_glove", "pull_items", 10, 0)}, cooldown {g.tools.CooldownOf("magnetic_glove")} s; points {pts} -> {pr.skillPoints}");
             foreach (var r in g.robots) r.enabled = true;
 
             EmptyHands();
@@ -1529,7 +1537,7 @@ namespace WorkshopWreckage
             zr.AssignZone(null);
 
             // Sorting tray: parts put there are picked up by the robots first
-            if (g.inventory.Count < 6) { g.player.Teleport(hc + new Vector3(1.0f, 0, 0)); yield return Frames(2); g.tools.AreaSweep(); yield return Frames(5); }
+            if (g.inventory.Count < 6) { g.player.Teleport(hc + new Vector3(1.0f, 0, 0)); yield return Frames(2); g.tools.ResetState(); g.tools.AreaSweep(); yield return Frames(5); }
             g.player.Teleport(g.TrayCenter + new Vector3(0, 0, 1.2f));
             int put = 0;
             foreach (var id in g.inventory.items.ToList()) { if (put >= 8) break; if (g.interaction.DropInTray(id, false)) put++; }

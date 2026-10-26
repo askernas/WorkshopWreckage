@@ -8,20 +8,20 @@ using UnityEngine.Rendering;
 namespace WorkshopWreckage
 {
     /// <summary>Player collection tools unlocked through skills (progression.json):
-    /// Handful (bulk pickup of the same part around the one you pick), Magnetic Glove
-    /// (hold B: copies of the magnetic part in your first slot fly to you, as many as the glove's
-    /// level I-X; playtest 2026-10-25, it replaced the material / category filters that matched the part
-    /// in hand), Parts Scanner (V: highlights unsorted copies of the part in hand and
-    /// its destination), Supermagnet (X: exact-match attraction of the held part's
-    /// definition). All of them move real items into the inventory: never sorted
+    /// Handful (bulk pickup of the same part around the one you pick), and the usable skills on the
+    /// number keys (playtest 2026-10-26; slots, cooldowns and per-level values in unlocks.json
+    /// "skill_tuning"): Magnetic Glove (1: copies of the magnetic part in your first slot fly to you,
+    /// as many as the glove's level I-X), Parts Scanner (2: highlights unsorted copies of the part in
+    /// hand and its destination), Supermagnet (3: exact-match attraction of the held part's
+    /// definition), Area Sweep (4). Every usable skill recharges after use. All of them move real items into the inventory: never sorted
     /// parts, never parts reserved or carried by robots, never robot components, and
     /// never more than the free inventory space. Collected parts still have to be
     /// delivered to their destinations by hand.</summary>
     public class PlayerTools : MonoBehaviour
     {
         Game g;
-        float _magnetT, _superReady, _scanUntil;
-        int _magnetTaken;
+        float _scanUntil;
+        readonly Dictionary<string, float> _ready = new();
         readonly List<int> _scanned = new();
         string _scanDest;
         Material _outline, _destGhost;
@@ -44,7 +44,68 @@ namespace WorkshopWreckage
             Destroy(c);
         }
 
-        public void ResetState() { _scanned.Clear(); _scanUntil = 0; _superReady = 0; _magnetTaken = 0; }
+        public void ResetState() { _scanned.Clear(); _scanUntil = 0; _ready.Clear(); }
+
+        // ---------------------------------------------------------------- usable skills
+
+        /// <summary>The usable skills in bar order: id (unlocks.json skill_tuning), name, old letter key.</summary>
+        public static readonly (string id, string name, Key letter)[] Usable =
+        {
+            ("magnetic_glove", "Magnetic Glove", Key.B), ("scanner", "Parts Scanner", Key.V), ("supermagnet", "Supermagnet", Key.X), ("area_sweep", "Area Sweep", Key.N),
+        };
+
+        /// <summary>The skill's level: 0 = not learned.</summary>
+        public int Level(string id) => id switch
+        {
+            "magnetic_glove" => MagnetLevel,
+            "scanner" => P.Has("scan_radius_m") ? 1 : 0,
+            "supermagnet" => P.Has("supermagnet") ? 1 : 0,
+            "area_sweep" => P.Has("area_collect_radius_m") ? 1 : 0,
+            _ => 0,
+        };
+
+        /// <summary>A tuning value for the skill at a level: a list (one entry per level) or one number.</summary>
+        public static float Tuned(string id, string field, int level, float fallback)
+        {
+            var t = Unlocks.SkillTuning(id);
+            if (t == null || !t.TryGetValue(field, out var v)) return fallback;
+            if (v is List<object> l) return l.Count == 0 ? fallback : (float)(double)l[Mathf.Clamp(level - 1, 0, l.Count - 1)];
+            return v is double d ? (float)d : fallback;
+        }
+
+        public int Slot(string id) => (int)Tuned(id, "slot", 1, System.Array.FindIndex(Usable, u => u.id == id) + 1);
+        public float CooldownOf(string id) => Tuned(id, "cooldown_s", Level(id), 10);
+        public float CooldownLeft(string id) => Mathf.Max(0, _ready.GetValueOrDefault(id) - Time.time);
+
+        /// <summary>False (with a message) while the skill recharges.</summary>
+        bool Ready(string id, string name)
+        {
+            float left = CooldownLeft(id);
+            if (left <= 0) return true;
+            g.hud.OnFeedback($"{name} recharging ({Mathf.CeilToInt(left)} s)", false);
+            return false;
+        }
+
+        void Recharge(string id) => _ready[id] = Time.time + CooldownOf(id);
+
+        public int Use(string id) => id switch
+        {
+            "magnetic_glove" => Glove(),
+            "scanner" => Scan(),
+            "supermagnet" => Supermagnet(),
+            "area_sweep" => AreaSweep(),
+            _ => 0,
+        };
+
+        /// <summary>The bar's name for a skill, with the glove's level: "Magnetic Glove III".</summary>
+        public string NameOf(string id)
+        {
+            var n = System.Array.Find(Usable, u => u.id == id).name;
+            int lv = Level(id);
+            return id == "magnetic_glove" && lv > 0 ? $"{n} {Roman(lv)}" : n;
+        }
+
+        static string Roman(int n) => n switch { 1 => "I", 2 => "II", 3 => "III", 4 => "IV", 5 => "V", 6 => "VI", 7 => "VII", 8 => "VIII", 9 => "IX", 10 => "X", _ => n.ToString() };
 
         Vector3 Hand => g.held.HandWorld().GetColumn(3);
         /// <summary>The glove sweeps low in front of the player.</summary>
@@ -56,7 +117,7 @@ namespace WorkshopWreckage
                 return t.position + Vector3.up * 0.6f + Vector3.ProjectOnPlane(t.forward, Vector3.up).normalized * 0.5f;
             }
         }
-        /// <summary>Magnetic Glove level 0-10: how many copies one hold of B pulls in.</summary>
+        /// <summary>Magnetic Glove level 0-10.</summary>
         public int MagnetLevel => (int)P.Effect("magnet_level");
         int HeldDef => g.inventory.HeldId() >= 0 ? g.world.instances[g.inventory.HeldId()].defId : -1;
 
@@ -113,9 +174,6 @@ namespace WorkshopWreckage
         /// <summary>How many of `ids` fit in the pockets (the rest go to the tray).</summary>
         int Fits(int n) => Mathf.Min(n, Mathf.Max(0, Inv.capacity - Inv.Count));
 
-        /// <summary>Recharge in proportion to what was pulled (at least 30 %).</summary>
-        static float Recharge(float full, int pulled, int max) => full * Mathf.Clamp(pulled / (float)Mathf.Max(1, max), 0.3f, 1f);
-
         void SettleBatch()
         {
             foreach (var (from, def) in _toSettle) g.interaction.SettleNeighbours(from, def);
@@ -127,11 +185,12 @@ namespace WorkshopWreckage
             if (g == null || g.world == null || P == null || g.state != "play" || g.interaction.inspecting || g.Automated) return;
             var kb = Keyboard.current;
             if (kb == null) return;
-            if (kb.bKey.isPressed) MagnetTick(Time.deltaTime);
-            else _magnetTaken = 0;
-            if (kb.vKey.wasPressedThisFrame) Scan();
-            if (kb.xKey.wasPressedThisFrame) Supermagnet();
-            if (kb.nKey.wasPressedThisFrame) AreaSweep();
+            foreach (var (id, _, letter) in Usable)
+            {
+                int slot = Slot(id);
+                bool digit = slot >= 1 && slot <= 9 && kb[(Key)((int)Key.Digit1 + slot - 1)].wasPressedThisFrame;
+                if (digit || kb[letter].wasPressedThisFrame) Use(id);
+            }
         }
 
         void LateUpdate() => DrawScan();
@@ -159,35 +218,33 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- magnet
 
-        /// <summary>Hold B: copies of the magnetic part in the first inventory slot fly to the hand one
-        /// at a time (nearest first), as many per hold as the glove's level (1-10).</summary>
-        public int MagnetTick(float dt)
+        /// <summary>Copies of the magnetic part in the first inventory slot fly to the hand (nearest first,
+        /// in range and sight, not from under a pile), as many as the glove's level pulls (unlocks.json).</summary>
+        public int Glove()
         {
-            float range = (float)P.Effect("magnet_range_m") * g.Scale("tool_range");
-            if (range <= 0) { if (_magnetT <= 0) { g.hud.OnFeedback("You need the Magnetic Glove skill (Esc → Skills)", false); _magnetT = 2; } _magnetT -= dt; return 0; }
-            int max = MagnetLevel;
-            _magnetT -= dt;
-            if (_magnetT > 0 || _magnetTaken >= max) return 0;
-            _magnetT = 0.11f;
-            var hand = MagnetOrigin;
+            int lv = MagnetLevel;
+            if (lv <= 0) { g.hud.OnFeedback("You need the Magnetic Glove skill (K → Skills)", false); return 0; }
             var stacks = Inv.Stacks();
-            if (stacks.Count == 0) { g.hud.OnFeedback("Magnetic Glove: pick up the part you want more of (it pulls copies of your first slot)", false); _magnetT = 2; return 0; }
+            if (stacks.Count == 0) { g.hud.OnFeedback("Magnetic Glove: pick up the part you want more of (it pulls copies of your first slot)", false); return 0; }
             var want = g.db.Get(stacks[0].defId);
-            if (!want.magnetic) { g.hud.OnFeedback($"Magnetic Glove: {want.displayName} isn't magnetic", false); _magnetT = 2; return 0; }
-            int pick = -1;
-            foreach (var i in g.index.QuerySphere(hand, range)
-                         .Where(i => Takeable(i) && g.world.instances[i].defId == want.id)
-                         .OrderBy(i => (g.world.instances[i].Position - hand).sqrMagnitude))
-                if (LineOfSight(hand, g.world.instances[i].Position)) { pick = i; break; }
-            if (pick < 0) { if (_magnetTaken == 0) { g.hud.OnFeedback($"Magnetic Glove: no {want.displayName} within {range:0.0} m", false); _magnetT = 2; } return 0; }
-            if (Inv.IsFull) { g.hud.OnFeedback($"Your hands are full ({Inv.Count}/{Inv.capacity})", false); _magnetT = 1; return 0; }
-            float dist = (g.world.instances[pick].Position - hand).magnitude;
-            if (!Take(pick, Mathf.Lerp(0.12f, 0.35f, dist / Mathf.Max(range, 0.1f)))) return 0;
-            _magnetTaken++;
-            lastMagnetCount++;
-            Sfx.Play("magnet", hand, -10, 0.15f);
+            if (!want.magnetic) { g.hud.OnFeedback($"Magnetic Glove: {want.displayName} isn't magnetic", false); return 0; }
+            if (!Ready("magnetic_glove", "Magnetic Glove")) return 0;
+            if (Inv.IsFull) { g.hud.OnFeedback($"Your hands are full ({Inv.Count}/{Inv.capacity})", false); return 0; }
+            float range = Tuned("magnetic_glove", "range_m", lv, 1.5f) * g.Scale("tool_range");
+            int max = Fits((int)Tuned("magnetic_glove", "pull_items", lv, lv));
+            var hand = MagnetOrigin;
+            var ids = g.index.QuerySphere(hand, range)
+                .Where(i => Takeable(i) && g.world.instances[i].defId == want.id && !g.Covered(i))
+                .OrderBy(i => (g.world.instances[i].Position - hand).sqrMagnitude)
+                .Where(i => LineOfSight(hand, g.world.instances[i].Position)).Take(max).ToList();
+            if (ids.Count == 0) { g.hud.OnFeedback($"Magnetic Glove: no {want.displayName} within {range:0.0} m", false); return 0; }
+            StartCoroutine(Pull(ids));
+            Recharge("magnetic_glove");
+            lastMagnetCount += ids.Count;
+            Sfx.Play("magnet", hand, -6, 0.1f);
+            g.hud.OnFeedback($"Magnetic Glove: {ids.Count} × {want.displayName}", true);
             g.telemetry?.SkillUsed("magnet");
-            return 1;
+            return ids.Count;
         }
 
         // ---------------------------------------------------------------- scanner
@@ -197,9 +254,11 @@ namespace WorkshopWreckage
         public int Scan()
         {
             float r = (float)P.Effect("scan_radius_m");
-            if (r <= 0) { g.hud.OnFeedback("You need the Parts Scanner skill (Esc → Skills)", false); return 0; }
+            if (r <= 0) { g.hud.OnFeedback("You need the Parts Scanner skill (K → Skills)", false); return 0; }
             int def = HeldDef >= 0 ? HeldDef : g.interaction.targetType == "item" ? g.world.instances[g.interaction.targetItem].defId : -1;
             if (def < 0) { g.hud.OnFeedback("Scanner: hold or aim at a part to scan for it", false); return 0; }
+            if (!Ready("scanner", "Parts Scanner")) return 0;
+            Recharge("scanner");
             var me = g.player.transform.position;
             _scanned.Clear();
             _scanned.AddRange(g.world.IdsOf(def).Where(i => g.world.instances[i].state == ItemState.InWorld && (g.world.instances[i].Position - me).magnitude <= r));
@@ -242,10 +301,10 @@ namespace WorkshopWreckage
         /// range and line of sight flies to the hand (rules in progression.json).</summary>
         public int Supermagnet()
         {
-            if (!P.Has("supermagnet")) { g.hud.OnFeedback("You need the Supermagnet skill (Esc → Skills)", false); return 0; }
+            if (!P.Has("supermagnet")) { g.hud.OnFeedback("You need the Supermagnet skill (K → Skills)", false); return 0; }
             int def = HeldDef;
             if (def < 0) { g.hud.OnFeedback("Supermagnet: hold the part you want more of", false); return 0; }
-            if (Time.time < _superReady) { g.hud.OnFeedback($"Supermagnet recharging ({_superReady - Time.time:0} s)", false); return 0; }
+            if (!Ready("supermagnet", "Supermagnet")) return 0;
             var cfg = new Dictionary<string, object>(P.supermagnet)
             {
                 ["radius_m"] = Json.Num(P.supermagnet, "radius_m", 6) * g.Scale("tool_range"),
@@ -269,7 +328,7 @@ namespace WorkshopWreckage
             if (ids.Count == 0) { g.hud.OnFeedback("Supermagnet: no more of those in range", false); return 0; }
             int toHand = Fits(ids.Count);
             StartCoroutine(Pull(ids));
-            _superReady = Time.time + Recharge((float)Json.Num(cfg, "cooldown_s", 20), ids.Count, Json.Int(cfg, "max_items_per_activation", 25));
+            Recharge("supermagnet");
             lastSuperCount = ids.Count;
             lastToTray = ids.Count - toHand;
             Sfx.Play("supermagnet", hand, -2, 0);
@@ -285,8 +344,8 @@ namespace WorkshopWreckage
         public int AreaSweep()
         {
             float r = (float)P.Effect("area_collect_radius_m") * g.Scale("tool_range");
-            if (r <= 0) { g.hud.OnFeedback("You need the Area Sweep skill (Esc → Skills)", false); return 0; }
-            if (Time.time < _sweepReady) { g.hud.OnFeedback($"Area Sweep recharging ({_sweepReady - Time.time:0} s)", false); return 0; }
+            if (r <= 0) { g.hud.OnFeedback("You need the Area Sweep skill (K → Skills)", false); return 0; }
+            if (!Ready("area_sweep", "Area Sweep")) return 0;
             int max = Mathf.RoundToInt((float)P.Effect("area_collect_max_items") * g.Scale("tool_items"));   // what doesn't fit goes to the tray
             var me = g.player.transform.position + Vector3.up * 0.5f;
             var ids = g.index.QuerySphere(me, r).Where(Takeable).Where(i => LineOfSight(Hand, g.world.instances[i].Position) && !g.Covered(i))
@@ -294,7 +353,7 @@ namespace WorkshopWreckage
             if (ids.Count == 0) { g.hud.OnFeedback("Area Sweep: nothing loose around you", false); return 0; }
             int toHand = Fits(ids.Count);
             StartCoroutine(Pull(ids));
-            _sweepReady = Time.time + Recharge((float)Mathf.Max(1f, (float)P.Effect("area_collect_cooldown_s")), ids.Count, max);
+            Recharge("area_sweep");
             lastToTray = ids.Count - toHand;
             Sfx.Play("supermagnet", Hand, -4, 0);
             g.hud.OnFeedback($"Area Sweep: {ids.Count} parts" + (lastToTray > 0 ? $"  ({toHand} to your pockets, {lastToTray} to the sorting tray)" : ""), true);
@@ -302,7 +361,6 @@ namespace WorkshopWreckage
             return ids.Count;
         }
 
-        float _sweepReady;
         /// <summary>How many parts the last Supermagnet / Area Sweep sent to the sorting tray.</summary>
         public int lastToTray;
 

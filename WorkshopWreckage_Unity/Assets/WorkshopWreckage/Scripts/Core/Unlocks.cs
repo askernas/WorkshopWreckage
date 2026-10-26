@@ -44,6 +44,13 @@ namespace WorkshopWreckage
         public static int Skill(string id, int fallback = 1) => Level("skills", id, fallback);
         public static int Respec => Json.Int(D, "respec", 12);
 
+        /// <summary>A usable skill's tuning ("skill_tuning": slot key, cooldowns, per-level values), or null.</summary>
+        public static Dictionary<string, object> SkillTuning(string id) => Json.Obj(Json.Obj(D.GetValueOrDefault("skill_tuning"))?.GetValueOrDefault(id));
+
+        /// <summary>The key that opens a menu screen straight from play ("menu_keys"), e.g. K for skills.</summary>
+        public static UnityEngine.InputSystem.Key MenuKey(string screen, UnityEngine.InputSystem.Key fallback)
+            => Json.Obj(D.GetValueOrDefault("menu_keys")) is Dictionary<string, object> m && Enum.TryParse<UnityEngine.InputSystem.Key>(Json.Str(m, screen), true, out var k) ? k : fallback;
+
         /// <summary>Test-phase cheats (the Robot Workbench's "unlock now"): debug_mode in the
         /// config or --debug on the command line. Always off in a release build.</summary>
         public static bool DebugMode

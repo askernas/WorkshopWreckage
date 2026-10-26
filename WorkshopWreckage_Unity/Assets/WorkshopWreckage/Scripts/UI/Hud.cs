@@ -21,7 +21,9 @@ namespace WorkshopWreckage
         RectTransform _hud, _menus;
         Text _objective, _level, _title, _sub, _hint, _feedback, _progress, _zone, _heldName, _heldCount, _heldDest, _carried, _inspectText, _debug, _status;
         Image _cross;
-        RectTransform _toasts, _hotbar, _heldPanel, _inspect;
+        RectTransform _toasts, _hotbar, _heldPanel, _inspect, _skillBar;
+        readonly List<(string id, Text text, Image fill)> _skillSlots = new();
+        string _skillBarKey = "";
         float _feedbackT;
         bool _hotbarDirty = true;
         readonly Dictionary<string, RectTransform> _screens = new();
@@ -121,18 +123,16 @@ namespace WorkshopWreckage
             _hint = Label(tbox, "hint", 18, Brass, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -84), new Vector2(0, -56));
             var fb = At("Feedback", _hud, new Vector2(0.5f, 0.5f), new Vector2(-500, -90), new Vector2(1000, 40));
             _feedback = Fill(fb, "t", 22, GoodC, TextAnchor.MiddleCenter);
-            _toasts = At("Toasts", _hud, new Vector2(0.5f, 0), new Vector2(-300, 20), new Vector2(600, 300));
+            _toasts = At("Log", _hud, Vector2.zero, new Vector2(20, 18), new Vector2(640, 220));
             var vl = _toasts.gameObject.AddComponent<VerticalLayoutGroup>();
-            vl.spacing = 6; vl.childControlHeight = false; vl.childForceExpandHeight = false; vl.childAlignment = TextAnchor.UpperCenter;
-            var tl = At("Progress", _hud, Vector2.zero, new Vector2(20, 20), new Vector2(600, 92));
+            vl.spacing = 2; vl.childControlHeight = false; vl.childForceExpandHeight = false; vl.childAlignment = TextAnchor.UpperLeft;
+            var tl = At("Progress", _hud, new Vector2(1, 0), new Vector2(-620, 20), new Vector2(600, 112));
             Panel(tl, new Color(0.1f, 0.07f, 0.05f, 0.72f), BrassDim);
-            _progress = Label(tl, "p", 20, Brass, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14, 0), new Vector2(-10, -8));
-            _level = Label(tl, "l", 17, Cream, TextAnchor.MiddleLeft, Vector2.zero, Vector2.one, new Vector2(14, 2), new Vector2(-10, 4));
-            var ob = At("Objective", _hud, new Vector2(1, 0), new Vector2(-500, 20), new Vector2(480, 56));
-            Panel(ob, new Color(0.1f, 0.07f, 0.05f, 0.72f), BrassDim);
-            Label(ob, "h", 13, Muted, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(12, 0), new Vector2(-10, -4)).text = "OBJECTIVE";
-            _objective = Label(ob, "o", 17, Cream, TextAnchor.LowerLeft, Vector2.zero, Vector2.one, new Vector2(12, 6), new Vector2(-10, 0));
-            _zone = Label(tl, "z", 16, Muted, TextAnchor.LowerLeft, Vector2.zero, Vector2.one, new Vector2(14, 8), new Vector2(-10, 0));
+            Text Row(string n, int size, Color c, int top) => Label(tl, n, size, c, TextAnchor.UpperLeft, new Vector2(0, 1), Vector2.one, new Vector2(14, -top - 24), new Vector2(-10, -top));
+            _progress = Row("p", 20, Brass, 8);
+            _level = Row("l", 16, Cream, 33);
+            _zone = Row("z", 15, Muted, 56);
+            _objective = Row("o", 15, Cream, 81);
             _heldPanel = At("Held", _hud, Vector2.one, new Vector2(-580, -230), new Vector2(560, 130));
             Panel(_heldPanel, new Color(0.1f, 0.07f, 0.05f, 0.8f), BrassDim);
             _heldName = Label(_heldPanel, "n", 20, Cream, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14, 0), new Vector2(-10, -10));
@@ -140,6 +140,9 @@ namespace WorkshopWreckage
             _heldDest = Label(_heldPanel, "d", 16, Brass, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14, 0), new Vector2(-10, -64));
             _carried = Label(_heldPanel, "k", 15, Muted, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14, 0), new Vector2(-10, -92));
             _hotbar = At("Hotbar", _hud, new Vector2(0.5f, 1), new Vector2(-700, -60), new Vector2(1400, 44));
+            _skillBar = At("SkillBar", _hud, new Vector2(0.5f, 1), new Vector2(-500, -106), new Vector2(1000, 40));
+            var sbl = _skillBar.gameObject.AddComponent<HorizontalLayoutGroup>();
+            sbl.spacing = 8; sbl.childAlignment = TextAnchor.MiddleCenter; sbl.childControlWidth = true; sbl.childForceExpandWidth = false;
             var hl = _hotbar.gameObject.AddComponent<HorizontalLayoutGroup>();
             hl.spacing = 6; hl.childAlignment = TextAnchor.MiddleCenter; hl.childControlWidth = true; hl.childForceExpandWidth = false;
             _inspect = At("Inspect", _hud, new Vector2(1, 0.5f), new Vector2(-520, -270), new Vector2(480, 540));
@@ -306,7 +309,7 @@ namespace WorkshopWreckage
             MakeButton(m, "Load Game", () => ShowSub("load"));
             MakeButton(m, "Settings", () => ShowSub("settings"));
             MakeButton(m, "Quit", Application.Quit);
-            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel/1-9 select · B magnet · V scan · X supermagnet · N sweep · R/T/H/J robots · Tab log · F5/F9 save/load", 14, Muted, 40);
+            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel select · 1-9 skills (glove, scan, supermagnet, sweep) · K skills · U robots · R/T/H/J robots · Tab log · F5/F9 save/load", 14, Muted, 40);
             Para(m, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20);
 
             var p = Screen("pause", 460);
@@ -449,8 +452,14 @@ namespace WorkshopWreckage
         void ShowSub(string name)
         {
             if (_screen == "main" || _screen == "pause") _backTo = _screen;
+            _direct = null;
             ShowScreenRaw(name);
         }
+
+        string _direct;
+        /// <summary>The screen opened straight from play with its own key (K skills, U robots), or null.</summary>
+        public string DirectScreen => _direct != null && _screen == _direct ? _direct : null;
+        public void OpenDirect(string name) { _backTo = "pause"; ShowScreenRaw(name); _direct = name; }
 
         void ShowScreenRaw(string name)
         {
@@ -567,17 +576,26 @@ namespace WorkshopWreckage
             _feedbackT = 2.2f;
         }
 
+        /// <summary>A line in the message log (top left, no box): newest at the bottom, fading out after 8 s.</summary>
         public void Toast(string text, bool big = false)
         {
-            var r = Rect("Toast", _toasts, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            Panel(r, new Color(0.16f, 0.11f, 0.06f, 0.92f), Brass);
-            var t = Fill(r, "t", big ? 24 : 19, big ? Brass : Cream, TextAnchor.MiddleCenter);
-            t.text = text;
-            // a long message wraps: the box grows to hold every line instead of letting them spill out
-            float lines = t.cachedTextGeneratorForLayout.GetPreferredHeight(text, t.GetGenerationSettings(new Vector2(600 - 28, 0))) / t.pixelsPerUnit;
-            r.sizeDelta = new Vector2(600, Mathf.Max(big ? 44 : 36, lines + 20));
-            Destroy(r.gameObject, 4f);
-            while (_toasts.childCount > 4) DestroyImmediate(_toasts.GetChild(0).gameObject);
+            var r = Rect("Line", _toasts, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            var t = Label(r, "t", 15, big ? Brass : Cream, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            t.supportRichText = true;
+            t.text = big ? $"<b>{text}</b>" : text;
+            float lines = t.cachedTextGeneratorForLayout.GetPreferredHeight(t.text, t.GetGenerationSettings(new Vector2(640, 0))) / t.pixelsPerUnit;
+            r.sizeDelta = new Vector2(640, Mathf.Max(19, lines + 1));
+            StartCoroutine(FadeLine(t, 7f, 1f));
+            while (_toasts.childCount > 8) DestroyImmediate(_toasts.GetChild(0).gameObject);
+        }
+
+        System.Collections.IEnumerator FadeLine(Text t, float hold, float fade)
+        {
+            yield return new WaitForSecondsRealtime(hold);
+            if (t == null) yield break;
+            t.CrossFadeAlpha(0, fade, true);
+            yield return new WaitForSecondsRealtime(fade);
+            if (t != null) Destroy(t.transform.parent.gameObject);
         }
 
         RectTransform _tutorial;
@@ -654,12 +672,13 @@ namespace WorkshopWreckage
             if (_g == null || _g.world == null) return;
             var p = _g.progress;
             var pr = _g.progression;
-            if (_g.objectives != null) _objective.text = _g.objectives.HudText();
+            if (_g.objectives != null) _objective.text = "<color=#b8a890>Objective:</color>  " + _g.objectives.HudText();
             _level.text = pr == null ? "" : pr.LevelText + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
             _progress.text = $"Workshop restored  {p.OverallPercent:0.0}%   ({p.sortedTotal} / {_g.world.Count} sorted)";
             int z = _g.layout.ZoneAt(_g.player.transform.position);
             _zone.text = $"{_g.layout.zones[z].name}  —  {p.ZonePercent(z):0}% restored" + RobotStatus();
             UpdateHeld();
+            UpdateSkillBar();
             if (Keyboard.current != null && Keyboard.current.f3Key.wasPressedThisFrame)
                 _debug.transform.parent.gameObject.SetActive(!_debug.transform.parent.gameObject.activeSelf);
             if (_debug.transform.parent.gameObject.activeSelf) UpdateDebug();
@@ -674,6 +693,36 @@ namespace WorkshopWreckage
             return "     " + near.Describe() + (active > 1 ? $"  (+{active - 1} robots)" : "");
         }
 
+        /// <summary>The learned usable skills at the bottom: number key, name, a recharge bar and countdown.</summary>
+        void UpdateSkillBar()
+        {
+            var t = _g.tools;
+            var learned = PlayerTools.Usable.Where(u => t.Level(u.id) > 0).OrderBy(u => t.Slot(u.id)).ToList();
+            string key = string.Join(",", learned.Select(u => u.id + t.Level(u.id) + ":" + t.Slot(u.id)));
+            if (key != _skillBarKey)
+            {
+                _skillBarKey = key;
+                foreach (Transform c in _skillBar) Destroy(c.gameObject);
+                _skillSlots.Clear();
+                foreach (var u in learned)
+                {
+                    var r = Rect("skill", _skillBar, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+                    var le = r.gameObject.AddComponent<LayoutElement>();
+                    le.preferredWidth = 230; le.preferredHeight = 36;
+                    Panel(r, new Color(0.1f, 0.07f, 0.05f, 0.8f), BrassDim);
+                    var fill = Rect("cool", r, Vector2.zero, new Vector2(0, 1), Vector2.zero, Vector2.zero).gameObject.AddComponent<Image>();
+                    fill.color = new Color(0.55f, 0.35f, 0.12f, 0.55f);
+                    _skillSlots.Add((u.id, Fill(r, "t", 15, Cream, TextAnchor.MiddleCenter), fill));
+                }
+            }
+            foreach (var (id, text, fill) in _skillSlots)
+            {
+                float left = t.CooldownLeft(id), full = Mathf.Max(0.01f, t.CooldownOf(id));
+                text.text = $"<b>{t.Slot(id)}</b>  {t.NameOf(id)}" + (left > 0 ? $"  <color=#b8a890>{Mathf.CeilToInt(left)} s</color>" : "");
+                fill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(left / full), 1);
+            }
+        }
+
         void UpdateHeld()
         {
             var inv = _g.inventory;
@@ -686,7 +735,7 @@ namespace WorkshopWreckage
                 _heldName.text = $"In hand:  {(known ? def.displayName : def.shape)}  ×{inv.IdsOf(def.id).Count}";
                 _heldCount.text = def.CategoryName + "  ·  " + _g.progress.CountLabel(def.id);
                 _heldDest.text = "→  " + _g.db.BoxLabel(def.storageBox);
-                _carried.text = $"Carrying {inv.Count} / {inv.capacity}     [Wheel/1-9] switch   [Z] drop   [Tab] inventory";
+                _carried.text = $"Carrying {inv.Count} / {inv.capacity}     [Wheel] switch   [Z] drop   [Tab] inventory";
             }
             if (!_hotbarDirty) return;
             _hotbarDirty = false;
@@ -701,7 +750,7 @@ namespace WorkshopWreckage
                 var le = r.gameObject.AddComponent<LayoutElement>();
                 le.preferredWidth = Mathf.Min(150, 1390f / Mathf.Max(1, shown) - 6); le.preferredHeight = 40;
                 Panel(r, sel ? new Color(0.25f, 0.17f, 0.08f, 0.9f) : new Color(0.1f, 0.07f, 0.05f, 0.75f), sel ? Brass : BrassDim);
-                Fill(r, "t", shown > 9 ? 13 : 15, Cream, TextAnchor.MiddleCenter).text = (i < 9 ? $"{i + 1}  " : "") + _g.db.Get(defId).shape + (ids.Count > 1 ? $" ×{ids.Count}" : "");
+                Fill(r, "t", shown > 9 ? 13 : 15, Cream, TextAnchor.MiddleCenter).text = _g.db.Get(defId).shape + (ids.Count > 1 ? $" ×{ids.Count}" : "");
             }
         }
 

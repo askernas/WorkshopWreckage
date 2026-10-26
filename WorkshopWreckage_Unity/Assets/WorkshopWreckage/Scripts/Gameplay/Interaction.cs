@@ -146,13 +146,7 @@ namespace WorkshopWreckage
             if (kb.zKey.wasPressedThisFrame) DropHeld();
             if (wheel < 0) Inv.Cycle(1);
             if (wheel > 0) Inv.Cycle(-1);
-            for (int k = 0; k < 9; k++)
-            {
-                if (((UnityEngine.InputSystem.Controls.KeyControl)kb[(Key)((int)Key.Digit1 + k)]).wasPressedThisFrame)
-                {
-                    Inv.SelectSlot(k);
-                }
-            }
+            // the number keys use skills (PlayerTools); the wheel picks the slot
         }
 
         (Vector3 o, Vector3 d) Ray()
