@@ -150,7 +150,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
-            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.TryGetValue("splash", out var sp)) { Splash.Show(() => hud.SplashBackdrop(true)); if (sp == "backdrop") Splash.Dismiss(); } StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
+            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.TryGetValue("splash", out var sp)) { Splash.Show(() => hud.SplashBackdrop(true)); if (sp == "backdrop") Splash.Dismiss(); if (sp == "instructions") Splash.Press(); } StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
             else if (args.ContainsKey("robotbench") && _studio != null) { SetState("play"); StartCoroutine(RobotBench()); }
             else if (args.TryGetValue("bench", out var bp)) { SetState("play"); StartCoroutine(new Benchmark().Run(this, bp)); }
             else if (args.TryGetValue("autoplay", out var ap)) { SetState("play"); StartCoroutine(new Autoplay().Run(this, ap)); }
