@@ -139,6 +139,7 @@ namespace WorkshopWreckage
             if (_grounded && _vel.y < 0) _vel.y = -0.5f;
             _vel.y -= Gravity * Time.deltaTime;
             var delta = _vel * Time.deltaTime;
+            float y0 = transform.position.y;
             _cc.Move(delta);
             _grounded = _cc.isGrounded;
             if (debris != null)
@@ -159,7 +160,10 @@ namespace WorkshopWreckage
                     {
                         if (horiz <= 0.0005f) rise = Mathf.Min(rise, Time.deltaTime * 2.5f);   // standing inside parts (teleport/load): pop up onto them
                         _cc.Move(Vector3.up * rise);
-                        _stepSmooth -= rise;            // the camera eases up instead of popping
+                        // the camera eases up instead of popping, by the real climb only: the lift that just undoes
+                        // this frame's sink into the parts is no climb (playtest 2026-10-26: the view shook while
+                        // standing on parts, more the longer the frame)
+                        _stepSmooth -= Mathf.Max(0, transform.position.y - y0);
                         if (_vel.y < 0) _vel.y = 0;
                     }
                 }
