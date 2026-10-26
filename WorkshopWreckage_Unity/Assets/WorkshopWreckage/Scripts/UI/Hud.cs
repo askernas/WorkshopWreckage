@@ -384,33 +384,7 @@ namespace WorkshopWreckage
             MakeButton(ex, "Leave without saving", () => _g.LeaveWorkshop(false));
             MakeButton(ex, "Stay in the workshop", () => _g.SetState("play"));
 
-            var st = Screen("settings", 640);
-            Title(st, "SETTINGS");
-            SliderRow(st, "Mouse sensitivity", 0.05f, 0.6f, _g.player != null ? _g.player.sensitivity : 0.22f, v => _g.player.sensitivity = v);
-            SliderRow(st, "Field of view", 60, 100, 72, v => _g.player.cam.fieldOfView = _g.player.fov = v);
-            SliderRow(st, "Master volume", 0, 1, Sfx.MasterSetting, Sfx.SetMaster);
-            SliderRow(st, "Sound effects", 0, 1, Sfx.SfxSetting, Sfx.SetSfx);
-            ToggleRow(st, "V-Sync", QualitySettings.vSyncCount > 0, on => QualitySettings.vSyncCount = on ? 1 : 0);
-            ToggleRow(st, "Fullscreen", UnityEngine.Screen.fullScreen, on => UnityEngine.Screen.fullScreen = on);
-            ToggleRow(st, "Invert mouse Y", false, on => _g.player.invertY = on);
-            ToggleRow(st, "Robot part afterglow (blinks once after you look away)", Interaction.Afterglow, on =>
-            {
-                Interaction.Afterglow = on;
-                PlayerPrefs.SetInt("ww_part_afterglow", on ? 1 : 0);
-                PlayerPrefs.Save();
-            });
-            ToggleRow(st, "Show performance stats", false, on => _debug.transform.parent.gameObject.SetActive(on));
-            {
-                // part shadows: the main GPU cost on Massive; "off" for slower PCs
-                Button sb = null;
-                sb = MakeButton(st, "Part shadows: " + ItemRenderer.ShadowModeNames[ItemRenderer.ShadowMode], () =>
-                {
-                    ItemRenderer.ShadowMode = (ItemRenderer.ShadowMode + 1) % 3;
-                    PlayerPrefs.SetInt("ww_part_shadows", ItemRenderer.ShadowMode);
-                    sb.GetComponentInChildren<Text>().text = "Part shadows: " + ItemRenderer.ShadowModeNames[ItemRenderer.ShadowMode];
-                });
-            }
-            MakeButton(st, "Back", () => ShowScreenRaw(_backTo));
+            BuildSettings();
 
             var inv = Screen("inventory", 1100);
             Title(inv, "WORKSHOP LOG", 32);
@@ -435,14 +409,24 @@ namespace WorkshopWreckage
             f.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
         }
 
-        void SliderRow(Transform parent, string label, float lo, float hi, float value, System.Action<float> cb)
+        /// <summary>Returns a setter that moves the slider without calling back (refreshing after a preset).</summary>
+        System.Action<float> SliderRow(Transform parent, string label, float lo, float hi, float value, System.Action<float> cb, System.Func<float, string> format = null)
         {
             var row = new GameObject(label, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
             row.transform.SetParent(parent, false);
             row.GetComponent<LayoutElement>().preferredHeight = 32;
-            Para(row.transform, label, 18, Cream, 32).alignment = TextAnchor.MiddleLeft;
+            row.GetComponent<LayoutElement>().flexibleHeight = 0;   // a short page must not stretch the rows
+            var rh = row.GetComponent<HorizontalLayoutGroup>();
+            rh.spacing = 12;
+            rh.childControlWidth = rh.childControlHeight = true;
+            rh.childForceExpandWidth = false; rh.childForceExpandHeight = true;
+            var lab = Para(row.transform, label, 18, Cream, 32);
+            lab.alignment = TextAnchor.MiddleLeft;
+            lab.GetComponent<LayoutElement>().preferredWidth = 190;
+            lab.GetComponent<LayoutElement>().flexibleWidth = 0;
             var s = DefaultControls.CreateSlider(new DefaultControls.Resources());
             s.transform.SetParent(row.transform, false);
+            s.AddComponent<LayoutElement>().flexibleWidth = 1;
             var sl = s.GetComponent<Slider>();
             // the default controls have no sprites: every piece is the same white box, so the value can't be
             // seen (playtest 2026-10-26). A dark track, an amber fill, a light handle and the value in words.
@@ -456,10 +440,11 @@ namespace WorkshopWreckage
             val.alignment = TextAnchor.MiddleRight;
             val.GetComponent<LayoutElement>().preferredWidth = 70;
             val.GetComponent<LayoutElement>().flexibleWidth = 0;
-            System.Action<float> show = v => val.text = lo == 0f && hi == 1f ? $"{Mathf.RoundToInt(v * 100)} %" : $"{v:0.##}";
+            System.Action<float> show = v => val.text = format != null ? format(v) : lo == 0f && hi == 1f ? $"{Mathf.RoundToInt(v * 100)} %" : $"{v:0.##}";
             sl.minValue = lo; sl.maxValue = hi; sl.value = value;
             show(sl.value);
             sl.onValueChanged.AddListener(v => { show(v); cb(v); });
+            return v => { sl.SetValueWithoutNotify(v); show(v); };
         }
 
         static readonly Color ControlTrack = new(0.04f, 0.1f, 0.17f, 1f);
@@ -475,11 +460,13 @@ namespace WorkshopWreckage
             return c;
         }
 
-        void ToggleRow(Transform parent, string label, bool value, System.Action<bool> cb)
+        /// <summary>Returns a setter that flips the toggle without calling back.</summary>
+        System.Action<bool> ToggleRow(Transform parent, string label, bool value, System.Action<bool> cb)
         {
             var t = DefaultControls.CreateToggle(new DefaultControls.Resources());
             t.transform.SetParent(parent, false);
-            t.AddComponent<LayoutElement>().preferredHeight = 30;
+            var tle = t.AddComponent<LayoutElement>();
+            tle.preferredHeight = 32; tle.flexibleHeight = 0;
             var tg = t.GetComponent<Toggle>();
             // a dark box with an amber check, and ON / OFF in the label (the sprite-less default is a white
             // check on a white box: on and off looked the same)
@@ -498,6 +485,226 @@ namespace WorkshopWreckage
             tg.isOn = value;
             show(value);
             tg.onValueChanged.AddListener(v => { show(v); cb(v); });
+            return v => { tg.SetIsOnWithoutNotify(v); show(v); };
+        }
+
+        // ------------------------------------------------------------------ settings
+
+        readonly List<System.Action> _settingsRefresh = new();
+        System.Action<string> _settingsTab;
+        (int w, int h)? _resPicked;
+
+        static readonly FullScreenMode[] DisplayModes = { FullScreenMode.FullScreenWindow, FullScreenMode.ExclusiveFullScreen, FullScreenMode.Windowed };
+        static readonly string[] DisplayModeNames = { "Borderless fullscreen", "Exclusive fullscreen", "Windowed" };
+
+        /// <summary>Settings in three tabs (playtest 2026-10-26: "a proper graphics and audio settings"):
+        /// Graphics (a quality preset over display and image), Audio (four volumes) and Controls. Every value
+        /// applies at once and is saved (GameSettings, Sfx).</summary>
+        void BuildSettings()
+        {
+            var st = Screen("settings", 1120);
+            Title(st, "SETTINGS");
+            var tabs = HRow(st, 44, 12);
+            var pages = new Dictionary<string, RectTransform>();
+            var tabButtons = new Dictionary<string, Button>();
+            _settingsTab = name =>
+            {
+                foreach (var kv in pages) kv.Value.gameObject.SetActive(kv.Key == name);
+                foreach (var kv in tabButtons) kv.Value.GetComponentInChildren<Text>().text = kv.Key == name ? $"[ {kv.Key.ToUpperInvariant()} ]" : kv.Key;
+            };
+            foreach (var n in new[] { "Graphics", "Audio", "Controls" }) tabButtons[n] = MakeButton(tabs, n, () => _settingsTab(n));
+
+            // graphics: display on the left, image on the right
+            var (gp, gl, gr) = Columns(st, "Graphics");
+            pages["Graphics"] = gp;
+            Para(gl, "DISPLAY", 18, Brass, 26);
+            ChoiceRow(gl, "Quality preset", () => GameSettings.PresetNames[GameSettings.Preset],
+                d => GameSettings.SetPreset(_g, (GameSettings.Preset + d + GameSettings.Custom) % GameSettings.Custom));   // Custom only by changing a value
+            ChoiceRow(gl, "Display mode", () => DisplayModeNames[DisplayModeIndex()], d =>
+            {
+                UnityEngine.Screen.fullScreenMode = DisplayModes[(DisplayModeIndex() + d + 3) % 3];
+            });
+            ChoiceRow(gl, "Resolution", () => { var r = CurrentRes(); return $"{r.w} x {r.h}"; }, d =>
+            {
+                var list = Resolutions();
+                if (list.Count == 0) return;
+                var cur = CurrentRes();
+                int i = list.FindIndex(r => r.w == cur.w && r.h == cur.h);
+                if (i < 0) i = list.FindLastIndex(r => r.w * r.h <= cur.w * cur.h);
+                i = Mathf.Clamp(i + d, 0, list.Count - 1);
+                _resPicked = list[i];
+                UnityEngine.Screen.SetResolution(list[i].w, list[i].h, UnityEngine.Screen.fullScreenMode);
+            });
+            Reg(ToggleRow(gl, "V-Sync", GameSettings.VSync, on => { GameSettings.VSync = on; GameSettings.Changed(_g); RefreshSettings(); }), () => GameSettings.VSync);
+            ChoiceRow(gl, "Frame rate limit", () => GameSettings.VSync ? "V-Sync" : GameSettings.FpsCaps[GameSettings.FpsCap] < 0 ? "Unlimited" : $"{GameSettings.FpsCaps[GameSettings.FpsCap]} fps", d =>
+            {
+                GameSettings.FpsCap = (GameSettings.FpsCap + d + GameSettings.FpsCaps.Length) % GameSettings.FpsCaps.Length;
+                GameSettings.Changed(_g);
+            });
+            Reg(SliderRow(gl, "Render scale", 0.5f, 1f, GameSettings.RenderScale, v =>
+            {
+                GameSettings.RenderScale = Mathf.Round(v * 20) / 20f;
+                GameSettings.Changed(_g);
+                RefreshPreset();
+            }, v => $"{Mathf.RoundToInt(Mathf.Round(v * 20) * 5)} %"), () => GameSettings.RenderScale);
+            ChoiceRow(gl, "Anti-aliasing", () => GameSettings.AaNames[GameSettings.Aa], d =>
+            {
+                GameSettings.Aa = (GameSettings.Aa + d + GameSettings.AaNames.Length) % GameSettings.AaNames.Length;
+                GameSettings.Changed(_g);
+            });
+            Para(gr, "IMAGE", 18, Brass, 26);
+            ChoiceRow(gr, "Shadows", () => GameSettings.ShadowNames[GameSettings.Shadows], d =>
+            {
+                GameSettings.Shadows = (GameSettings.Shadows + d + GameSettings.ShadowNames.Length) % GameSettings.ShadowNames.Length;
+                GameSettings.Changed(_g);
+            });
+            // part shadows: the main GPU cost on Massive; "off" for slower PCs
+            ChoiceRow(gr, "Part shadows", () => ItemRenderer.ShadowModeNames[GameSettings.PartShadows], d =>
+            {
+                GameSettings.PartShadows = (GameSettings.PartShadows + d + 3) % 3;
+                GameSettings.Changed(_g);
+            });
+            Reg(SliderRow(gr, "Brightness", -1f, 1f, GameSettings.Brightness, v => { GameSettings.Brightness = v; GameSettings.Changed(_g); },
+                v => Mathf.Abs(v) < 0.005f ? "0" : $"{v:+0.00;-0.00}"), () => GameSettings.Brightness);
+            Reg(ToggleRow(gr, "Bloom (glowing eyes and lamps)", GameSettings.Bloom, on => { GameSettings.Bloom = on; GameSettings.Changed(_g); }), () => GameSettings.Bloom);
+            Reg(ToggleRow(gr, "Film grain", GameSettings.Grain, on => { GameSettings.Grain = on; GameSettings.Changed(_g); RefreshPreset(); }), () => GameSettings.Grain);
+            Reg(ToggleRow(gr, "Vignette", GameSettings.Vignette, on => { GameSettings.Vignette = on; GameSettings.Changed(_g); }), () => GameSettings.Vignette);
+            Reg(ToggleRow(gr, "Light shafts and dust", GameSettings.Shafts, on => { GameSettings.Shafts = on; GameSettings.Changed(_g); RefreshPreset(); }), () => GameSettings.Shafts);
+
+            // audio
+            var (ap, al, ar) = Columns(st, "Audio");
+            pages["Audio"] = ap;
+            Para(al, "VOLUME", 18, Brass, 26);
+            Reg(SliderRow(al, "Master", 0, 1, Sfx.MasterSetting, Sfx.SetMaster), () => Sfx.MasterSetting);
+            Reg(SliderRow(al, "Workshop", 0, 1, Sfx.SfxSetting, Sfx.SetSfx), () => Sfx.SfxSetting);
+            Reg(SliderRow(al, "Robots", 0, 1, Sfx.RobotSetting, Sfx.SetRobots), () => Sfx.RobotSetting);
+            Reg(SliderRow(al, "Interface", 0, 1, Sfx.UiSetting, Sfx.SetUi), () => Sfx.UiSetting);
+            Para(ar, "WHAT YOU HEAR", 18, Brass, 26);
+            var what = Para(ar, "<b>Master</b>  everything at once\n\n<b>Workshop</b>  parts, drawers, footsteps, the lathe, the magnets\n\n" +
+                "<b>Robots</b>  motors, rotors, tracks, steps, servos, boot-ups\n\n<b>Interface</b>  clicks, sorted-box chimes, finds, saves, the reject buzz", 17, Muted, 190);
+            what.alignment = TextAnchor.UpperLeft;
+
+            // controls
+            var (cp, cl, cr) = Columns(st, "Controls");
+            pages["Controls"] = cp;
+            Para(cl, "CAMERA", 18, Brass, 26);
+            Reg(SliderRow(cl, "Mouse sensitivity", 0.05f, 0.6f, GameSettings.Sensitivity, v => { GameSettings.Sensitivity = v; GameSettings.ControlsChanged(_g); }), () => GameSettings.Sensitivity);
+            Reg(SliderRow(cl, "Field of view", 60, 100, GameSettings.Fov, v => { GameSettings.Fov = Mathf.Round(v); GameSettings.ControlsChanged(_g); }, v => $"{Mathf.RoundToInt(v)}"), () => GameSettings.Fov);
+            Reg(ToggleRow(cl, "Invert mouse Y", GameSettings.InvertY, on => { GameSettings.InvertY = on; GameSettings.ControlsChanged(_g); }), () => GameSettings.InvertY);
+            Para(cr, "HELP", 18, Brass, 26);
+            Reg(ToggleRow(cr, "Robot part afterglow", Interaction.Afterglow, on =>
+            {
+                Interaction.Afterglow = on;
+                PlayerPrefs.SetInt("ww_part_afterglow", on ? 1 : 0);
+                PlayerPrefs.Save();
+            }), () => Interaction.Afterglow);
+            Para(cr, "A robot part you looked at blinks once after you look away.", 15, Muted, 22).alignment = TextAnchor.MiddleLeft;
+            Reg(ToggleRow(cr, "Show performance stats  [F3]", false, on => _debug.transform.parent.gameObject.SetActive(on)), () => _debug.transform.parent.gameObject.activeSelf);
+
+            var bottom = HRow(st, 44, 12);
+            MakeButton(bottom, "Reset to defaults", () =>
+            {
+                GameSettings.ResetDefaults(_g);
+                Sfx.SetMaster(1f); Sfx.SetSfx(0.8f); Sfx.SetRobots(0.8f); Sfx.SetUi(0.8f);
+                Interaction.Afterglow = true;
+                PlayerPrefs.SetInt("ww_part_afterglow", 1);
+                PlayerPrefs.Save();
+                RefreshSettings();
+            });
+            MakeButton(bottom, "Back", () => ShowScreenRaw(_backTo));
+            _settingsTab("Graphics");
+        }
+
+        /// <summary>QA: the settings sheet on one tab (--menusub=settings:Audio).</summary>
+        public void SettingsTab(string t) => _settingsTab?.Invoke(t);
+
+        void RefreshSettings()
+        {
+            if (_resPicked.HasValue && _resPicked.Value.w == UnityEngine.Screen.width && _resPicked.Value.h == UnityEngine.Screen.height) _resPicked = null;
+            foreach (var r in _settingsRefresh) r();
+        }
+
+        /// <summary>A slider or toggle that can make the preset Custom: the rows show it (sliders and toggles
+        /// don't refresh themselves while dragged or clicked).</summary>
+        void RefreshPreset() => RefreshSettings();
+
+        void Reg(System.Action<float> set, System.Func<float> get) => _settingsRefresh.Add(() => set(get()));
+        void Reg(System.Action<bool> set, System.Func<bool> get) => _settingsRefresh.Add(() => set(get()));
+
+        static int DisplayModeIndex()
+        {
+            var m = UnityEngine.Screen.fullScreenMode;
+            return m == FullScreenMode.ExclusiveFullScreen ? 1 : m == FullScreenMode.FullScreenWindow ? 0 : 2;
+        }
+
+        /// <summary>The window size (the size just picked until the window has it).</summary>
+        (int w, int h) CurrentRes() => _resPicked ?? (UnityEngine.Screen.width, UnityEngine.Screen.height);
+
+        static List<(int w, int h)> Resolutions() =>
+            UnityEngine.Screen.resolutions.Select(r => (r.width, r.height)).Where(r => r.width >= 1024).Distinct().OrderBy(r => r.width * r.height).ToList();
+
+        RectTransform HRow(Transform parent, float height, float spacing)
+        {
+            var row = new GameObject("Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            row.transform.SetParent(parent, false);
+            row.GetComponent<LayoutElement>().preferredHeight = height;
+            var h = row.GetComponent<HorizontalLayoutGroup>();
+            h.spacing = spacing;
+            h.childControlWidth = h.childControlHeight = true;
+            h.childForceExpandWidth = h.childForceExpandHeight = true;
+            return (RectTransform)row.transform;
+        }
+
+        /// <summary>A settings page: two columns of rows, tall enough that the sheet keeps its size between tabs.</summary>
+        (RectTransform page, RectTransform left, RectTransform right) Columns(Transform parent, string name)
+        {
+            var page = new GameObject(name, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            page.transform.SetParent(parent, false);
+            page.GetComponent<LayoutElement>().minHeight = 8 * 40;
+            var h = page.GetComponent<HorizontalLayoutGroup>();
+            h.spacing = 44;
+            h.childControlWidth = h.childControlHeight = true;
+            h.childForceExpandWidth = true; h.childForceExpandHeight = false;
+            RectTransform Col(string n)
+            {
+                var go = new GameObject(n, typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+                go.transform.SetParent(page.transform, false);
+                var v = go.GetComponent<VerticalLayoutGroup>();
+                v.spacing = 8;
+                v.childControlWidth = v.childControlHeight = true;
+                v.childForceExpandWidth = true; v.childForceExpandHeight = false;
+                go.GetComponent<LayoutElement>().flexibleWidth = 1;
+                return (RectTransform)go.transform;
+            }
+            return ((RectTransform)page.transform, Col("Left"), Col("Right"));
+        }
+
+        /// <summary>A setting with a few named values: label, &lt; value &gt;.</summary>
+        void ChoiceRow(Transform parent, string label, System.Func<string> value, System.Action<int> step)
+        {
+            var row = new GameObject(label, typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            row.transform.SetParent(parent, false);
+            row.GetComponent<LayoutElement>().preferredHeight = 32;
+            row.GetComponent<LayoutElement>().flexibleHeight = 0;
+            var h = row.GetComponent<HorizontalLayoutGroup>();
+            h.spacing = 6;
+            h.childControlWidth = h.childControlHeight = true;
+            h.childForceExpandWidth = false; h.childForceExpandHeight = true;
+            var lab = Para(row.transform, label, 18, Cream, 32);
+            lab.alignment = TextAnchor.MiddleLeft;
+            lab.GetComponent<LayoutElement>().flexibleWidth = 1;
+            void Arrow(string a, int d)
+            {
+                var b = MakeButton(row.transform, a, () => { step(d); RefreshSettings(); });
+                var le = b.GetComponent<LayoutElement>();
+                le.preferredWidth = 36; le.preferredHeight = 32;
+            }
+            Arrow("<", -1);
+            var val = Para(row.transform, "", 18, UiStyle.Amber, 32);
+            val.GetComponent<LayoutElement>().preferredWidth = 230;
+            Arrow(">", 1);
+            _settingsRefresh.Add(() => val.text = value());
+            val.text = value();
         }
 
         // ------------------------------------------------------------------ screens
@@ -537,6 +744,7 @@ namespace WorkshopWreckage
             else if (name == "modify") RefreshModify();
             else if (_previewCam != null) PreviewCamera(false);
             if (name == "inventory") RefreshLog();
+            if (name == "settings") RefreshSettings();
             if (name == "main") _continue.interactable = LatestSlot() != "";
         }
 

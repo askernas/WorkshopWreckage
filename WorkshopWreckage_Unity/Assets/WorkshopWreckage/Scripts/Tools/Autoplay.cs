@@ -117,6 +117,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "settings")
+            {
+                SettingsChecks();   // QA: graphics presets and the sound categories
+                Finish();
+                yield break;
+            }
             if (section == "respec")
             {
                 yield return RespecChecks();   // QA: full respec, upgrade previews, robot telemetry (skill progression spec §6-8)
@@ -1687,6 +1693,33 @@ namespace WorkshopWreckage
             }
             Check("every robot unit's kit lies in the world from the start (Hoverbot #2/#3, Sorting Arm #2/#3 too)", ok && wb.projects.Count == 10, string.Join(", ", rows));
             Check("robot parts are unique, each in one place", PartsIntact(out var detail), detail);
+        }
+
+        /// <summary>A preset sets the pipeline, the look and the shadows; one changed value makes it Custom;
+        /// every clip plays at its category's volume. (Automated runs never write the saved values.)</summary>
+        void SettingsChecks()
+        {
+            var urp = (UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset)UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+            var b = g.builder;
+            GameSettings.SetPreset(g, 0);
+            bool low = urp.renderScale == 0.75f && urp.msaaSampleCount == 1 && urp.mainLightShadowmapResolution == 1024 && !b.grain.active && b.bloom.active
+                       && b.shafts.Count > 0 && b.shafts.All(s => !s.activeSelf) && b.shadowLights.Count > 0 && b.shadowLights.All(l => l.shadows == LightShadows.Hard) && ItemRenderer.ShadowMode == 2;
+            Check("settings: Low sets scale, AA, shadows, part shadows, grain and shafts", low,
+                  $"scale {urp.renderScale}, MSAA {urp.msaaSampleCount}, shadow map {urp.mainLightShadowmapResolution}, grain {b.grain.active}, shafts {b.shafts.Count(s => s.activeSelf)}/{b.shafts.Count} on, {b.shadowLights.Count} shadow lights, part shadows {ItemRenderer.ShadowMode}");
+            GameSettings.Shadows = 0; GameSettings.Changed(g);
+            Check("settings: one changed value makes it Custom; shadows off", GameSettings.Preset == GameSettings.Custom && b.shadowLights.All(l => l.shadows == LightShadows.None), GameSettings.PresetNames[GameSettings.Preset]);
+            GameSettings.Brightness = 0.5f; GameSettings.Changed(g);
+            bool bright = Mathf.Approximately(b.colorAdjust.postExposure.value, WorkshopBuilder.Exposure + 0.5f);
+            GameSettings.ResetDefaults(g);
+            bool high = GameSettings.Preset == 2 && urp.renderScale == 1 && urp.msaaSampleCount == 2 && urp.mainLightShadowmapResolution == 4096 && b.grain.active && b.shafts.All(s => s.activeSelf)
+                        && b.shadowLights.All(l => l.shadows == LightShadows.Soft) && Mathf.Approximately(b.colorAdjust.postExposure.value, WorkshopBuilder.Exposure) && Mathf.Approximately(g.player.cam.fieldOfView, 72);
+            Check("settings: brightness moves the exposure; defaults put the designed look back", bright && high, $"bright {bright}, high {high}");
+            float w0 = Sfx.masterVolume, r0 = Sfx.robotVolume, u0 = Sfx.uiVolume;
+            Sfx.masterVolume = 0.9f; Sfx.robotVolume = 0.3f; Sfx.uiVolume = 0.6f;   // distinct values (a muted run has them all at 0)
+            Check("settings: each sound plays at its category's volume",
+                  Sfx.VolumeOf("servo") == 0.3f && Sfx.VolumeOf("loop_tracks") == 0.3f && Sfx.VolumeOf("ui_click") == 0.6f && Sfx.VolumeOf("robot_part") == 0.6f && Sfx.VolumeOf("pickup") == 0.9f,
+                  "servo and tracks robots, ui_click and robot_part interface, pickup workshop");
+            Sfx.masterVolume = w0; Sfx.robotVolume = r0; Sfx.uiVolume = u0;
         }
 
         /// <summary>Full respec gives back exactly what was spent and loses nothing carried; the previews show

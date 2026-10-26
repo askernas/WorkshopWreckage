@@ -10,23 +10,56 @@ namespace WorkshopWreckage
         static Sfx _i;
         readonly Dictionary<string, AudioClip> _clips = new();
         readonly List<AudioSource> _2d = new(), _3d = new();
+        /// <summary>The workshop's own sounds (parts, drawers, steps, the lathe): the "Workshop" volume.</summary>
         public static float masterVolume = 0.8f;
+        /// <summary>Robot motors, steps, servos and boot-ups; and the interface (clicks, chimes, saves, finds).</summary>
+        public static float robotVolume = 0.8f, uiVolume = 0.8f;
 
-        /// <summary>Settings (PlayerPrefs): master = the whole mix (AudioListener.volume), sound
-        /// effects = Sfx.masterVolume. A muted run (--mute, automated) plays nothing and never
+        /// <summary>Settings (PlayerPrefs): master = the whole mix (AudioListener.volume), workshop =
+        /// Sfx.masterVolume, robots, interface. A muted run (--mute, automated) plays nothing and never
         /// writes the saved values.</summary>
         public static float MasterSetting { get; private set; } = 1f;
         public static float SfxSetting { get; private set; } = 0.8f;
+        public static float RobotSetting { get; private set; } = 0.8f;
+        public static float UiSetting { get; private set; } = 0.8f;
         public static bool Muted { get; private set; }
+
+        static readonly HashSet<string> RobotClips = new() { "robot_boot", "servo", "robot_step", "spider_step", "loop_wheel", "loop_tracks", "loop_rotor" };
+        static readonly HashSet<string> UiClips = new() { "ui_click", "save", "milestone", "discover", "reject", "complete", "robot_part", "inspect" };
+
+        /// <summary>The category volume a clip plays at.</summary>
+        public static float VolumeOf(string clip) => RobotClips.Contains(clip) ? robotVolume : UiClips.Contains(clip) ? uiVolume : masterVolume;
 
         public static void LoadVolumes(bool mute)
         {
             Muted = mute;
             MasterSetting = Mathf.Clamp01(PlayerPrefs.GetFloat("ww_master_volume", 1f));
             SfxSetting = Mathf.Clamp01(PlayerPrefs.GetFloat("ww_sfx_volume", 0.8f));
+            RobotSetting = Mathf.Clamp01(PlayerPrefs.GetFloat("ww_robot_volume", 0.8f));
+            UiSetting = Mathf.Clamp01(PlayerPrefs.GetFloat("ww_ui_volume", 0.8f));
             AudioListener.volume = mute ? 0 : MasterSetting;
             masterVolume = mute ? 0 : SfxSetting;
-            Debug.Log($"[audio] master {MasterSetting:0.00}, effects {SfxSetting:0.00}{(mute ? ", muted run" : "")}");
+            robotVolume = mute ? 0 : RobotSetting;
+            uiVolume = mute ? 0 : UiSetting;
+            Debug.Log($"[audio] master {MasterSetting:0.00}, workshop {SfxSetting:0.00}, robots {RobotSetting:0.00}, interface {UiSetting:0.00}{(mute ? ", muted run" : "")}");
+        }
+
+        public static void SetRobots(float v)
+        {
+            RobotSetting = Mathf.Clamp01(v);
+            if (Muted) return;
+            robotVolume = RobotSetting;
+            PlayerPrefs.SetFloat("ww_robot_volume", RobotSetting);
+            PlayerPrefs.Save();
+        }
+
+        public static void SetUi(float v)
+        {
+            UiSetting = Mathf.Clamp01(v);
+            if (Muted) return;
+            uiVolume = UiSetting;
+            PlayerPrefs.SetFloat("ww_ui_volume", UiSetting);
+            PlayerPrefs.Save();
         }
 
         public static void SetMaster(float v)
@@ -139,7 +172,7 @@ namespace WorkshopWreckage
             var src = list.Find(s => !s.isPlaying) ?? list[0];
             if (at.HasValue) src.transform.position = at.Value;
             src.clip = clip;
-            src.volume = Mathf.Pow(10, volumeDb / 20f) * masterVolume;
+            src.volume = Mathf.Pow(10, volumeDb / 20f) * VolumeOf(name);
             src.pitch = 1 + Random.Range(-pitchVar, pitchVar);
             src.Play();
         }

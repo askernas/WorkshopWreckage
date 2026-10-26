@@ -15,6 +15,14 @@ namespace WorkshopWreckage
         public readonly List<Light> lamps = new();
         public Light sun;
         public ReflectionProbe probe;
+        // what the graphics settings switch (GameSettings.ApplyWorld)
+        public Bloom bloom;
+        public FilmGrain grain;
+        public Vignette vignette;
+        public ColorAdjustments colorAdjust;
+        public readonly List<GameObject> shafts = new();
+        public List<Light> shadowLights;
+        public const float Exposure = 2.0f;
 
         public void Build(WorkshopLayout l)
         {
@@ -509,6 +517,7 @@ namespace WorkshopWreckage
                 mesh.RecalculateNormals(); mesh.RecalculateBounds();
                 var go = new GameObject("Shaft");
                 go.transform.SetParent(transform, false);
+                shafts.Add(go);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
                 var mr = go.AddComponent<MeshRenderer>();
                 mr.sharedMaterial = mat;
@@ -519,6 +528,7 @@ namespace WorkshopWreckage
                 var mid = Shared.Pos(x, (y0 + y1) / 2, wz) + dir * len * 0.45f;
                 var dgo = new GameObject("Dust");
                 dgo.transform.SetParent(transform, false);
+                shafts.Add(dgo);
                 dgo.transform.SetPositionAndRotation(mid, Quaternion.LookRotation(dir, Vector3.up));
                 var ps = dgo.AddComponent<ParticleSystem>();
                 ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -607,28 +617,28 @@ namespace WorkshopWreckage
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
             var tm = profile.Add<Tonemapping>(true);
             tm.mode.Override(TonemappingMode.ACES);
-            var bloom = profile.Add<Bloom>(true);
+            bloom = profile.Add<Bloom>(true);
             bloom.intensity.Override(0.7f);
             bloom.threshold.Override(1.0f);
             bloom.scatter.Override(0.75f);
             bloom.tint.Override(new Color(1f, 0.86f, 0.7f));
             // the look: worn industrial film. Slightly desaturated, firm contrast, teal shadows and
             // amber highlights (rust against blueprint), fine grain, a soft vignette
-            var ca = profile.Add<ColorAdjustments>(true);
+            var ca = colorAdjust = profile.Add<ColorAdjustments>(true);
             ca.saturation.Override(-6f);
             ca.contrast.Override(10f);
-            ca.postExposure.Override(2.0f);
+            ca.postExposure.Override(Exposure);
             var wb = profile.Add<WhiteBalance>(true);
             wb.temperature.Override(2f);
             var split = profile.Add<SplitToning>(true);
             split.shadows.Override(new Color(0.32f, 0.5f, 0.56f));
             split.highlights.Override(new Color(0.96f, 0.74f, 0.48f));
             split.balance.Override(-12f);
-            var grain = profile.Add<FilmGrain>(true);
+            grain = profile.Add<FilmGrain>(true);
             grain.type.Override(FilmGrainLookup.Thin1);
             grain.intensity.Override(0.16f);
             grain.response.Override(0.85f);
-            var vig = profile.Add<Vignette>(true);
+            var vig = vignette = profile.Add<Vignette>(true);
             vig.intensity.Override(0.3f);
             vig.smoothness.Override(0.5f);
             var smh = profile.Add<ShadowsMidtonesHighlights>(true);

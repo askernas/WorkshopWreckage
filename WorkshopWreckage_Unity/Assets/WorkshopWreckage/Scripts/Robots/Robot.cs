@@ -2816,7 +2816,7 @@ namespace WorkshopWreckage
             {
                 if (_loop.clip == null) { _loop.clip = Sfx.Clip(_loopName); if (_loop.clip != null) { _loop.time = Random.value * 0.9f; _loop.Play(); } }
                 float want = locomotion == "hover" ? 0.22f + 0.12f * moving : 0.25f * Mathf.Clamp01(moving * 1.3f);
-                _loop.volume = Mathf.MoveTowards(_loop.volume, want * Sfx.masterVolume, Time.deltaTime);
+                _loop.volume = Mathf.MoveTowards(_loop.volume, want * Sfx.robotVolume, Time.deltaTime);
                 _loop.pitch = locomotion == "hover" ? 1f + 0.08f * moving : 0.85f + 0.3f * Mathf.Clamp01(moving);
             }
             else if (_gait > 0.1f)

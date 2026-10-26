@@ -94,6 +94,7 @@ namespace WorkshopWreckage
             // sound is on in a normal run at the saved volumes; tests, screenshots and benchmarks
             // run silently (--mute does it for normal runs too) without touching the saved volumes
             Sfx.LoadVolumes(args.ContainsKey("mute") || Automated);
+            GameSettings.Load(Automated);   // graphics and controls; automated runs keep the defaults
 
             RetrobotModel.LegacyLook = args.TryGetValue("retrolook", out var rlook) && rlook == "legacy";
             if (args.TryGetValue("retrosplay", out var rsp)) RetrobotModel.HipSplay = float.Parse(rsp, System.Globalization.CultureInfo.InvariantCulture);   // QA: thigh splay (deg)   // QA: the finish before the polish pass
@@ -110,6 +111,7 @@ namespace WorkshopWreckage
             player = new GameObject("Player").AddComponent<PlayerController>();
             player.transform.SetParent(transform, false);
             player.Init();
+            GameSettings.ApplyPlayer(player);
             player.stepped = () => Sfx.Play("step", null, -16, 0.15f);
             held = new GameObject("HeldView").AddComponent<HeldView>();
             held.Init(player.cam);
@@ -150,7 +152,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
-            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.TryGetValue("splash", out var sp)) { Splash.Show(() => hud.SplashBackdrop(true)); if (sp == "backdrop") Splash.Dismiss(); if (sp == "instructions") Splash.Press(); } StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
+            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.TryGetValue("splash", out var sp)) { Splash.Show(() => hud.SplashBackdrop(true)); if (sp == "backdrop") Splash.Dismiss(); if (sp == "instructions") Splash.Press(); } if (args.TryGetValue("menusub", out var sub)) { var sp2 = sub.Split(':'); hud.OpenSub(sp2[0]); if (sp2.Length > 1) hud.SettingsTab(sp2[1]); } StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
             else if (args.ContainsKey("robotbench") && _studio != null) { SetState("play"); StartCoroutine(RobotBench()); }
             else if (args.TryGetValue("bench", out var bp)) { SetState("play"); StartCoroutine(new Benchmark().Run(this, bp)); }
             else if (args.TryGetValue("autoplay", out var ap)) { SetState("play"); StartCoroutine(new Autoplay().Run(this, ap)); }
@@ -201,6 +203,7 @@ namespace WorkshopWreckage
             builder.transform.SetParent(transform, false);
             Debug.Log("[boot] layout generated");
             builder.Build(layout);
+            GameSettings.ApplyWorld(builder);
             var trayTarget = new GameObject("Target_Tray") { layer = Layers.Target };
             trayTarget.transform.SetParent(builder.transform, false);
             trayTarget.transform.position = Shared.Pos(layout.trayRect.center.x, 0.15f, layout.trayRect.center.y);
