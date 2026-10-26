@@ -39,6 +39,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "loadkeep")
+            {
+                yield return LoadKeepChecks();   // QA: a load (also converted to a changed catalog) moves nothing
+                Finish();
+                yield break;
+            }
             if (section == "loadslot")
             {
                 yield return LoadSlotChecks(g.args.GetValueOrDefault("apslot", "slot1"));   // QA: a player's save loads with its loose parts at rest
@@ -96,6 +102,12 @@ namespace WorkshopWreckage
             if (section == "design")
             {
                 yield return DesignChecks();   // QA: Game Design v1.0 acceptance tests (P/R/S/E, §15)
+                Finish();
+                yield break;
+            }
+            if (section == "cater")
+            {
+                yield return CaterChecks();   // QA: Caterpillarbot fills its boxes for one destination (playtest 2026-10-26)
                 Finish();
                 yield break;
             }
@@ -1643,6 +1655,54 @@ namespace WorkshopWreckage
         /// <summary>Playtest 2026-10-26: "robots are still struggling to pick up things in the sorting tray".
         /// Retrobot and Unibot are built, the tray is filled with parts they may carry (its back row against the
         /// wall too), and they must take every one out, however far over the rim it lies.</summary>
+        /// <summary>Caterpillarbot alone in the room: every delivery run carries parts for one destination only,
+        /// and it leaves with a part short of a full load only when no other part for that place was left that
+        /// it could take.</summary>
+        IEnumerator CaterChecks()
+        {
+            var wb = g.workbench;
+            var pj = wb.P("caterpillarbot");
+            foreach (var id in wb.PartIds(pj)) { Take(id); g.interaction.DepositStation(id); }
+            wb.InstallAll(pj);
+            wb.Activate(pj);
+            var cat = wb.RobotOf(pj);
+            float t0 = Time.realtimeSinceStartup;
+            while (!cat.Active && Time.realtimeSinceStartup - t0 < 15) yield return null;
+            g.player.enabled = false;
+            var runs = new List<(int n, int boxes, int left)>();
+            var load = new List<int>();
+            bool unloading = false;
+            int leftAtDeparture = 0;
+            Time.timeScale = 4f;
+            float tg = 0;
+            while (tg < 420f && runs.Count < 5)
+            {
+                tg += Time.deltaTime;
+                if (!unloading && cat.carried.Count > load.Count)
+                {
+                    load = cat.carried.ToList();
+                    // other parts for the same place it could still take, while it is loading
+                    var box = g.world.DefOf(load[0]).storageBox;
+                    leftAtDeparture = g.world.instances.Count(i => i.state == ItemState.InWorld && g.db.Get(i.defId).storageBox == box && cat.CanPick(i.id) && !g.Covered(i.id));
+                }
+                else if (!unloading && load.Count > 0 && cat.carried.Count < load.Count)
+                {
+                    unloading = true;
+                    runs.Add((load.Count, load.Select(id => g.world.DefOf(id).storageBox).Distinct().Count(), leftAtDeparture));
+                    Debug.Log($"[catertest] run {runs.Count}: {load.Count} part(s) for {string.Join(", ", load.Select(id => g.world.DefOf(id).storageBox).Distinct())}; {leftAtDeparture} more for that place were left");
+                }
+                else if (unloading && cat.carried.Count == 0) { unloading = false; load.Clear(); }
+                yield return null;
+            }
+            Time.timeScale = 1f;
+            int cap = cat.Capacity;
+            Check("Caterpillarbot: every delivery run carries parts for one destination only", runs.Count >= 3 && runs.All(r => r.boxes == 1),
+                  string.Join("; ", runs.Select(r => $"{r.n} part(s), {r.boxes} place(s)")));
+            Check("Caterpillarbot: it fills its boxes before it drives off (short only when nothing more for that place was left)",
+                  runs.Count >= 3 && runs.All(r => r.n >= cap || r.left == 0) && runs.Count(r => r.n >= 2) * 2 >= runs.Count,
+                  string.Join("; ", runs.Select(r => $"{r.n}/{cap} on board, {r.left} left for that place")));
+        }
+
         IEnumerator TrayChecks()
         {
             var wb = g.workbench;
@@ -1695,6 +1755,55 @@ namespace WorkshopWreckage
             g.hud.OpenSub("skills");
             yield return g.Capture(Path.Combine(outDir, "tray_skills.png"), 6);
             g.SetState("play");
+        }
+
+        /// <summary>A load, and a load converted to a changed catalog, put every part back exactly
+        /// where it was: nothing moves, and a stray taken off a shelf never comes back there.</summary>
+        IEnumerator LoadKeepChecks()
+        {
+            g.player.enabled = false;
+            yield return Frames(10);
+            // a shelf stray taken down to the floor, and another copy of a kind stored while a copy of it still lies on a shelf
+            var strays = g.world.instances.Where(i => i.state == ItemState.InWorld && i.Position.y > 0.5f && i.Position.y < Game.MaxDropDeck && !g.InTray(i.Position)
+                && !g.world.DefOf(i.id).IsRobotPart).OrderBy(i => i.id).ToList();
+            var down = strays.First();
+            var floor = g.SafeDropPoint(g.player.transform.position + g.player.transform.forward, g.player.transform.position);
+            g.world.SetTransform(down.id, Matrix4x4.TRS(floor + Vector3.up * 0.05f, Quaternion.identity, Vector3.one * g.world.DefOf(down.id).worldScale));
+            g.index.Insert(down.id);
+            var shelfCopy = strays.Skip(1).First(i => g.world.IdsOf(i.defId).Any(o => o != i.id && g.world.instances[o].state == ItemState.InWorld && g.world.instances[o].Position.y < 0.3f));
+            var stored = g.world.IdsOf(shelfCopy.defId).First(o => o != shelfCopy.id && g.world.instances[o].state == ItemState.InWorld && g.world.instances[o].Position.y < 0.3f);
+            Take(stored); g.inventory.Remove(stored);
+            bool depOk = g.storage.Deposit(g.world.DefOf(stored).storageBox, stored) == StorageSystem.Result.Ok;
+            yield return Frames(5);
+            Dictionary<int, (ItemState s, Vector3 p)> Snap() => g.world.instances.ToDictionary(i => i.id, i => (i.state, i.Position));
+            string Diff(Dictionary<int, (ItemState s, Vector3 p)> a)
+            {
+                var now = Snap();
+                var bad = a.Where(kv => now[kv.Key].s != kv.Value.s || (kv.Value.s == ItemState.InWorld && (now[kv.Key].p - kv.Value.p).magnitude > 0.0005f)).ToList();
+                foreach (var kv in bad.Take(5)) Debug.Log($"[loadkeep] {g.world.DefOf(kv.Key).displayName} #{kv.Key}: {kv.Value.s} {kv.Value.p} -> {now[kv.Key].s} {now[kv.Key].p}");
+                return bad.Count == 0 ? "" : $"{bad.Count} part(s) changed";
+            }
+            var before = Snap();
+            g.SaveGame("autotest_keep");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_keep");
+            g.player.enabled = false;
+            yield return Frames(30);
+            string d1 = Diff(before);
+            Check("a load puts every part back exactly where it was (nothing settles, nothing moves)", depOk && d1 == "", d1 == "" ? $"{before.Count} parts identical" : d1);
+            // the same save as if made with an older catalog: it is converted, and still nothing moves
+            var raw = SaveSystem.Read("autotest_keep");
+            raw["catalog_hash"] = "0";
+            SaveSystem.Write("autotest_keep", raw);
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_keep");
+            g.player.enabled = false;
+            yield return Frames(30);
+            string d2 = Diff(before);
+            Check("a save converted to a changed catalog keeps every part's identity and place: the stray taken off the shelf stays on the floor, the stored copy stays stored",
+                  g.migrationReport != "" && d2 == "" && g.world.instances[down.id].Position.y < 0.3f && g.world.instances[stored].state == ItemState.Stored,
+                  $"{g.migrationReport}; " + (d2 == "" ? $"{before.Count} parts identical" : d2));
+            File.Delete(SaveSystem.PathOf("autotest_keep"));
         }
 
         /// <summary>Loads a save slot (read only) and checks that its loose parts rest on something: a save

@@ -136,6 +136,7 @@ namespace WorkshopWreckage
             // QA: item lighting terms (1 normals, 2 ambient, 3 main light, 4 additional lights)
             if (args.TryGetValue("itemdebug", out var idm)) Shader.SetGlobalFloat("_WWItemDebug", float.Parse(idm, System.Globalization.CultureInfo.InvariantCulture));
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
+            if (args.TryGetValue("radarview", out var rdv)) RadarView(rdv);
             if (args.TryGetValue("robotwatch", out var rwatch)) { SetState("play"); StartCoroutine(RobotWatch(rwatch)); return; }
             if (args.TryGetValue("activatewatch", out var awatch)) { SetState("play"); StartCoroutine(ActivateWatch(awatch)); return; }
             if (args.TryGetValue("lineup", out var lineup)) { SetState("play"); StartCoroutine(Lineup(lineup)); return; }
@@ -285,8 +286,9 @@ namespace WorkshopWreckage
             // the previous world's simulation goes first: the settle hands its last falling parts
             // on to play, and clearing after it froze them in mid-air
             piles.Clear();
-            if (save != null && !UnsettledSave()) SettleAfterLoad();
-            else piles.SettleWorld(save == null ? 4 : 10);   // nothing starts in mid-air (a new world, or a save whose loose parts never settled)
+            // a new world settles once (the generator only estimates where parts rest); a load moves
+            // nothing: every part is where the player left it (playtest 2026-10-26)
+            if (save == null) piles.SettleWorld();
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
             interaction.ResetState();
@@ -373,46 +375,6 @@ namespace WorkshopWreckage
                 if (cover >= area * 0.5f) return true;
             }
             return false;
-        }
-
-        /// <summary>A part saved while it was still falling would load hanging in the air: after a
-        /// load every moved part comes down onto its real support (lowest first, so stacks settle).</summary>
-        /// <summary>Loose parts a save holds no position for stand where the generator put them, in mid-air
-        /// above their piles. A settled world gives most of them a position; a save converted to a new catalog
-        /// (its loose parts go back to the generator's spots) or one written right after such a conversion
-        /// does not, so the whole room is settled again, as in a new game.</summary>
-        bool UnsettledSave()
-        {
-            if (migrationReport != "") return true;
-            int loose = 0, unsettled = 0;
-            foreach (var i in world.instances)
-                if (i.state == ItemState.InWorld) { loose++; if (!i.moved) unsettled++; }
-            bool redo = loose > 0 && unsettled > loose / 2;
-            if (redo) Debug.Log($"[load] {unsettled} of {loose} loose parts were never settled: settling the room");
-            return redo;
-        }
-
-        void SettleAfterLoad()
-        {
-            var moved = world.instances.Where(i => i.state == ItemState.InWorld && i.moved).OrderBy(i => i.Position.y).ToList();
-            var none = new Dictionary<int, float>();
-            int n = 0;
-            foreach (var i in moved)
-            {
-                var b = index.WorldBounds(i.id);
-                float dy = b.min.y - interaction.SupportUnder(i.id, b, none);
-                if (dy < 0.012f) continue;
-                // the bounding-box estimate knows no pallet rim or box top: only a part the physics
-                // probe finds nothing under comes down (it would otherwise drop into the unit)
-                if (piles.Contact(i.id).supported) continue;
-                var m = i.transform;
-                m.m13 -= dy;
-                index.Remove(i.id);
-                world.SetTransform(i.id, m);
-                index.Insert(i.id);
-                n++;
-            }
-            if (n > 0) Debug.Log($"[load] {n} part(s) saved mid-fall settled");
         }
 
         /// <summary>Highest deck a dropped part may rest on (bench, pallet, tray, low open shelf).</summary>
@@ -933,6 +895,44 @@ namespace WorkshopWreckage
             Application.Quit();
         }
 
+        /// <summary>Art QA for the Part Radar (resources/part radar): --radarview=studio|lit|battery|held
+        /// [--radarled=0|1] [--radarcharges=0..4] [--radardial=deg]. studio: the device alone in the
+        /// studio (--studiocam poses); lit: the same framing in the workshop's own light
+        /// (--studiolight=workshop look); battery: the cell alone; held: in front of the player's camera,
+        /// as first person will show it (use --shot with --cam).</summary>
+        void RadarView(string mode)
+        {
+            var go = new GameObject("PartRadar");
+            var m = go.AddComponent<PartRadarModel>();
+            m.battery = mode == "battery";
+            m.Init();
+            m.Build(new HashSet<string>(PartRadarModel.Parts.Append("")));
+            m.SetLed(!args.TryGetValue("radarled", out var led) || led != "0");
+            m.SetCharges(args.TryGetValue("radarcharges", out var ch) ? int.Parse(ch) : 3);
+            m.Pose(args.TryGetValue("radardial", out var dd) ? float.Parse(dd, System.Globalization.CultureInfo.InvariantCulture) : -35f, 0);
+            foreach (var c in go.GetComponentsInChildren<Collider>()) Destroy(c);
+            if (mode == "held")
+            {
+                // both hands on the grips, low and central, the face with the controls towards the player
+                go.transform.SetParent(player.cam.transform, false);
+                go.transform.localPosition = new Vector3(0, -0.25f, 0.56f);
+                go.transform.localRotation = Quaternion.Euler(-18, 180, 0);
+                return;
+            }
+            var pos = Shared.Pos(layout.spawn.x, 1.0f, layout.spawn.z - 1.2f);
+            go.transform.SetPositionAndRotation(pos, Quaternion.LookRotation(Vector3.back));   // controls towards the camera
+            var bounds = new Bounds(pos, Vector3.zero);
+            foreach (var rr in go.GetComponentsInChildren<Renderer>()) bounds.Encapsulate(rr.bounds);
+            if (mode == "lit")
+            {
+                player.cam.fieldOfView = 30;
+                _studio = (go.transform, bounds);
+                _studioFwd = go.transform.forward;
+                return;
+            }
+            StudioScene(go.transform, pos, bounds);
+        }
+
         static Bounds RendererBounds(Robot r, Vector3 pos)
         {
             var bounds = new Bounds(pos + Vector3.up * 0.3f, Vector3.zero);
@@ -1025,7 +1025,14 @@ namespace WorkshopWreckage
                 _studioFwd = r.transform.forward;
                 return;
             }
-            foreach (var t in r.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = StudioLayer;
+            StudioScene(r.transform, pos, RendererBounds(r, pos));
+        }
+
+        /// <summary>The studio around a model at `pos`: only it is drawn and lit (key, fill and rim
+        /// lights, flat grey backdrop, a long lens and a neutral grade); shots frame `bounds`.</summary>
+        void StudioScene(Transform model, Vector3 pos, Bounds bounds)
+        {
+            foreach (var t in model.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = StudioLayer;
             // the studio: nothing else is drawn or lit
             player.cam.cullingMask = 1 << StudioLayer;
             foreach (var l in FindObjectsByType<Light>()) l.enabled = false;
@@ -1036,8 +1043,8 @@ namespace WorkshopWreckage
             player.cam.clearFlags = CameraClearFlags.SolidColor;
             player.cam.backgroundColor = new Color(0.9f, 0.9f, 0.89f);
             player.cam.fieldOfView = 22;   // a long lens: little perspective distortion, like the sheets
-            _studio = (r.transform, RendererBounds(r, pos));
-            _studioFwd = r.transform.forward;
+            _studio = (model, bounds);
+            _studioFwd = model.forward;
             var key = new GameObject("StudioKey").AddComponent<Light>();
             key.type = LightType.Directional;
             key.color = new Color(1f, 0.96f, 0.9f);

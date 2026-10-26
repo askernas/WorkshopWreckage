@@ -191,6 +191,8 @@ namespace WorkshopWreckage
         Dictionary<string, object> _cfg, _limits;
         bool Flies => locomotion == "hover";
         readonly HashSet<int> _unreachable = new();
+        readonly HashSet<int> _fillSkip = new();   // multi_stop: parts it couldn't get at while filling this load
+        float _toItemTime;   // multi_stop: twice the walk along the path to the part (it fetches from across the room)
         readonly Dictionary<int, GameObject> _carryModels = new();
         readonly Dictionary<string, Vector3?> _stagingSpot = new();
         string _destBox;
@@ -1003,10 +1005,10 @@ namespace WorkshopWreckage
                 specialistState = "PAUSED";
                 return;
             }
-            if (_step == Step.ToItem && _stepT > 25f)
+            if (_step == Step.ToItem && _stepT > Mathf.Max(25f, _toItemTime))
             {
-                if (targetId >= 0) _unreachable.Add(targetId);
-                Release(); _path = null; _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
+                if (targetId >= 0) { _unreachable.Add(targetId); _fillSkip.Add(targetId); }
+                Release(); _path = null; _step = carried.Count > 0 && !FillsOneDest ? Step.ToDest : Step.Choose;
                 return;
             }
             if (_step == Step.ToDest && _stepT > 60f) { DropCarried($"{displayName} got stuck and set its load down"); return; }
@@ -1035,7 +1037,7 @@ namespace WorkshopWreckage
                     break;
                 case Step.ToItem:
                 {
-                    if (targetId < 0 || g.world.instances[targetId].state != ItemState.InWorld) { Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; break; }
+                    if (targetId < 0 || g.world.instances[targetId].state != ItemState.InWorld) { Release(); _step = carried.Count > 0 && !FillsOneDest ? Step.ToDest : Step.Choose; _path = null; break; }
                     var ip = g.world.instances[targetId].Position;
                     bool high = !Flies && ip.y > _maxPickH;   // only climbers choose those: they climb up from the path's end
                     bool tray = g.InTray(ip);                 // reached over the rim from outside
@@ -1044,7 +1046,7 @@ namespace WorkshopWreckage
                     // the tray backs onto the wall, so its back row is up to 0.9 m from the nearest floor
                     bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : ((!high && fd <= _reach * 0.75f) || (Steer(dt) && (tray || fd <= _reach + 0.1f || (high && fd <= 1.0f))));
                     if (arrived) { _step = Step.Picking; StartCoroutine(PickUp(targetId)); }
-                    else if (!Flies && _pathIdx >= _path.Count) { _unreachable.Add(targetId); Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; }   // a delivery plans its own path (the spent one would "arrive" with no destination)
+                    else if (!Flies && _pathIdx >= _path.Count) { _unreachable.Add(targetId); Release(); _step = carried.Count > 0 && !FillsOneDest ? Step.ToDest : Step.Choose; _path = null; }   // a delivery plans its own path (the spent one would "arrive" with no destination)
                     break;
                 }
                 case Step.ToPlayer:
@@ -1201,17 +1203,7 @@ namespace WorkshopWreckage
                     // the nearest part first; one it can store itself is worth 0.4 m of walking more than one for a high
                     // destination (playtest 2026-10-25: "pick up what is nearest")
                     score = i => (i.Position - me).magnitude + (ReachableDest(g.db.Get(i.defId).storageBox) ? 0 : 0.4f);
-                if (strategy == "multi_stop" && _routeRank > 0 && carried.Count > 0)
-                {
-                    // route planning: next pickups whose destinations lie near the ones already on board
-                    var dests = carried.Select(c => StagingSpot(g.world.DefOf(c).storageBox)).Where(s => s.HasValue).Select(s => s.Value).ToList();
-                    score = i =>
-                    {
-                        var s = StagingSpot(g.db.Get(i.defId).storageBox);
-                        float near = s.HasValue && dests.Count > 0 ? dests.Min(d => Flat(d - s.Value).magnitude) : 5;
-                        return (i.Position - me).magnitude + near * 0.25f * _routeRank;
-                    };
-                }
+                if (strategy == "multi_stop") pool = OneDestination(pool, tray, me, ref score);
             }
             // bought intelligence only (design v1.0 §7.2): switch penalty and set focus are exactly 0 without it
             if (_persistRank > 0 || _setRank > 0) { var plain = score; score = i => plain(i) + Smart(i); }
@@ -1220,6 +1212,8 @@ namespace WorkshopWreckage
             var ordered = pool.Where(Pickable).OrderBy(score).ThenBy(i => i.id).ToList();
             _tSort = prof.Elapsed.TotalMilliseconds;
             if (TryTargets(ordered, me, types, ref tries, ref coveredSkips)) return;
+            // filling a load: the candidates tried this frame failed, more are left: go on next frame
+            if (FillsOneDest && carried.Count > 0 && tries > 6 + 3 * _searchRank) { _idleT = 0.05f; return; }
             // nothing in the tray it can get at (covered, or no free spot beside it): the rest of the floor
             // instead of waiting on the tray for ever
             if (pool == tray && carried.Count == 0)
@@ -1232,6 +1226,46 @@ namespace WorkshopWreckage
             if (carried.Count > 0) { _step = Step.ToDest; _path = null; return; }
             _idleT = 0.5f;
             if (tries == 0) status = _handoffSkips > 0 ? $"staging full below {g.db.BoxLabel(_handoffBox)} — needs a high-reach sorter" : "nothing left it can reach";
+        }
+
+        bool FillsOneDest => strategy == "multi_stop";
+
+        static float PathLength(Vector3 from, List<Vector3> path)
+        {
+            float len = 0;
+            foreach (var p in path) { len += Flat(p - from).magnitude; from = p; }
+            return len;
+        }
+
+        /// <summary>Caterpillarbot (multi_stop) fills its cargo boxes for one destination, so it never drives off
+        /// with a single part (playtest 2026-10-26). Once loaded it takes only parts going where the first one
+        /// goes, from anywhere in the room (not only within the gather radius); with Route Planning, when none is
+        /// left for that destination, also parts for destinations beside it (0.6 m per rank between their
+        /// staging spots). Empty, it starts where several parts share a destination: each further part waiting
+        /// for the same place (up to a full load) counts as 1.5 m less walking.</summary>
+        IEnumerable<ItemInstance> OneDestination(IEnumerable<ItemInstance> pool, List<ItemInstance> tray, Vector3 me, ref System.Func<ItemInstance, float> score)
+        {
+            if (carried.Count == 0) _fillSkip.Clear();
+            if (carried.Count > 0)
+            {
+                var box = g.world.DefOf(carried[0]).storageBox;
+                bool Same(ItemInstance i) => g.db.Get(i.defId).storageBox == box && !_fillSkip.Contains(i.id);
+                var same = pool.Where(Same).ToList();
+                if (same.Count == 0 && pool == tray) same = g.world.instances.Where(i => Same(i) && Pickable(i)).ToList();
+                else same = same.Where(Pickable).ToList();
+                if (same.Count > 0 || _routeRank <= 0) return same;
+                // Route Planning: a destination right beside it (the same unit) tops the load up
+                var spot = StagingSpot(box);
+                if (!spot.HasValue) return same;
+                float near = 0.6f * _routeRank;
+                return g.world.instances.Where(i => Pickable(i) && !_fillSkip.Contains(i.id) && StagingSpot(g.db.Get(i.defId).storageBox) is Vector3 s && Flat(s - spot.Value).magnitude <= near).ToList();
+            }
+            var list = pool.Where(Pickable).ToList();
+            var waiting = list.GroupBy(i => g.db.Get(i.defId).storageBox).ToDictionary(gr => gr.Key, gr => gr.Count());
+            var plain = score;
+            int cap = _capacity;
+            score = i => plain(i) - 1.5f * Mathf.Min(waiting[g.db.Get(i.defId).storageBox] - 1, cap - 1);
+            return list;
         }
 
         // ---------------------------------------------------------------- bought intelligence (design v1.0 §6–7)
@@ -1319,7 +1353,9 @@ namespace WorkshopWreckage
             int maxTries = 6 + 3 * _searchRank;
             foreach (var inst in ordered)
             {
-                if (carried.Count > 0 && ((inst.Position - me).magnitude > _gather || (!types.Contains(inst.defId) && types.Count >= _types) || SlotsUsed + SlotsOf(inst.id) > _capacity)) break;
+                bool full = (!types.Contains(inst.defId) && types.Count >= _types) || SlotsUsed + SlotsOf(inst.id) > _capacity;
+                if (carried.Count > 0 && FillsOneDest && full) continue;   // a smaller part, or one of a kind on board, may still fit
+                if (carried.Count > 0 && (!FillsOneDest && (inst.Position - me).magnitude > _gather || full)) break;
                 bool inTray = g.InTray(inst.Position);   // anything in the sorting tray can always be taken (TrayGoal)
                 if (!Flies && !inTray && g.Covered(inst.id)) { if (++coveredSkips > 40) break; continue; }   // under other parts: wait until it is uncovered
                 if (++tries > maxTries) break;   // keep the frame cheap; continue next frame
@@ -1331,11 +1367,12 @@ namespace WorkshopWreckage
                 {
                     bool high = inst.Position.y > _maxPickH;
                     var goal = inTray ? TrayGoal(inst) : _nav.NearestFree(inst.Position, _reach * 0.7f) ?? _nav.NearestFree(inst.Position, high ? 0.95f : _reach);
-                    if (goal.HasValue && !high && !inTray && !InGripRange(inst, goal.Value)) continue;   // a climber closes in on a high part on top (ClimbTo)
+                    if (goal.HasValue && !high && !inTray && !InGripRange(inst, goal.Value)) { _fillSkip.Add(inst.id); continue; }   // a climber closes in on a high part on top (ClimbTo)
                     var path = goal.HasValue ? _nav.Path(me, goal.Value) : null;
-                    if (path == null) { _unreachable.Add(inst.id); continue; }
+                    if (path == null) { _unreachable.Add(inst.id); _fillSkip.Add(inst.id); continue; }
                     _path = path;
                     _pathIdx = 0;
+                    _toItemTime = FillsOneDest ? 2f * PathLength(me, path) / Mathf.Max(0.05f, _walk) : 0;
                 }
                 targetId = inst.id;
                 g.robotReserved.Add(inst.id);

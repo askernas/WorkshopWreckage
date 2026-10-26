@@ -292,9 +292,8 @@ namespace WorkshopWreckage
 
         /// <summary>A new world: the generator only estimates where parts rest, so every loose
         /// part (not the tray, not up on the storage units) falls once until the whole room is
-        /// at rest (playtest 2026-10-25: parts floating in the starting heaps). maxSeconds: a converted save's
-        /// parts fall further (their heaps are half gone) and need longer.</summary>
-        public void SettleWorld(float maxSeconds = 4)
+        /// at rest (playtest 2026-10-25: parts floating in the starting heaps).</summary>
+        public void SettleWorld()
         {
             if (g == null || g.layout == null) return;
             EnsureScene();
@@ -324,8 +323,7 @@ namespace WorkshopWreckage
             // its parts only creep by millimetres a second, and a bolt may spin on its shank in place
             bool Fast(Rigidbody r) => !r.IsSleeping() && r.linearVelocity.sqrMagnitude > 0.03f * 0.03f;
             int steps = 0, awake = rbs.Count;
-            int maxSteps = Mathf.RoundToInt(maxSeconds * 120);
-            for (; steps < maxSteps; steps++)   // up to maxSeconds simulated
+            for (; steps < 480; steps++)   // up to 4 s simulated
             {
                 _phys.Simulate(Bulk);
                 if (steps % 12 == 11 && (awake = rbs.Count(Fast)) <= rbs.Count / 1000) break;

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -14,6 +15,8 @@ namespace WorkshopWreckage.EditorTools
     {
         public const string Output = "Builds/Windows/WorkshopWreckage.exe";
         public const string ReleaseOutput = "Builds/Release/WorkshopWreckage.exe";
+        /// <summary>CLI -wwOutput=Builds/Art/WorkshopWreckage.exe: build elsewhere (Builds/Windows may be busy running a test).</summary>
+        static string OutputOverride => System.Environment.GetCommandLineArgs().Where(x => x.StartsWith("-wwOutput=")).Select(x => x.Substring(10)).FirstOrDefault();
 
         /// <summary>Generated only during a release build: unlocks.json compiled in.</summary>
         const string BakedUnlocks = "Assets/WorkshopWreckage/Scripts/Core/UnlocksBaked.g.cs";
@@ -64,7 +67,7 @@ namespace WorkshopWreckage.EditorTools
             var opts = new BuildPlayerOptions
             {
                 scenes = new[] { "Assets/Scenes/SampleScene.unity" },
-                locationPathName = release ? ReleaseOutput : Output,
+                locationPathName = release ? ReleaseOutput : OutputOverride ?? Output,
                 target = BuildTarget.StandaloneWindows64,
                 // QA profiling: WW_DEV_BUILD=1 makes a development build (profiler markers readable by --bench)
                 options = System.Environment.GetEnvironmentVariable("WW_DEV_BUILD") == "1" ? BuildOptions.Development : BuildOptions.None,

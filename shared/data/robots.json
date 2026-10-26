@@ -53,7 +53,7 @@
 			"can_direct_store": true, "can_climb": false, "can_fly": false,
 			"pick_time": 0.9, "deposit_time": 1.2, "follow_distance": 1.4, "radius": 0.2,
 			"limits": {"capacity": 6, "item_types": 6, "walk_speed": 0.7, "heap_step_height": 0.48, "max_item_size": 0.55, "reach_height": 0.5},
-			"strengths": ["Carries three parts of different kinds per trip", "Crosses low and moderate heaps", "Hauls bulky parts"],
+			"strengths": ["Fills its three cargo boxes for one destination per trip", "Crosses low and moderate heaps", "Hauls bulky parts"],
 			"limitations": ["Slow, wide turns", "Needs room for its long body", "Cannot climb shelving or fly", "Uses the staging zone below high destinations"],
 			"assembly": {"requires": {"head": ["chassis"], "searchlight": ["chassis"], "radio mast": ["chassis"], "hazard beacon": ["chassis"], "left track": ["chassis", "left drive sprocket"], "right track": ["chassis", "right drive sprocket"], "front cargo box": ["chassis"], "middle cargo box": ["chassis"], "rear cargo box": ["chassis"], "left track tensioner": ["chassis"], "right track tensioner": ["chassis"]}},
 			"personality": "Slow, determined, dependable. Hauls loads in three cargo boxes."

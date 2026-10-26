@@ -489,8 +489,10 @@ namespace WorkshopWreckage
         /// 3: component rescale (ComponentScale). Loose parts are saved with their size, and every
         /// version loads them at their definition's current size (ApplyItems), so older saves get the new
         /// sizes once and a save never scales twice. A robot carrying a part that is player-only now sets
-        /// it down (Robot.AdoptCarried).</summary>
-        public const int Version = 3;
+        /// it down (Robot.AdoptCarried).
+        /// 4: every loose part is saved with its place (not only the moved ones), so a load or a catalog
+        /// conversion puts back exactly what the player left and never the generator's spots.</summary>
+        public const int Version = 4;
         public static readonly string[] Slots = { "quick", "slot1", "slot2", "slot3" };
         public static string Dir => System.IO.Path.Combine(Application.persistentDataPath, "saves");
         public static string PathOf(string slot) => System.IO.Path.Combine(Dir, slot + ".json");
@@ -501,7 +503,6 @@ namespace WorkshopWreckage
             var itemDefs = new List<object>();
             foreach (var i in g.world.instances)
             {
-                if (i.state == ItemState.InWorld && !i.moved) continue;
                 itemDefs.Add((double)i.defId);
                 var e = new List<object> { (double)i.id, (double)(int)i.state, i.owner };
                 if (i.state == ItemState.InWorld)
@@ -600,9 +601,11 @@ namespace WorkshopWreckage
     }
 
     /// <summary>Carries a save over to a changed item catalog (IMPLEMENTATION_AUDIT P1-4).
-    /// The world is generated from the new catalog with the save's seed; every saved part is
-    /// matched to an unused part of the same definition (definition ids are stable), keeping
-    /// its state, owner, place and storage. A part stored in a destination that no longer
+    /// The world is generated from the new catalog with the save's seed; every saved part keeps
+    /// its own instance where the new world has the same definition there (else an unused part of
+    /// the same definition: definition ids are stable), with its state, owner, place and storage.
+    /// A loose part keeps its saved place: a conversion never moves anything, and a copy the player
+    /// took off a shelf can't come back there in another copy's name (playtest 2026-10-26). A part stored in a destination that no longer
     /// holds its definition goes to the definition's current destination. Parts of removed
     /// definitions are dropped (XP already earned stays); extra copies stay unsorted in the
     /// world. Instance ids in the inventory and the per-part sort-XP record are remapped.</summary>
@@ -618,8 +621,18 @@ namespace WorkshopWreckage
                 if (!free.TryGetValue(inst.defId, out var q)) free[inst.defId] = q = new Queue<int>();
                 q.Enqueue(inst.id);
             }
-            // sorted / installed / carried parts first: they carry progress
-            var order = Enumerable.Range(0, rows.Count).OrderBy(k => (int)(double)((List<object>)rows[k])[1] == (int)ItemState.InWorld ? 1 : 0).ThenBy(k => k).ToList();
+            // each part keeps its own instance where the definition still matches; the rest take an
+            // unused one, sorted / installed / carried parts first: they carry progress
+            var same = new HashSet<int>();
+            for (int k = 0; k < rows.Count; k++)
+            {
+                int id = (int)(double)((List<object>)rows[k])[0];
+                if (id < w.Count && w.instances[id].defId == (int)(double)defs[k]) same.Add(k);
+            }
+            var taken = same.Select(k => (int)(double)((List<object>)rows[k])[0]).ToHashSet();
+            foreach (var q0 in free.Values) { var keep = q0.Where(i => !taken.Contains(i)).ToList(); q0.Clear(); foreach (var i in keep) q0.Enqueue(i); }
+            var order = same.OrderBy(k => k).Concat(Enumerable.Range(0, rows.Count).Where(k => !same.Contains(k))
+                .OrderBy(k => (int)(double)((List<object>)rows[k])[1] == (int)ItemState.InWorld ? 1 : 0).ThenBy(k => k)).ToList();
             var map = new Dictionary<int, int>();
             var newRows = new List<object>();
             var storage = new Dictionary<string, object>();
@@ -628,14 +641,13 @@ namespace WorkshopWreckage
             {
                 var e = new List<object>((List<object>)rows[k]);
                 int oldId = (int)(double)e[0], defId = (int)(double)defs[k];
-                if (!free.TryGetValue(defId, out var q) || q.Count == 0) { dropped++; continue; }
-                int nid = q.Dequeue();
+                int nid;
+                if (same.Contains(k)) nid = oldId;
+                else if (!free.TryGetValue(defId, out var q) || q.Count == 0) { dropped++; continue; }
+                else nid = q.Dequeue();
                 map[oldId] = nid;
                 e[0] = (double)nid;
                 var state = (ItemState)(int)(double)e[1];
-                // unsorted parts go back to where the new world generated them: the layout may
-                // have changed with the catalog, so an old position could be inside furniture now
-                if (state == ItemState.InWorld) { e = new List<object> { e[0], e[1], "world" }; }
                 if (state == ItemState.Stored && e[2] is string owner && owner.StartsWith("box:"))
                 {
                     string box = owner.Substring(4);
