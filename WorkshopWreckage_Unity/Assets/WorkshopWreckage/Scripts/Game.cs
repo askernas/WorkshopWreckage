@@ -1257,6 +1257,10 @@ namespace WorkshopWreckage
             {
                 progression.Load(Json.Obj(save.GetValueOrDefault("progression")));
                 playTime = Json.Num(save, "play_time_s");
+                // the ledger and the level points agree: a save from before the ledger keeps its completions,
+                // and a destination the ledger finished but never paid out pays now (once)
+                foreach (var d in progression.completedDestinations) progress.completedDefs.Add(d);
+                foreach (var d in progress.completedDefs.ToList()) progression.OnDefinitionCompleted(d, world.TotalOf(d));
             }
             // gameplay counters: from the save, or (a save from before they existed) seeded from what it shows
             stats = save == null ? new GameStats()

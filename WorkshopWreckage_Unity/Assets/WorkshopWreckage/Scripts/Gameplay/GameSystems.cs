@@ -173,6 +173,12 @@ namespace WorkshopWreckage
         readonly Dictionary<int, int> _collected = new(), _sorted = new();
         int[] _zoneTotal, _zoneSorted;
         public int sortedTotal, robotPartsFound;
+        /// <summary>Completion ledger (design v1.0 §3): every part that has ever been accepted
+        /// into its own destination. Permanent: taking a part out again (crafting) never undoes it.</summary>
+        public readonly HashSet<int> accepted = new();
+        readonly Dictionary<int, int> _acceptedOf = new();
+        /// <summary>Destinations whose every assigned copy has been accepted: complete for good.</summary>
+        public readonly HashSet<int> completedDefs = new();
         public int CollectedTotal => _collected.Values.Sum();
         public event Action<string, string> Milestone;
         public event Action<int> Discovered, DefinitionCompleted, DefinitionHalf;
@@ -200,6 +206,7 @@ namespace WorkshopWreckage
                     _collected[i.defId] = _collected.GetValueOrDefault(i.defId) + 1;
                     if (world.DefOf(i.id).IsRobotPart) robotPartsFound++;
                 }
+                if (AcceptedNow(i)) Accept(i, false);
                 if (Accounted(i.state))
                 {
                     _sorted[i.defId] = _sorted.GetValueOrDefault(i.defId) + 1;
@@ -224,6 +231,7 @@ namespace WorkshopWreckage
                 _collected[inst.defId] = _collected.GetValueOrDefault(inst.defId) - 1;
                 if (def.IsRobotPart) robotPartsFound--;
             }
+            if (AcceptedNow(inst)) Accept(inst, true);
             if (Accounted(inst.state) && !Accounted(old))
             {
                 _sorted[inst.defId] = _sorted.GetValueOrDefault(inst.defId) + 1;
@@ -235,10 +243,6 @@ namespace WorkshopWreckage
                     foreach (var step in new[] { 25, 50, 75, 100 })
                         if (pct >= step) Mile($"zone_{inst.zone}_{step}", $"{zoneNames[inst.zone]} {step}% restored");
                 }
-                // unique robot parts follow the workbench's rules, not collection completion
-                int total = world.TotalOf(inst.defId), have = SortedOf(inst.defId);
-                if (!def.IsRobotPart && total >= 2 && have == (total + 1) / 2 && have < total) DefinitionHalf?.Invoke(inst.defId);
-                if (!def.IsRobotPart && have == total) DefinitionCompleted?.Invoke(inst.defId);
                 foreach (var m in SortMilestones)
                     if (sortedTotal == m) Mile("sorted_" + m, m == 1 ? "First part sorted!" : $"{m} parts sorted");
             }
@@ -250,13 +254,28 @@ namespace WorkshopWreckage
             }
         }
 
+        /// <summary>Stored in the destination its definition is assigned to (not a workbench tray).</summary>
+        bool AcceptedNow(ItemInstance i) => i.state == ItemState.Stored && !world.DefOf(i.id).IsRobotPart && i.owner == "box:" + world.DefOf(i.id).storageBox;
+
+        /// <summary>Ledger entry: once per part; a destination completes once, when its last copy is accepted.</summary>
+        void Accept(ItemInstance i, bool live)
+        {
+            if (!accepted.Add(i.id)) return;
+            int have = _acceptedOf[i.defId] = _acceptedOf.GetValueOrDefault(i.defId) + 1, total = world.TotalOf(i.defId);
+            if (live && total >= 2 && have == (total + 1) / 2 && have < total) DefinitionHalf?.Invoke(i.defId);
+            if (have >= total && completedDefs.Add(i.defId) && live) DefinitionCompleted?.Invoke(i.defId);
+        }
+
+        /// <summary>Copies of the definition accepted into its destination so far (the ledger).</summary>
+        public int AcceptedOf(int d) => _acceptedOf.GetValueOrDefault(d);
+
         /// <summary>Accounted for in its collection: stored in its destination, or
         /// installed at the Robot Workbench (robot part, or consumed by a recipe).
         /// Parts in staging zones, in hands or carried by robots are not.</summary>
         public static bool Accounted(ItemState s) => s == ItemState.Stored || s == ItemState.Installed;
 
-        /// <summary>Every copy of the definition accounted for (the collection is complete).</summary>
-        public bool IsComplete(int defId) => world.TotalOf(defId) > 0 && SortedOf(defId) == world.TotalOf(defId);
+        /// <summary>The destination is complete: every copy has been accepted into it at least once.</summary>
+        public bool IsComplete(int defId) => completedDefs.Contains(defId);
 
         void Mile(string key, string text)
         {
@@ -285,6 +304,8 @@ namespace WorkshopWreckage
             ["discovered"] = discovered.Select(x => (object)x).ToList(),
             ["revealed"] = revealed.Select(x => (object)x).ToList(),
             ["milestones"] = milestones.Select(x => (object)x).ToList(),
+            ["accepted"] = accepted.Select(x => (object)(double)x).ToList(),
+            ["completed_defs"] = completedDefs.Select(x => (object)(double)x).ToList(),
         };
 
         public void Load(Dictionary<string, object> d)
@@ -293,6 +314,14 @@ namespace WorkshopWreckage
             foreach (var x in Json.Arr(d.GetValueOrDefault("discovered"))) discovered.Add((int)(double)x);
             foreach (var x in Json.Arr(d.GetValueOrDefault("revealed"))) revealed.Add((int)(double)x);
             foreach (var x in Json.Arr(d.GetValueOrDefault("milestones"))) milestones.Add(x.ToString());
+            accepted.Clear(); _acceptedOf.Clear(); completedDefs.Clear();
+            foreach (var x in Json.Arr(d.GetValueOrDefault("completed_defs"))) completedDefs.Add((int)(double)x);
+            foreach (var x in Json.Arr(d.GetValueOrDefault("accepted")))
+            {
+                int id = (int)(double)x;
+                if (id < 0 || id >= world.Count || !accepted.Add(id)) continue;
+                _acceptedOf[world.instances[id].defId] = _acceptedOf.GetValueOrDefault(world.instances[id].defId) + 1;
+            }
             Recount();
         }
     }

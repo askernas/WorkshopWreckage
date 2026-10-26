@@ -42,6 +42,14 @@ namespace WorkshopWreckage
         /// <summary>Blueprint level of a robot project (robots.json id or extra unit id).</summary>
         public static int Robot(string id, int fallback = 1) => Level("robots", id, fallback);
         public static int Skill(string id, int fallback = 1) => Level("skills", id, fallback);
+        /// <summary>Earliest level for rank `rank` (0-based) of a robot upgrade, by its stat ("robot_upgrades":
+        /// a number for every rank or a list per rank); 1 if not listed.</summary>
+        public static int UpgradeLevel(string stat, int rank)
+        {
+            if (Json.Obj(D.GetValueOrDefault("robot_upgrades")) is not Dictionary<string, object> g || !g.TryGetValue(stat, out var v)) return 1;
+            if (v is List<object> l) return l.Count == 0 ? 1 : (int)(double)l[System.Math.Min(rank, l.Count - 1)];
+            return (int)(double)v;
+        }
         public static int Respec => Json.Int(D, "respec", 12);
 
         /// <summary>A usable skill's tuning ("skill_tuning": slot key, cooldowns, per-level values), or null.</summary>

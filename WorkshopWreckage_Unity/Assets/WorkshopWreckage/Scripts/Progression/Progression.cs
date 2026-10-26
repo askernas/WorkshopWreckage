@@ -23,7 +23,12 @@ namespace WorkshopWreckage
         public List<int> costPerRank = new();
         public double effectPerRank;
         public Dictionary<string, double> also = new(), alsoPercent = new();
+        /// <summary>Other upgrades needed first; an exclusive group may be bought for one robot type only.</summary>
+        public List<string> requires = new();
+        public string exclusive = "";
         public bool Active => status == "active";
+        /// <summary>Earliest player level for buying rank `rank` (0-based) — unlocks.json robot_upgrades, by stat.</summary>
+        public int LevelFor(int rank) => Unlocks.UpgradeLevel(stat, rank);
         public int CostOf(int rank) => costPerRank.Count == 0 ? 1 : costPerRank[Math.Min(rank, costPerRank.Count - 1)];
     }
 
@@ -97,6 +102,8 @@ namespace WorkshopWreckage
                     stat = Json.Str(d, "stat"), mode = Json.Str(d, "mode", "add"), status = Json.Str(d, "status", "planned"),
                     maxRank = Json.Int(d, "max_rank", 1), effectPerRank = Json.Num(d, "effect_per_rank"),
                     costPerRank = Json.Arr(d.GetValueOrDefault("cost_per_rank")).Select(x => (int)(double)x).ToList(),
+                    requires = Json.Arr(d.GetValueOrDefault("requires")).Select(x => x.ToString()).ToList(),
+                    exclusive = Json.Str(d, "exclusive"),
                 };
                 foreach (var kv in Json.Obj(d.GetValueOrDefault("also")) ?? new Dictionary<string, object>()) u.also[kv.Key] = (double)kv.Value;
                 foreach (var kv in Json.Obj(d.GetValueOrDefault("also_percent")) ?? new Dictionary<string, object>()) u.alsoPercent[kv.Key] = (double)kv.Value;
@@ -126,6 +133,11 @@ namespace WorkshopWreckage
             if (!robotOperational) return "Build the robot first";
             int r = RankOf(id);
             if (r >= u.maxRank) return "Maximum rank";
+            if (level < u.LevelFor(r)) return $"Requires level {u.LevelFor(r)}";
+            var missing = u.requires.Where(x => RankOf(x) == 0).ToList();
+            if (missing.Count > 0) return "Requires " + string.Join(", ", missing.Select(x => Upgrade(x)?.name ?? x));
+            if (u.exclusive != "" && robotUpgrades.FirstOrDefault(o => o.exclusive == u.exclusive && o.robot != u.robot && RankOf(o.id) > 0) is RobotUpgradeDef taken)
+                return $"Already chosen for {taken.robot} (one robot type only)";
             if (skillPoints < u.CostOf(r)) return $"Needs {u.CostOf(r)} skill point{(u.CostOf(r) == 1 ? "" : "s")}";
             return "";
         }
@@ -245,10 +257,10 @@ namespace WorkshopWreckage
         public int DestinationsForNext => level >= maxLevel ? 0 : DestinationsForLevel(level + 1) - DestinationsForLevel(level);
         public float LevelFraction => level >= maxLevel ? 1f : (float)DestinationsIntoLevel / DestinationsForNext;
 
-        /// <summary>HUD line: "Level 3  ·  2/3 destinations to level 4".</summary>
+        /// <summary>HUD line: "Level 8  ·  31 / 41 completed destinations to level 9" (cumulative).</summary>
         public string LevelText => level >= maxLevel
-            ? $"Level {level} (max)  ·  {DestinationsCompleted} destinations completed"
-            : $"Level {level}  ·  {DestinationsIntoLevel}/{DestinationsForNext} destinations to level {level + 1}";
+            ? $"Level {level} (max)  ·  {DestinationsCompleted} completed destinations"
+            : $"Level {level}  ·  {DestinationsCompleted} / {DestinationsForLevel(level + 1)} completed destinations to level {level + 1}";
 
         /// <summary>XP needed to advance from `lvl` to `lvl + 1`.</summary>
         public long XpForLevel(int lvl) => lvl >= maxLevel ? long.MaxValue : (long)Math.Round(_curveBase * Math.Pow(lvl, _curveExp));
@@ -400,6 +412,8 @@ namespace WorkshopWreckage
         public bool Has(string effect) => Effect(effect) > 0;
 
         static readonly Dictionary<string, int> RetiredSkills = new() { ["filter_material"] = 1, ["filter_category"] = 1 };
+        /// <summary>Robot AI ranks replaced by the design v1.0 intelligence upgrades: their cost per rank, refunded on load.</summary>
+        static readonly Dictionary<string, int[]> RetiredUpgrades = new() { ["retro_targeting"] = new[] { 1, 1 }, ["uni_coordination"] = new[] { 1, 2 }, ["hover_fleet"] = new[] { 1, 1, 1 } };
 
         // ------------------------------------------------------------------ save
 
@@ -429,7 +443,12 @@ namespace WorkshopWreckage
             foreach (var x in Json.Arr(d.GetValueOrDefault("discover_rewarded"))) _discoverRewarded.Add((int)(double)x);
             foreach (var x in Json.Arr(d.GetValueOrDefault("once"))) _onceRewarded.Add(x.ToString());
             upgradeRanks.Clear();
-            foreach (var kv in Json.Obj(d.GetValueOrDefault("robot_upgrades")) ?? new Dictionary<string, object>()) upgradeRanks[kv.Key] = (int)(double)kv.Value;
+            foreach (var kv in Json.Obj(d.GetValueOrDefault("robot_upgrades")) ?? new Dictionary<string, object>())
+            {
+                int rank = (int)(double)kv.Value;
+                if (RetiredUpgrades.TryGetValue(kv.Key, out var cost)) { for (int r = 0; r < rank && r < cost.Length; r++) skillPoints += cost[r]; continue; }
+                upgradeRanks[kv.Key] = rank;
+            }
             completedDestinations.Clear();
             if (d.ContainsKey("completed_destinations"))
                 foreach (var x in Json.Arr(d["completed_destinations"])) completedDestinations.Add((int)(double)x);

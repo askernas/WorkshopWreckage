@@ -19,7 +19,7 @@ namespace WorkshopWreckage
         Game _g;
         Canvas _canvas;
         RectTransform _hud, _menus;
-        Text _objective, _level, _title, _sub, _hint, _feedback, _progress, _zone, _heldName, _heldCount, _heldDest, _carried, _inspectText, _debug, _status;
+        Text _objective, _target, _level, _title, _sub, _hint, _feedback, _progress, _zone, _heldName, _heldCount, _heldDest, _carried, _inspectText, _debug, _status;
         Image _cross;
         RectTransform _toasts, _hotbar, _heldPanel, _inspect, _skillBar;
         readonly List<(string id, Text text, Image fill)> _skillSlots = new();
@@ -126,13 +126,15 @@ namespace WorkshopWreckage
             _toasts = At("Log", _hud, Vector2.zero, new Vector2(20, 18), new Vector2(640, 220));
             var vl = _toasts.gameObject.AddComponent<VerticalLayoutGroup>();
             vl.spacing = 2; vl.childControlHeight = false; vl.childForceExpandHeight = false; vl.childAlignment = TextAnchor.UpperLeft;
-            var tl = At("Progress", _hud, new Vector2(1, 0), new Vector2(-620, 20), new Vector2(600, 112));
+            var tl = At("Progress", _hud, new Vector2(1, 0), new Vector2(-620, 20), new Vector2(600, 136));
             Panel(tl, new Color(0.1f, 0.07f, 0.05f, 0.72f), BrassDim);
             Text Row(string n, int size, Color c, int top) => Label(tl, n, size, c, TextAnchor.UpperLeft, new Vector2(0, 1), Vector2.one, new Vector2(14, -top - 24), new Vector2(-10, -top));
-            _progress = Row("p", 20, Brass, 8);
-            _level = Row("l", 16, Cream, 33);
-            _zone = Row("z", 15, Muted, 56);
-            _objective = Row("o", 15, Cream, 81);
+            // design v1.0 §3.3: the level line (completed destinations) first, restoration second, never mixed
+            _level = Row("l", 20, Brass, 8);
+            _progress = Row("p", 16, Cream, 33);
+            _target = Row("t", 15, Cream, 56);
+            _zone = Row("z", 15, Muted, 79);
+            _objective = Row("o", 15, Cream, 104);
             _heldPanel = At("Held", _hud, Vector2.one, new Vector2(-580, -230), new Vector2(560, 130));
             Panel(_heldPanel, new Color(0.1f, 0.07f, 0.05f, 0.8f), BrassDim);
             _heldName = Label(_heldPanel, "n", 20, Cream, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, new Vector2(14, 0), new Vector2(-10, -10));
@@ -674,7 +676,8 @@ namespace WorkshopWreckage
             var pr = _g.progression;
             if (_g.objectives != null) _objective.text = "<color=#b8a890>Objective:</color>  " + _g.objectives.HudText();
             _level.text = pr == null ? "" : pr.LevelText + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
-            _progress.text = $"Workshop restored  {p.OverallPercent:0.0}%   ({p.sortedTotal} / {_g.world.Count} sorted)";
+            _progress.text = $"Workshop  {p.OverallPercent:0.0}% parts restored   ({p.sortedTotal} / {_g.world.Count})";
+            _target.text = ActiveTarget();
             int z = _g.layout.ZoneAt(_g.player.transform.position);
             _zone.text = $"{_g.layout.zones[z].name}  —  {p.ZonePercent(z):0}% restored" + RobotStatus();
             UpdateHeld();
@@ -682,6 +685,16 @@ namespace WorkshopWreckage
             if (Keyboard.current != null && Keyboard.current.f3Key.wasPressedThisFrame)
                 _debug.transform.parent.gameObject.SetActive(!_debug.transform.parent.gameObject.activeSelf);
             if (_debug.transform.parent.gameObject.activeSelf) UpdateDebug();
+        }
+
+        /// <summary>The destination of the held part: "Active target  M6 hex bolt  9 / 10" (the ledger count).</summary>
+        string ActiveTarget()
+        {
+            int d = _g.inventory.heldDef;
+            var def = d >= 0 ? _g.db.Get(d) : null;
+            if (def == null || def.IsRobotPart) return "";
+            int have = _g.progress.AcceptedOf(d), total = _g.world.TotalOf(d);
+            return $"<color=#b8a890>Active target:</color>  {def.displayName}  {have} / {total}" + (_g.progress.IsComplete(d) ? "  <color=#8fd18f>COMPLETED</color>" : "");
         }
 
         string RobotStatus()

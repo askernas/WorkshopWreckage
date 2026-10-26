@@ -422,7 +422,7 @@ namespace WorkshopWreckage
             if (p.crafted)
             {
                 var miss = MaterialsMissing(p).Where(kv => kv.Value > 0).Select(kv => $"{kv.Value} {kv.Key}");
-                bits.Add($"{p.name}: {InstalledCount(p)} of {Required(p)} parts built in. Still needed: {string.Join(", ", miss)}.");
+                bits.Add($"{p.name}: {InstalledCount(p)} of {Required(p)} parts built in. Still needed: {string.Join(", ", miss)}. Materials come from completed destinations ({StockFor(p).Count} available in stock).");
                 return string.Join(" ", bits);
             }
             var ids = NeededIds(p);
@@ -503,7 +503,50 @@ namespace WorkshopWreckage
         {
             var def = _g.world.DefOf(id);
             if (def.IsRobotPart) return P(def.craftingPurpose.Replace("robot:", ""));
+            if (!_g.progress.IsComplete(def.id)) return null;   // design v1.0 §3.4: only stock of a completed destination
             return projects.FirstOrDefault(p => p.crafted && OnBench(p) && Unlocked(p) && MaterialsMissing(p).GetValueOrDefault(def.CategoryName) > 0);
+        }
+
+        /// <summary>Recipe stock: parts lying in destinations that are already complete (their level
+        /// point is paid and stays paid), of the categories the recipe still needs.</summary>
+        public List<int> StockFor(Project p)
+        {
+            var o = new List<int>();
+            if (!p.crafted) return o;
+            foreach (var kv in MaterialsMissing(p))
+            {
+                int left = kv.Value;
+                foreach (var d in _g.progress.completedDefs.OrderBy(d => d))
+                {
+                    if (left <= 0) break;
+                    var def = _g.db.Get(d);
+                    if (def == null || def.CategoryName != kv.Key) continue;
+                    foreach (var id in _g.storage.Stored(def.storageBox).ToList())
+                    {
+                        if (left <= 0) break;
+                        o.Add(id); left--;
+                    }
+                }
+            }
+            return o;
+        }
+
+        /// <summary>The confirmed bench build: takes the recipe's materials out of completed
+        /// destinations' stock (nothing unsorted is ever teleported). Returns how many went in.</summary>
+        public int BuildFromStock(Project p)
+        {
+            if (!p.crafted || !Unlocked(p) || !OnBench(p) || Operational(p)) return 0;
+            int n = 0;
+            foreach (var id in StockFor(p))
+            {
+                var box = _g.world.DefOf(id).storageBox;
+                _g.storage.Remove(box, id);
+                _g.world.SetState(id, ItemState.Installed, OwnerOf(p.id));
+                n++;
+            }
+            if (n > 0) { RobotOf(p)?.RefreshAssembly(); Sfx.Play(Complete(p) ? "complete" : "servo", transform.position, -6); }
+            Refresh();
+            return n;
         }
 
         /// <summary>The player personally delivers a carried part. Robot parts go to the
@@ -516,7 +559,9 @@ namespace WorkshopWreckage
             var def = _g.world.DefOf(id);
             if (inst.state != ItemState.Carried || inst.owner != "player") return (false, "Carry the part here yourself");
             var p = ProjectFor(id);
-            if (p == null) return (false, def.IsRobotPart ? "Unknown robot part" : "The workbench takes robot parts (and recipe materials for a Hoverbot under construction)");
+            if (p == null) return (false, def.IsRobotPart ? "Unknown robot part"
+                : !_g.progress.IsComplete(def.id) ? $"Not yet — recipes only use parts of a completed destination ({_g.progress.AcceptedOf(def.id)}/{_g.world.TotalOf(def.id)} {def.displayName} stored)"
+                : "The workbench takes robot parts (and recipe materials for a robot under construction)");
             _g.inventory.Remove(id);
             if (!def.IsRobotPart)
             {

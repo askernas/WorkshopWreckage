@@ -186,6 +186,19 @@ namespace WorkshopWreckage
                 RefreshWorkbench();
             });
             ib.interactable = installable > 0;
+            if (p.crafted)
+            {
+                // the confirmed build: recipe materials out of completed destinations' stock
+                int stock = wb.StockFor(p).Count;
+                var sb = MakeButton(_wbActions, stock > 0 ? $"Build from stock ({stock})" : "Build from stock (none)", () =>
+                {
+                    int n = wb.BuildFromStock(p);
+                    OnFeedback(n > 0 ? $"{n} part{(n == 1 ? "" : "s")} from completed destinations built into {p.name} ({wb.InstalledCount(p)}/{wb.Required(p)}) — their level points stay" : wb.Summary(p), n > 0);
+                    RefreshWorkbench();
+                });
+                sb.interactable = stock > 0;
+                sb.GetComponent<LayoutElement>().preferredWidth = 300;
+            }
             // a head or arm stripped off a built robot (Modify robots → Take off) goes on here too
             ClearChildren(_wbSpares);
             if (!p.crafted && _g.modules != null)
@@ -318,7 +331,7 @@ namespace WorkshopWreckage
             var t2 = "";
             foreach (var u in units)
             {
-                t2 += $"<b><color={Hex(Brass)}>{u.displayName}</color></b>  —  {u.Describe().Substring(u.displayName.Length + 2)}\n";
+                t2 += $"<b><color={Hex(Brass)}>{u.displayName}</color></b>  —  [{u.StatusWord()}]  {Detail(u)}\n";
                 t2 += $"   battery {u.Battery * 100:0}%  ·  stored {u.delivered}, staged {u.staged}" + (u.paused ? "  ·  <color=#d98a4a>PAUSED</color>" : "") + (u.zoneCenter.HasValue ? "  ·  zone" : "")
                     + (u.strategy == "assigned_definition" ? $"\n   assignment: {(u.assignedDef >= 0 ? _g.db.Get(u.assignedDef).displayName + (u.autoAssigned ? " (its own choice)" : "") : "none")}  ·  {(u.specialistState == "" ? "WORKING" : u.specialistState)}" : "") + "\n";
             }
@@ -358,9 +371,18 @@ namespace WorkshopWreckage
                 Btn((robot.mode == Robot.Mode.Following ? "Work" : "Follow me") + tag, 170, () => { robot.ToggleFollow(); RefreshRobots(); });
                 if (robot.zoneCenter.HasValue) Btn("Clear zone" + tag, 170, () => { robot.AssignZone(null); RefreshRobots(); });
                 if (robot.strategy == "assigned_definition" && robot.assignedDef >= 0 && !robot.autoAssigned) Btn("Clear assignment", 220, () => { robot.Assign(-1, false); RefreshRobots(); });
+                if (robot.strategy != "assigned_definition" && robot.preferDef >= 0) Btn((robot.orderState != "" ? "Cancel order" : "Cancel request") + tag, 220, () => { robot.CancelOrder(); RefreshRobots(); });
             }
             if (pr.level >= pr.respecLevel && pr.RanksBought > 0)
                 Btn("Refund robot upgrades", 280, () => { int n = pr.RefundRobotUpgrades(); OnFeedback($"{n} skill points refunded", true); RefreshRobots(); });
+        }
+
+        /// <summary>Describe() without the leading "Name [WORD]: ".</summary>
+        static string Detail(Robot u)
+        {
+            var d = u.Describe();
+            int c = d.IndexOf(": ");
+            return c >= 0 ? d.Substring(c + 2) : d;
         }
 
         void Btn(string text, float width, System.Action cb)

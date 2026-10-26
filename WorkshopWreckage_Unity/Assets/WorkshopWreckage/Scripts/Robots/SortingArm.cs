@@ -386,7 +386,7 @@ namespace WorkshopWreckage
                     if (!Pickable(i.Position)) continue;   // the pincer must really get there
                     bool staged = i.owner == "stage:" + box || Vector3.ProjectOnPlane(i.Position - spot.Value, Vector3.up).magnitude <= 0.5f;
                     if (!staged) continue;
-                    float d = (i.Position - socket.point).sqrMagnitude;
+                    float d = (i.Position - socket.point).magnitude - _r.FocusBonus(def.id);   // Set Awareness: nearly complete destinations first
                     if (d < bestD) { bestD = d; best = id; }
                 }
             }

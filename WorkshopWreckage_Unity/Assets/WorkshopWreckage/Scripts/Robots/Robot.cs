@@ -173,7 +173,18 @@ namespace WorkshopWreckage
         public int Capacity => _capacity;
         float _walk, _turn, _reach, _maxPickH, _followDist, _radius, _pickTime, _depositTime, _height, _maxItem, _stepH, _gather, _cruise;
         float _climbH, _climbSpeed, _scan, _largeItem;
-        int _targetRank, _courierRank, _searchRank, _routeRank, _stagingRank, _fleetRank;
+        int _searchRank, _routeRank, _stagingRank;
+        /// <summary>Bought robot intelligence (design v1.0 §6): zero means the base nearest-feasible robot.</summary>
+        int _persistRank, _setRank, _strategistRank, _handoffRank;
+        bool Fleet => g.progression?.Has("fleet_coordination") ?? false;
+        bool Orders => g.progression?.Has("destination_orders") ?? false;
+        int _lastDef = -1;              // Local Persistence: the kind it last picked up, where and when
+        Vector3 _lastPickPos;
+        float _lastPickT = -999f;
+        bool _preferPicked;             // a one-load R request: done once that load is put down
+        /// <summary>A lasting R order (Destination Orders): WORKING, WAITING FOR ACCESS or PLAYER HELP NEEDED; "" for none.</summary>
+        public string orderState = "";
+        int _handoffSkips;
         bool _canStore = true, _canClimb, _climbing;
         float _climbPitch, _unreachableT;
         Dictionary<string, object> _cfg, _limits;
@@ -293,8 +304,8 @@ namespace WorkshopWreckage
             float pick = (float)(g.progression?.RobotStat(type, "pick_time", 1) ?? 1);   // a multiplier: faster loading also speeds unloading
             _pickTime = (float)Json.Num(c, "pick_time", 1.1) * pick;
             _depositTime = (float)Json.Num(c, "deposit_time", 0.9) * pick;
-            _targetRank = R("target_selection"); _courierRank = R("courier_coordination"); _searchRank = R("search_efficiency");
-            _routeRank = R("route_planning"); _stagingRank = R("staging_priority"); _fleetRank = R("fleet_coordination");
+            _searchRank = R("search_efficiency"); _routeRank = R("route_planning"); _stagingRank = R("staging_priority");
+            _persistRank = R("local_persistence"); _setRank = R("set_awareness"); _strategistRank = R("completion_strategist"); _handoffRank = R("courier_handoff");
         }
 
         /// <summary>Base value of a stat from robots.json (for "base → upgraded" displays).</summary>
@@ -578,12 +589,28 @@ namespace WorkshopWreckage
             if (g.db.Get(defId).IsRobotPart) return $"{displayName} leaves robot parts to you";
             if (!g.db.CanRobotCarry(defId)) return $"{displayName}: {g.db.Get(defId).displayName} is too big for robots — yours to sort";
             if (strategy == "assigned_definition") return Assign(defId, false);
+            if (g.progress.IsComplete(defId)) return $"{displayName}: {g.db.Get(defId).displayName} is already complete";
+            // without Destination Orders, R asks for one load; with it, an order lasts until the destination is complete
+            bool order = Orders;
+            if (order && !(preferDef == defId && orderState != ""))
+            {
+                int slots = OrderSlots + (g.progression.Effect("robot_command_slots") >= 3 ? 2 : 0);   // +2 with Shift Planner
+                var busy = g.robots.Where(r => r != this && r.orderState != "").ToList();
+                if (busy.Count >= slots) return $"All {slots} order slot{(slots == 1 ? " is" : "s are")} in use ({string.Join(", ", busy.Select(r => r.displayName))}) — cancel one in the Robots screen";
+            }
             preferDef = defId;
+            orderState = order ? "WORKING" : "";
+            _preferPicked = false;
             mode = Mode.Working;
             if (carried.Count == 0 && _step != Step.Picking) { Release(); _step = Step.Choose; _path = null; }
             Sfx.Play("servo", transform.position + Vector3.up * 0.3f, -6);
-            return $"{displayName}: on it — {g.db.Get(defId).displayName}";
+            string name = g.db.Get(defId).displayName;
+            return order ? $"{displayName}: order — {name} until complete ({g.progress.AcceptedOf(defId)}/{g.world.TotalOf(defId)})"
+                         : $"{displayName}: on it — one load of {name}";
         }
+
+        /// <summary>Cancels a lasting order or a one-load request.</summary>
+        public void CancelOrder() { preferDef = -1; orderState = ""; _preferPicked = false; }
 
         /// <summary>Spiderbot: collect exactly this definition (-1 cancels). Its current
         /// carried part is finished first; a target of another kind is released.</summary>
@@ -611,6 +638,7 @@ namespace WorkshopWreckage
             {
                 ["operational"] = Operational || mode == Mode.Activating, ["paused"] = paused,
                 ["assigned"] = (double)assignedDef, ["auto_assigned"] = autoAssigned,
+                ["order"] = orderState != "" ? (double)preferDef : -1.0,
                 ["following"] = mode == Mode.Following, ["battery"] = (double)Battery,
                 ["summon"] = mode == Mode.Docked ? "docked" : mode == Mode.Summoned || _summonPending ? "summoned" : "",
                 ["delivered"] = (double)delivered, ["staged"] = (double)staged,
@@ -633,6 +661,8 @@ namespace WorkshopWreckage
             paused = Json.Bool(d, "paused");
             assignedDef = Json.Int(d, "assigned", -1);
             autoAssigned = Json.Bool(d, "auto_assigned");
+            int order = Json.Int(d, "order", -1);   // a lasting order survives a save; a one-load request does not
+            if (order >= 0) { preferDef = order; orderState = "WORKING"; }
             if (Json.Bool(d, "operational") && !Operational) SetOperational();
             if (arm != null) { if (Operational) arm.Load(Json.Obj(d.GetValueOrDefault("arm"))); return; }
             if (!Active) return;
@@ -960,8 +990,8 @@ namespace WorkshopWreckage
             // recovery: a trip that takes far too long is abandoned (blocked path, unreachable spot)
             if (_step != _lastStep) { _lastStep = _step; _stepT = 0; }
             _stepT += dt;
-            // parts it gave up on are tried again now and then (better target selection remembers longer)
-            if ((_unreachableT += dt) > (_targetRank >= 2 ? 180f : 60f)) { _unreachableT = 0; _unreachable.Clear(); }
+            // parts it gave up on are tried again now and then (Completion Strategist remembers longer)
+            if ((_unreachableT += dt) > (_strategistRank > 0 ? 180f : 60f)) { _unreachableT = 0; _unreachable.Clear(); }
             // paused from Robot Management: finishes what it holds, then waits
             if (paused && carried.Count == 0 && (_step == Step.Choose || _step == Step.ToItem))
             {
@@ -1112,8 +1142,9 @@ namespace WorkshopWreckage
             _tNav = swn.Elapsed.TotalMilliseconds;
             var types = carried.Select(c => g.world.instances[c].defId).ToHashSet();
             IEnumerable<ItemInstance> pool = null;
-            System.Func<ItemInstance, float> score = i => (i.Position - me).sqrMagnitude;
+            System.Func<ItemInstance, float> score = i => (i.Position - me).magnitude;
             specialistState = "";
+            _handoffSkips = 0;
             _stagedNow = StagedCounts();   // the staging cap holds for every robot (never waits on a full zone)
             // parts the player put in the sorting tray come first, for every robot (playtest 2026-10-25),
             // before a specialist's assignment or a Hoverbot's staging zones; only a part the player
@@ -1125,20 +1156,28 @@ namespace WorkshopWreckage
             }
             else
             {
-                if (tray.Count > 0 && preferDef < 0) pool = tray;
+                if (preferDef >= 0 && g.progress.IsComplete(preferDef))
+                {
+                    if (orderState != "") g.hud?.Toast($"{displayName}: order complete — {g.db.Get(preferDef).displayName}", true);
+                    CancelOrder();
+                }
+                bool orderWaits = false;
                 if (preferDef >= 0)
                 {
                     var pref = g.world.IdsOf(preferDef).Select(i => g.world.instances[i]).Where(Pickable).ToList();
-                    if (pref.Count > 0) pool = pref; else preferDef = -1;
+                    if (pref.Count > 0) { pool = pref; if (orderState != "") orderState = "WORKING"; }
+                    else if (orderState != "") { orderState = OrderBlockedReason(preferDef); orderWaits = true; }   // a lasting order waits; meanwhile it works nearby
+                    else preferDef = -1;
                 }
+                if (tray.Count > 0 && (preferDef < 0 || orderWaits)) pool = tray;
                 if (pool == null && strategy == "staging_first")
                 {
                     // Hoverbot: finish what the others left in the staging zones first
                     // ...except the piles below a working Sorting Arm's drawers: those are the arm's
                     var staged = g.world.instances.Where(i => i.state == ItemState.InWorld && i.owner.StartsWith("stage:") && !g.ArmServes(i.owner.Substring(6)) && Pickable(i)).ToList();
-                    if (_fleetRank > 0)
+                    if (Fleet)
                     {
-                        // fleet coordination: leave zones another Hoverbot is already working on
+                        // Fleet Coordination (player skill): leave zones another Hoverbot is already working on
                         var taken = g.robots.Where(r => r != this && r.type == type && r.targetId >= 0).Select(r => g.world.instances[r.targetId].owner).ToHashSet();
                         var free = staged.Where(i => !taken.Contains(i.owner)).ToList();
                         if (free.Count > 0) staged = free;
@@ -1156,10 +1195,8 @@ namespace WorkshopWreckage
                 pool ??= g.world.instances;
                 if (strategy == "opportunistic")
                     // the nearest part first; one it can store itself is worth 0.4 m of walking more than one for a high
-                    // destination (playtest 2026-10-25: "pick up what is nearest"); with Better Targeting, sets already
-                    // started come first too
-                    score = i => (i.Position - me).magnitude + (ReachableDest(g.db.Get(i.defId).storageBox) ? 0 : 0.4f)
-                                 - (_targetRank > 0 && g.progress.SortedOf(i.defId) > 0 ? 1.5f : 0);
+                    // destination (playtest 2026-10-25: "pick up what is nearest")
+                    score = i => (i.Position - me).magnitude + (ReachableDest(g.db.Get(i.defId).storageBox) ? 0 : 0.4f);
                 if (strategy == "multi_stop" && _routeRank > 0 && carried.Count > 0)
                 {
                     // route planning: next pickups whose destinations lie near the ones already on board
@@ -1172,9 +1209,11 @@ namespace WorkshopWreckage
                     };
                 }
             }
+            // bought intelligence only (design v1.0 §7.2): switch penalty and set focus are exactly 0 without it
+            if (_persistRank > 0 || _setRank > 0) { var plain = score; score = i => plain(i) + Smart(i); }
             int tries = 0, coveredSkips = 0;
             var prof = System.Diagnostics.Stopwatch.StartNew();
-            var ordered = pool.Where(Pickable).OrderBy(score).ToList();
+            var ordered = pool.Where(Pickable).OrderBy(score).ThenBy(i => i.id).ToList();
             _tSort = prof.Elapsed.TotalMilliseconds;
             if (TryTargets(ordered, me, types, ref tries, ref coveredSkips)) return;
             // nothing in the tray it can get at (covered, or no free spot beside it): the rest of the floor
@@ -1182,13 +1221,91 @@ namespace WorkshopWreckage
             if (pool == tray && carried.Count == 0)
             {
                 pool = g.world.instances;
-                ordered = pool.Where(Pickable).OrderBy(score).ToList();
+                ordered = pool.Where(Pickable).OrderBy(score).ThenBy(i => i.id).ToList();
                 tries = coveredSkips = 0;
                 if (TryTargets(ordered, me, types, ref tries, ref coveredSkips)) return;
             }
             if (carried.Count > 0) { _step = Step.ToDest; _path = null; return; }
             _idleT = 0.5f;
-            if (tries == 0) status = "nothing left it can reach";
+            if (tries == 0) status = _handoffSkips > 0 ? "staging full — needs a high-reach sorter" : "nothing left it can reach";
+        }
+
+        // ---------------------------------------------------------------- bought intelligence (design v1.0 §6–7)
+
+        static Dictionary<string, object> _ai;
+        static Dictionary<string, object> AI => _ai ??= Json.Obj(RootConfig().GetValueOrDefault("robot_ai")) ?? new Dictionary<string, object>();
+        static float AiNum(string k, double def) => (float)Json.Num(AI, k, def);
+        static float AiRank(string k, int rank, double def)
+        {
+            var l = Json.Arr(AI.GetValueOrDefault(k));
+            return l.Count == 0 ? (float)Json.Num(AI, k, def) : Json.F(l[Mathf.Clamp(rank - 1, 0, l.Count - 1)]);
+        }
+        public static int StagingSoftLimit => Json.Int(AI, "staging_soft_limit", 10);
+        public static int OrderSlots => Json.Int(AI, "order_slots", 1);
+
+        /// <summary>The intelligence part of a candidate's score (metres, lower is better): Local Persistence's
+        /// switch penalty minus Set Awareness's focus bonus. 0 for a robot without those upgrades.</summary>
+        float Smart(ItemInstance i)
+        {
+            float s = 0;
+            if (_persistRank > 0 && _lastDef >= 0 && _time - _lastPickT < AiRank("persistence_s", _persistRank, 60))
+            {
+                bool local = i.defId == _lastDef && Flat(i.Position - _lastPickPos).magnitude <= AiRank("persistence_radius_m", _persistRank, 4);
+                if (!local) s += AiNum("switch_penalty_m", 1.5) * _persistRank;
+            }
+            return s - FocusBonus(i.defId);
+        }
+
+        readonly Dictionary<int, float> _focus = new();
+        int _focusFrame = -1;
+
+        /// <summary>Set Awareness (§7.2): maxBonus × accepted/total × reachable remaining/remaining, so a 9/10
+        /// destination whose last copy is player-only or out of reach draws nothing. Exactly 0 without the upgrade.</summary>
+        public float FocusBonus(int defId)
+        {
+            if (_setRank <= 0) return 0;
+            if (_focusFrame != Time.frameCount) { _focus.Clear(); _focusFrame = Time.frameCount; }
+            if (_focus.TryGetValue(defId, out var f)) return f;
+            f = 0;
+            int total = g.world.TotalOf(defId), acc = g.progress.AcceptedOf(defId), remaining = total - acc;
+            if (remaining > 0 && acc > 0 && !g.progress.IsComplete(defId))
+            {
+                int feasible = 0;
+                foreach (var id in g.world.IdsOf(defId))
+                    if (!g.progress.accepted.Contains(id) && CopyFeasible(g.world.instances[id])) feasible++;
+                f = (_strategistRank > 0 ? AiNum("strategist_bonus_m", 4) : AiNum("focus_bonus_m", 2.5)) * acc / total * feasible / remaining;
+            }
+            _focus[defId] = f;
+            return f;
+        }
+
+        /// <summary>Can the robots really finish this copy? Not player-only, not in the player's hands, and its
+        /// destination storable by this robot or a downstream one. Completion Strategist also checks the copy
+        /// itself (covered, given up on); Set Awareness only its height.</summary>
+        bool CopyFeasible(ItemInstance i)
+        {
+            var def = g.world.DefOf(i.id);
+            if (!def.robotCarry || def.IsRobotPart || ItemDatabase.Extents(def)[0] > _maxItem) return false;
+            if (i.state == ItemState.Carried) return i.owner.StartsWith("robot:");
+            if (i.state != ItemState.InWorld) return false;
+            if (!ReachableDest(def.storageBox) && !HasDownstream(def.storageBox)) return false;
+            if (_strategistRank > 0) return g.robotReserved.Contains(i.id) || Pickable(i) && (Flies || g.InTray(i.Position) || !g.Covered(i.id));
+            return g.InTray(i.Position) || i.owner.StartsWith("stage:") || i.Position.y <= ReachHeight;
+        }
+
+        /// <summary>Is there someone to put a staged part away: a working Sorting Arm on that unit, or another
+        /// running mobile robot that can store into the destination?</summary>
+        public bool HasDownstream(string box) => g.ArmServes(box) || g.robots.Any(r => r != this && r.Active && r.Mobile && !r.paused && r.ReachableDest(box));
+
+        /// <summary>Why a lasting order can't go on: copies only the player can move, or ones out of reach.</summary>
+        string OrderBlockedReason(int defId)
+        {
+            var def = g.db.Get(defId);
+            if (!def.robotCarry || ItemDatabase.Extents(def)[0] > _maxItem) return "PLAYER HELP NEEDED";
+            foreach (var id in g.world.IdsOf(defId))
+                if (!g.progress.accepted.Contains(id) && g.world.instances[id].state == ItemState.Carried && g.world.instances[id].owner == "player")
+                    return "PLAYER HELP NEEDED";
+            return "WAITING FOR ACCESS";
         }
 
         /// <summary>Takes the first of these candidates it can walk to and grip (a bounded number of tries per
@@ -1253,7 +1370,8 @@ namespace WorkshopWreckage
                 {
                     float sc = (inst.Position - from).magnitude;
                     if (strategy == "opportunistic")
-                        sc += (ReachableDest(g.db.Get(inst.defId).storageBox) ? 0 : 0.4f) - (_targetRank > 0 && g.progress.SortedOf(inst.defId) > 0 ? 1.5f : 0);
+                        sc += ReachableDest(g.db.Get(inst.defId).storageBox) ? 0 : 0.4f;
+                    if (_persistRank > 0 || _setRank > 0) sc += Smart(inst);
                     _planList.Add((sc, inst.id));
                 }
                 if (i % 600 == 599) yield return null;
@@ -1289,7 +1407,7 @@ namespace WorkshopWreckage
             _planReady = false;
             _plannedId = -1;
             if (!ready || id < 0) return false;
-            bool ok = carried.Count == 0 && preferDef < 0 && !handoverPending && !paused && Battery >= 0.12f;
+            bool ok = carried.Count == 0 && (preferDef < 0 || orderState is "WAITING FOR ACCESS" or "PLAYER HELP NEEDED") && !handoverPending && !paused && Battery >= 0.12f;
             var inst = g.world.instances[id];
             if (ok) ok = Pickable(inst) && !g.Covered(id) && !g.index.QuerySphere(g.TrayCenter, 1f).Any(i => g.InTray(g.world.instances[i].Position) && Pickable(g.world.instances[i]));
             if (ok)
@@ -1343,7 +1461,8 @@ namespace WorkshopWreckage
                 // no assignment: take the nearest unfinished set it can actually reach
                 // (never straight back to a set it just gave up on: it would idle on it forever)
                 if (_time - _failedDefsT > 180f) { _failedDefs.Clear(); _failedDefsT = _time; }
-                var first = g.world.instances.Where(i => !_failedDefs.Contains(i.defId) && Pickable(i)).OrderBy(i => (i.Position - me).sqrMagnitude).FirstOrDefault();
+                // base: the nearest part's set; Set Awareness weighs nearly complete, reachable destinations in
+                var first = g.world.instances.Where(i => !_failedDefs.Contains(i.defId) && Pickable(i)).OrderBy(i => (i.Position - me).magnitude - FocusBonus(i.defId)).ThenBy(i => i.id).FirstOrDefault();
                 if (first == null) { specialistState = "WAITING_FOR_ACCESS"; return false; }
                 Assign(first.defId, true);
             }
@@ -1391,7 +1510,10 @@ namespace WorkshopWreckage
             if (staged && Blocked(def.storageBox)) return false;   // waits until someone clears the strays out of its destination
             if (ReachableDest(def.storageBox)) return true;
             if (staged) return false;   // waiting for a robot that can store it
-            if (_stagedNow != null && _stagedNow.GetValueOrDefault("stage:" + def.storageBox) >= StagingCapacity) return false;   // that zone is full
+            int inZone = (_stagedNow?.GetValueOrDefault("stage:" + def.storageBox) ?? 0) + (Fleet ? PendingStage(def.storageBox) : 0);
+            if (inZone >= StagingCapacity) return false;   // that zone is full (the hard cap holds for every robot)
+            // Courier Hand-off: stop feeding a zone at the soft limit, and never stage what no robot can put away
+            if (_handoffRank > 0 && (inZone >= StagingSoftLimit || !HasDownstream(def.storageBox))) { _handoffSkips++; return false; }
             var spot = StagingSpot(def.storageBox);
             return spot == null || Flat(i.Position - spot.Value).magnitude > 0.45f;
         }
@@ -1458,6 +1580,27 @@ namespace WorkshopWreckage
             foreach (var i in g.world.instances) if (i.state == ItemState.InWorld && i.owner.StartsWith("stage:")) d[i.owner] = d.GetValueOrDefault(i.owner) + 1;
             _stagedFrame = Time.frameCount;
             return _stagedCache = d;
+        }
+
+        static int _pendingFrame = -1;
+        static Dictionary<string, int> _pendingCache;
+        /// <summary>Fleet Coordination: parts robots carry that will be staged in front of this destination.</summary>
+        int PendingStage(string box)
+        {
+            if (_pendingFrame != Time.frameCount || _pendingCache == null)
+            {
+                var d = new Dictionary<string, int>();
+                foreach (var r in g.robots)
+                    if (r.Active && r.Mobile)
+                        foreach (var c in r.carried)
+                        {
+                            var b = g.world.DefOf(c).storageBox;
+                            if (!r.ReachableDest(b)) d[b] = d.GetValueOrDefault(b) + 1;
+                        }
+                _pendingFrame = Time.frameCount;
+                _pendingCache = d;
+            }
+            return _pendingCache.GetValueOrDefault(box);
         }
 
         /// <summary>Floor point in front of a destination (where ground robots stand and pile parts).</summary>
@@ -1596,6 +1739,8 @@ namespace WorkshopWreckage
                 g.world.SetState(itemId, ItemState.Carried, Owner);
                 g.interaction.SettleNeighbours(from, g.world.DefOf(itemId));
                 carried.Add(itemId);
+                _lastDef = inst.defId; _lastPickPos = inst.Position; _lastPickT = _time;   // Local Persistence
+                if (inst.defId == preferDef && orderState == "") _preferPicked = true;     // a one-load R request
                 if (Stows) _clawItem = itemId;   // in the grippers until it is stowed
                 ShowCarried(itemId);
                 PlaceCarried();
@@ -1830,6 +1975,8 @@ namespace WorkshopWreckage
         /// <summary>A trip ends when the robot has put its whole load down (stored and/or staged).</summary>
         void TripCheck()
         {
+            // a one-load R request (without Destination Orders) ends with the load it asked for
+            if (carried.Count == 0 && _preferPicked) { _preferPicked = false; if (orderState == "") preferDef = -1; }
             if (carried.Count > 0 || _tripParts == 0) return;
             GameEvents.Raise(GameEventKind.RobotTripCompleted, Owner, type, count: _tripParts);
             _tripParts = 0;
@@ -2541,7 +2688,39 @@ namespace WorkshopWreckage
             if (_carryModels.TryGetValue(itemId, out var go)) { Destroy(go); _carryModels.Remove(itemId); }
         }
 
+        /// <summary>The robot's main state in the design's few words (§10.3).</summary>
+        public string StatusWord()
+        {
+            if (arm != null) return Operational ? "WORKING" : "IDLE";
+            switch (mode)
+            {
+                case Mode.Following: return "FOLLOWING";
+                case Mode.Docked: return g.modules != null && !g.modules.Complete(id) ? "NEEDS MODULE" : "IDLE";
+                case Mode.Working: break;
+                default: return "IDLE";
+            }
+            if (_step == Step.ToCharge || _step == Step.Charging) return "CHARGING";
+            if (_step == Step.ToDest || _step == Step.Depositing) return carried.Count > 0 && !_destReachable ? "STAGING" : "DELIVERING";
+            if (_step == Step.ToItem || _step == Step.Picking || _step == Step.ToPlayer) return "WORKING";
+            if (paused) return "IDLE";
+            if (orderState is "WAITING FOR ACCESS" or "PLAYER HELP NEEDED") return orderState;
+            if (specialistState == "WAITING_FOR_ACCESS") return "WAITING FOR ACCESS";
+            if (status.StartsWith("staging full")) return "STAGING FULL";
+            if (status == "nothing left it can reach") return "NO REACHABLE PART";
+            return "IDLE";
+        }
+
         public string Describe()
+        {
+            var d = DescribeDetail();
+            if (arm != null && Operational) return d;
+            if (d.StartsWith(displayName + ":")) d = $"{displayName} [{StatusWord()}]" + d.Substring(displayName.Length);
+            if (preferDef >= 0 && strategy != "assigned_definition")
+                d += $"  ·  {(orderState != "" ? "order" : "one load")}: {g.db.Get(preferDef).displayName} {g.progress.AcceptedOf(preferDef)}/{g.world.TotalOf(preferDef)}";
+            return d;
+        }
+
+        string DescribeDetail()
         {
             if (arm != null && Operational) return arm.Describe();
             switch (mode)
