@@ -485,7 +485,7 @@ namespace WorkshopWreckage
                 yield return null;
             }
             // off the bench: a hop down to its charging mat (Hoverbot flies down); the Sorting
-            // Arm waits folded in front of the bench until the player carries it to a socket
+            // Arm comes straight into the player's hands (empty ones; else it waits folded in front of the bench)
             if (arm != null)
             {
                 mode = Mode.Working;
@@ -493,7 +493,8 @@ namespace WorkshopWreckage
                 Sfx.Play("complete", transform.position + Vector3.up * 0.3f, -2);
                 g.progression?.OnRobotRepaired(id);
                 GameEvents.Raise(GameEventKind.RobotActivated, Owner, type);
-                g.hud.Toast($"{displayName} is ready — carry it to an overhead socket above a drawer cabinet", true);
+                bool carried = g.CarriedArm == null && g.inventory.Count == 0 && arm.PickUp();   // PickUp says how to mount it
+                if (!carried) g.hud.Toast($"{displayName} is ready — it waits in front of the workbench: with empty hands, click it to pick it up", true);
                 g.workbench?.Refresh();
                 foreach (var r in g.robots) if (r != this && r.mode == Mode.Assembling) r.RefreshAssembly();
                 yield break;

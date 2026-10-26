@@ -242,7 +242,7 @@ namespace WorkshopWreckage
             {
                 // the finished arm: into the player's hands (also the way to recover a mounted one)
                 var arm = armBot.arm;
-                string label = arm.place == SortingArm.Place.Bench ? $"Carry {p.name} to a socket" : $"Fetch {p.name} from {arm.socket?.id}";
+                string label = arm.place == SortingArm.Place.Floor ? $"Pick up {p.name}" : $"Fetch {p.name} from {arm.socket?.id}";
                 var carry = MakeButton(_wbActions, label, () => { if (arm.PickUp()) _g.SetState("play"); });
                 carry.GetComponent<LayoutElement>().preferredWidth = 320;
             }

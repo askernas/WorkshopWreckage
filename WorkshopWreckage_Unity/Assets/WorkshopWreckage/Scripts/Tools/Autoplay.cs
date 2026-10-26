@@ -2111,18 +2111,37 @@ namespace WorkshopWreckage
             var paused = g.robots.Where(r => r.Mobile && r.Active).ToList();
             foreach (var r in paused) r.paused = true;
             wb.ForceInstall(p);
+            int pockets0 = g.inventory.items.Count;
             if (!wb.Activate(p)) wb.DebugUnlock(p);   // the arm-only section starts below the blueprint level
             float t0 = Time.realtimeSinceStartup;
             while (!bot.Operational && Time.realtimeSinceStartup - t0 < 15) yield return null;
-            Check("an activated arm waits folded at the workbench (it never roams)", bot.Operational && arm.place == SortingArm.Place.Bench && (bot.transform.position - bot.home).magnitude < 0.05f, arm.Describe());
+            Check("a built arm comes straight into the player's empty hands (with parts in them it waits at the bench)", bot.Operational
+                  && (pockets0 == 0 ? g.CarriedArm == arm : arm.place == SortingArm.Place.Floor && (bot.transform.position - bot.home).magnitude < 0.05f), $"{pockets0} part(s) in the pockets; " + arm.Describe());
             if (!bot.Operational) { foreach (var r in paused) r.paused = false; yield break; }
+
+            // set down anywhere (the same click as mounting, off a mount), picked up again only with empty hands
+            if (arm.place != SortingArm.Place.Carried) arm.PickUp();
+            g.interaction.SetArmDown(arm, false);
+            var me = g.player.transform.position;
+            var down = arm.transform.position;
+            float off = Vector3.ProjectOnPlane(down - me, Vector3.up).magnitude;
+            Check("the carried arm is set down folded on the floor in front of the player, not at the bench", arm.place == SortingArm.Place.Floor && g.CarriedArm == null && Mathf.Abs(down.y) < 0.01f && off > 0.5f && off < 1.2f
+                  && g.sockets.Values.All(s => s.occupant != arm), $"{off:0.00} m from the player at {down}; " + arm.Describe());
+            LookFrom(down + Vector3.ProjectOnPlane(me - down, Vector3.up).normalized * 1.6f + Vector3.up * 1.1f, down + Vector3.up * 0.25f);
+            yield return g.Capture(Path.Combine(outDir, "17_arm_set_down.png"), 2);
+            var loose = g.world.instances.First(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart && !g.InTray(i.Position));
+            bool tookPart = g.interaction.Pickup(loose.id, false);
+            bool armRefused = !arm.PickUp();
+            g.interaction.DropHeld();
+            yield return Frames(30);
+            Check("with a part in the hands the arm can't be picked up", tookPart && armRefused && arm.place == SortingArm.Place.Floor, $"took part {tookPart}, refused {armRefused}");
 
             // carry: two-handed, no pocket slot, no pickups meanwhile
             int pockets = g.inventory.items.Count;
             arm.PickUp();
-            var loose = g.world.instances.First(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart);
+            loose = g.world.instances.First(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart && !g.interaction.busy.Contains(i.id));
             bool refused = !g.interaction.Pickup(loose.id, false);
-            Check("the arm is carried in both hands: no inventory slot, no part pickups", g.CarriedArm == arm && g.inventory.items.Count == pockets && refused, arm.Describe());
+            Check("the arm is carried in both hands: no inventory slot, no part pickups", pockets == 0 && g.CarriedArm == arm && g.inventory.items.Count == 0 && refused, arm.Describe());
 
             int total = g.world.instances.Count;
             // ---- cabinet
@@ -2238,8 +2257,21 @@ namespace WorkshopWreckage
             g.LoadGame("autotest_arm");
             yield return Frames(5);
             bot = g.workbench.RobotOf(g.workbench.P("sorting_arm"));
-            Check("an arm saved while carried is set down at the workbench on load (nothing lost)", bot.arm.place == SortingArm.Place.Bench && g.sockets.Values.All(s => s.occupant == null) && g.CarriedArm == null
-                  && g.world.instances.Count == total, bot.arm.Describe());
+            Check("an arm saved while carried is set down at the workbench on load (nothing lost)", bot.arm.place == SortingArm.Place.Floor && (bot.arm.transform.position - bot.home).magnitude < 0.01f
+                  && g.sockets.Values.All(s => s.occupant == null) && g.CarriedArm == null && g.world.instances.Count == total, bot.arm.Describe());
+            // set down somewhere else: it is still standing there after save/load
+            g.player.Teleport(g.player.transform.position + Vector3.ProjectOnPlane(g.player.transform.forward, Vector3.up).normalized * -1.5f);
+            yield return Frames(3);
+            bot.arm.PickUp();
+            g.interaction.SetArmDown(bot.arm, false);
+            var spot = bot.arm.transform.position;
+            g.SaveGame("autotest_arm");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_arm");
+            yield return Frames(5);
+            bot = g.workbench.RobotOf(g.workbench.P("sorting_arm"));
+            Check("save/load: an arm set down on the floor comes back where it stood", bot.arm.place == SortingArm.Place.Floor && (bot.arm.transform.position - spot).magnitude < 0.01f
+                  && (spot - bot.home).magnitude > 0.2f, $"{bot.arm.transform.position} (set down at {spot}); " + bot.arm.Describe());
             File.Delete(SaveSystem.PathOf("autotest_arm"));
             foreach (var r in g.robots.Where(r => r.Mobile)) r.paused = false;
         }

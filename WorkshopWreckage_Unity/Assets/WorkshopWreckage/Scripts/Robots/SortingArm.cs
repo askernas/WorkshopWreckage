@@ -204,10 +204,11 @@ namespace WorkshopWreckage
     }
 
     /// <summary>The Stationary Sorting Arm (Robot Workshop redesign, Phase C). A Robot with
-    /// strategy "stationary": assembled at the Robot Workbench like the others, then it
-    /// stands folded on the floor in front of the bench until the player carries it
-    /// (two-handed, no pocket slot) to an empty overhead mount above a drawer cabinet or a
-    /// shelving unit. Mounted, it sorts the parts lying in the staging piles in front of that
+    /// strategy "stationary": assembled at the Robot Workbench like the others; once built it
+    /// comes straight into the player's hands (both of them: nothing else is carried meanwhile,
+    /// so only with empty pockets, else it waits folded in front of the bench). One click does
+    /// it all: on a free overhead mount above a drawer cabinet or a shelving unit it is mounted,
+    /// anywhere else it is set down folded on the floor, and a click on it picks it up again. Mounted, it sorts the parts lying in the staging piles in front of that
     /// unit: it reserves a part (the shared robot reservation set), the mount's trolley and lift
     /// bring the arm down in front of the pile, it lifts the part, carries it to its drawer (opened)
     /// or container and lets go there, storing it through StorageSystem.Deposit — the same storage,
@@ -216,8 +217,8 @@ namespace WorkshopWreckage
     /// leaves staged parts of a working arm's unit alone.</summary>
     public class SortingArm : MonoBehaviour
     {
-        public enum Place { Bench, Carried, Mounted }
-        public Place place = Place.Bench;
+        public enum Place { Floor, Carried, Mounted }
+        public Place place = Place.Floor;
         public ArmSocket socket;
         public string idleReason = "";
         public int heldId = -1;
@@ -242,21 +243,34 @@ namespace WorkshopWreckage
         // ---------------------------------------------------------------- placement
 
         /// <summary>Folded on the floor in front of the bench (after activation, recovery or load).</summary>
-        public void ToBench()
+        public void ToBench() => SetDown(_r.home, _r.homeRot);
+
+        /// <summary>Folded, standing on the floor at `p` (set down by the player, or the bench spot).</summary>
+        public void SetDown(Vector3 p, Quaternion rot)
         {
             CancelCycle();
             Unmount();
-            place = Place.Bench;
+            place = Place.Floor;
             transform.SetParent(_g.transform, true);
-            transform.SetPositionAndRotation(_r.home, _r.homeRot);
+            transform.SetPositionAndRotation(p, rot);
             Show(BenchScale, true);
             _m.Fold(1);
         }
 
+        /// <summary>Where the crosshair finds the arm standing on the floor: its folded model's box.</summary>
+        public Bounds FloorBounds()
+        {
+            var b = new Bounds(transform.position, Vector3.zero);
+            foreach (var r in GetComponentsInChildren<Renderer>()) if (r.enabled) b.Encapsulate(r.bounds);
+            return b;
+        }
+
+        /// <summary>Into the player's hands: both of them, so only with nothing else carried.</summary>
         public bool PickUp()
         {
             if (!_r.Operational || place == Place.Carried) return false;
             if (_g.CarriedArm != null) { _g.hud.Toast("You are already carrying a Sorting Arm"); return false; }
+            if (_g.inventory.Count > 0) { _g.hud.Toast("The Sorting Arm takes both hands — put away the parts you carry first"); return false; }
             if (place == Place.Mounted && _busy) { _detach = true; _g.hud.Toast($"{_r.displayName}: finishing this move, then it's yours"); return true; }
             CancelCycle();
             Unmount();
@@ -264,7 +278,7 @@ namespace WorkshopWreckage
             Show(CarryScale, true);
             _m.Fold(1);
             Sfx.Play("servo", transform.position, -6);
-            _g.hud.Toast("Carrying the Sorting Arm — aim at a free overhead rail mount (green lamp) above a drawer cabinet or a shelf and click to mount it.  [Z] sets it down at the workbench.", true);
+            _g.hud.Toast("Carrying the Sorting Arm — click a free overhead rail mount (green lamp) above a drawer cabinet or a shelf to mount it; click anywhere else to set it down there.", true);
             return true;
         }
 
@@ -778,16 +792,20 @@ namespace WorkshopWreckage
         public Dictionary<string, object> ToDict() => new()
         {
             ["place"] = place.ToString(), ["socket"] = place == Place.Mounted && socket != null ? socket.id : "",
+            ["floor"] = new List<object> { (double)transform.position.x, (double)transform.position.y, (double)transform.position.z, (double)transform.eulerAngles.y },
         };
 
-        /// <summary>Loads the placement. A carried arm (or one whose mount is gone / taken) is
-        /// set down at the bench; a part held mid-cycle goes back to its staging pile. A mounted arm
-        /// comes back parked at its mount's parking end.</summary>
+        /// <summary>Loads the placement. An arm on the floor comes back where it stood; a carried arm
+        /// (or one whose mount is gone / taken, or an older save's "Bench") is set down at the bench; a
+        /// part held mid-cycle goes back to its staging pile. A mounted arm comes back parked at its
+        /// mount's parking end.</summary>
         public void Load(Dictionary<string, object> d)
         {
             foreach (var inst in _g.world.instances.Where(i => i.state == ItemState.Carried && i.owner == _r.Owner).ToList())
                 ReturnToPile(inst.id, _g.world.DefOf(inst.id).storageBox);
             ToBench();
+            if (d != null && Json.Str(d, "place") == "Floor" && d.TryGetValue("floor", out var fo) && Json.Arr(fo) is var f && f.Count == 4)
+                SetDown(new Vector3(Json.F(f[0]), Json.F(f[1]), Json.F(f[2])), Quaternion.Euler(0, Json.F(f[3]), 0));
             if (d == null || Json.Str(d, "place") != "Mounted") return;
             if (_g.sockets.TryGetValue(Json.Str(d, "socket"), out var s) && s.occupant == null)
             {
@@ -801,7 +819,7 @@ namespace WorkshopWreckage
         {
             switch (place)
             {
-                case Place.Bench: return $"{_r.displayName}: folded at the workbench — carry it to an overhead mount";
+                case Place.Floor: return $"{_r.displayName}: folded on the floor — pick it up and carry it to an overhead mount";
                 case Place.Carried: return $"{_r.displayName}: in your hands";
             }
             if (_r.paused) return $"{_r.displayName} on {socket.id}: paused";

@@ -29,6 +29,7 @@ namespace WorkshopWreckage
         public Game game;
         public bool enabledInput = true;
         public string targetType = "none";
+        public SortingArm targetArm;   // targetType "arm": one standing on the floor
         public int targetItem = -1;
         /// <summary>Robot part afterglow (Settings, PlayerPrefs "ww_part_afterglow", on by default): a robot
         /// part blinks once after the crosshair leaves it, so it is easier to spot again (playtest 2026-10-26).</summary>
@@ -130,12 +131,13 @@ namespace WorkshopWreckage
             // two hands on the Sorting Arm: no parts in or out until it is mounted or set down
             if (game.CarriedArm is SortingArm carriedArm)
             {
+                // one action: on a mount it is mounted, anywhere else it is set down there
                 if (lmbDown)
                 {
                     if (targetType == "socket") Primary();
-                    else Feedback?.Invoke("Both hands on the Sorting Arm — mount it on the overhead rail above a drawer cabinet or shelving unit, or [Z] set it down at the workbench", false);
+                    else SetArmDown(carriedArm, true);
                 }
-                if (kb.zKey.wasPressedThisFrame) { carriedArm.ToBench(); Feedback?.Invoke("Sorting Arm set down at the workbench", true); }
+                if (kb.zKey.wasPressedThisFrame) SetArmDown(carriedArm, false);
                 return;
             }
             _repeatT -= Time.deltaTime;
@@ -181,7 +183,16 @@ namespace WorkshopWreckage
                 && hit.Value.collider.GetComponent<StorageTarget>() is StorageTarget aimed && !aimed.station && aimed.unit != null && aimed.destId != null
                 && game.db.boxes.ContainsKey(aimed.destId) && Storage.Check(aimed.destId, Inv.HeldId()) == StorageSystem.Result.Ok)
                 pid = -1;
-            if (pid >= 0) { targetType = "item"; targetItem = pid; }
+            // a Sorting Arm standing on the floor, in front of whatever lies behind it
+            targetArm = null;
+            if (game.CarriedArm == null)
+            {
+                float best = Mathf.Min(envT, pid >= 0 ? pdist : Reach);
+                foreach (var r in game.robots)
+                    if (r.arm is SortingArm a && a.place == SortingArm.Place.Floor && r.Operational && a.FloorBounds().IntersectRay(new Ray(o, dir), out float d) && d < best) { best = d; targetArm = a; }
+            }
+            if (targetArm != null) targetType = "arm";
+            else if (pid >= 0) { targetType = "item"; targetItem = pid; }
             else if (hit.HasValue)
             {
                 var st = hit.Value.collider.GetComponent<StorageTarget>();
@@ -289,8 +300,15 @@ namespace WorkshopWreckage
         public TargetInfo Describe()
         {
             int held = Inv.HeldId();
+            if (game.CarriedArm != null && targetType != "socket")
+                return new TargetInfo { title = "Carrying the Sorting Arm", sub = "Both hands — nothing else can be picked up",
+                    hint = "[LMB] Set it down here  ·  aim at an overhead rail mount (green lamp) to mount it", tone = 0 };
             switch (targetType)
             {
+                case "arm":
+                    return Inv.Count > 0
+                        ? new TargetInfo { title = "Sorting Arm", sub = targetArm.Describe(), hint = "It takes both hands — put away the parts you carry first", tone = -1 }
+                        : new TargetInfo { title = "Sorting Arm", sub = targetArm.Describe(), hint = "[LMB] Pick it up (both hands)", tone = 1 };
                 case "item":
                 {
                     var def = World.DefOf(targetItem);
@@ -359,6 +377,7 @@ namespace WorkshopWreckage
             switch (targetType)
             {
                 case "item": Pickup(targetItem, true); break;
+                case "arm": targetArm?.PickUp(); break;
                 case "dest":
                     int held = Inv.HeldId();
                     if (held >= 0) Deposit(targetDest, held);
@@ -561,6 +580,25 @@ namespace WorkshopWreckage
             int held = Inv.HeldId();
             if (o.Remove(held)) o.Insert(0, held);
             return o;
+        }
+
+        /// <summary>Sets the carried Sorting Arm down folded on the floor: where the crosshair meets
+        /// the floor (aimed, within reach), else just in front of the player; never on the player's
+        /// feet, inside furniture or under a unit.</summary>
+        public void SetArmDown(SortingArm arm, bool aimed)
+        {
+            var (o, dir) = Ray();
+            var me = game.player.transform.position;
+            var flat = Vector3.ProjectOnPlane(dir, Vector3.up);
+            flat = flat.sqrMagnitude > 1e-4f ? flat.normalized : game.player.transform.forward;
+            var want = me + flat * 0.8f;
+            if (aimed && dir.y < -0.05f && -o.y / dir.y <= Reach + 0.5f) want = o + dir * (-o.y / dir.y);   // the floor plane
+            var away = Vector3.ProjectOnPlane(want - me, Vector3.up);
+            if (away.magnitude < 0.6f) want = me + (away.sqrMagnitude > 1e-4f ? away.normalized : flat) * 0.6f;
+            var p = game.SafeDropPoint(new Vector3(want.x, 0, want.z), me);
+            arm.SetDown(new Vector3(p.x, 0, p.z), Quaternion.LookRotation(-flat, Vector3.up));
+            Sfx.Play("servo", p, -6);
+            Feedback?.Invoke("Sorting Arm set down — click it to pick it up again", true);
         }
 
         public void DropHeld()

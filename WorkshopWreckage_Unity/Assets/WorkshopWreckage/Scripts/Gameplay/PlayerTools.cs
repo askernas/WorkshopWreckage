@@ -146,7 +146,7 @@ namespace WorkshopWreckage
         /// has been taken — settling parts are busy and would otherwise be skipped.</summary>
         bool Take(int id, float flyTime, bool settleNow = true)
         {
-            if (!Takeable(id) || Inv.IsFull) return false;
+            if (!Takeable(id) || Inv.IsFull || g.CarriedArm != null) return false;   // both hands on the Sorting Arm
             var inst = g.world.instances[id];
             var from = inst.transform;
             var def = g.world.DefOf(id);
