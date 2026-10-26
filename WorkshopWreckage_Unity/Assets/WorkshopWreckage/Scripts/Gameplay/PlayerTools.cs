@@ -44,7 +44,7 @@ namespace WorkshopWreckage
             Destroy(c);
         }
 
-        public void ResetState() { _scanned.Clear(); _scanUntil = 0; _ready.Clear(); }
+        public void ResetState() { _scanned.Clear(); _scanUntil = 0; _ready.Clear(); senseId = -1; }
 
         // ---------------------------------------------------------------- usable skills
 
@@ -52,6 +52,7 @@ namespace WorkshopWreckage
         public static readonly (string id, string name, Key letter)[] Usable =
         {
             ("magnetic_glove", "Magnetic Glove", Key.B), ("scanner", "Parts Scanner", Key.V), ("supermagnet", "Supermagnet", Key.X), ("area_sweep", "Area Sweep", Key.N),
+            ("part_sense", "Part Sense", Key.None),
         };
 
         /// <summary>The skill's level: 0 = not learned.</summary>
@@ -61,6 +62,7 @@ namespace WorkshopWreckage
             "scanner" => P.Has("scan_radius_m") ? 1 : 0,
             "supermagnet" => P.Has("supermagnet") ? 1 : 0,
             "area_sweep" => P.Has("area_collect_radius_m") ? 1 : 0,
+            "part_sense" => P.Has("part_sense") ? 1 : 0,
             _ => 0,
         };
 
@@ -94,6 +96,7 @@ namespace WorkshopWreckage
             "scanner" => Scan(),
             "supermagnet" => Supermagnet(),
             "area_sweep" => AreaSweep(),
+            "part_sense" => PartSense(),
             _ => 0,
         };
 
@@ -189,11 +192,55 @@ namespace WorkshopWreckage
             {
                 int slot = Slot(id);
                 bool digit = slot >= 1 && slot <= 9 && kb[(Key)((int)Key.Digit1 + slot - 1)].wasPressedThisFrame;
-                if (digit || kb[letter].wasPressedThisFrame) Use(id);
+                if (digit || (letter != Key.None && kb[letter].wasPressedThisFrame)) Use(id);
             }
         }
 
-        void LateUpdate() => DrawScan();
+        void LateUpdate() { DrawScan(); DrawSense(); }
+
+        // ---------------------------------------------------------------- robot part sense
+
+        /// <summary>The robot part glowing faintly, until when (playtest 2026-10-26).</summary>
+        public int senseId = -1;
+        float _senseUntil;
+        Material _senseMat;
+
+        /// <summary>The nearest robot part lying in the workshop glows faintly for duration_s.</summary>
+        public int PartSense()
+        {
+            if (!P.Has("part_sense")) { g.hud.OnFeedback("You need the Robot Part Sense skill (K → Skills)", false); return 0; }
+            if (!Ready("part_sense", "Robot Part Sense")) return 0;
+            var me = g.player.transform.position;
+            int best = -1; float bd = float.MaxValue;
+            foreach (var inst in g.world.instances)
+            {
+                if (inst.state != ItemState.InWorld || !g.world.DefOf(inst.id).IsRobotPart || g.robotReserved.Contains(inst.id)) continue;
+                float d = (inst.Position - me).sqrMagnitude;
+                if (d < bd) { bd = d; best = inst.id; }
+            }
+            if (best < 0) { g.hud.OnFeedback("Robot Part Sense: no robot parts left lying around", false); return 0; }
+            senseId = best;
+            _senseUntil = Time.time + Tuned("part_sense", "duration_s", 1, 5);
+            Recharge("part_sense");
+            Sfx.Play("discover", null, -10, 0);
+            g.hud.OnFeedback($"Robot Part Sense: something glows {Mathf.Sqrt(bd):0} m away", true);
+            g.telemetry?.SkillUsed("part_sense");
+            return 1;
+        }
+
+        void DrawSense()
+        {
+            if (senseId < 0 || g.world == null) return;
+            var inst = g.world.instances[senseId];
+            if (Time.time > _senseUntil || inst.state != ItemState.InWorld) { senseId = -1; return; }
+            if (_senseMat == null) { _senseMat = new Material(EnvMaterials.Outline); _senseMat.SetColor("_Color", new Color(0.35f, 0.85f, 1f)); }
+            // faint: the soft glow only (no bright edge), breathing slowly
+            _senseMat.SetFloat("_Width", 0);
+            _senseMat.SetFloat("_Glow", 5f + 2f * Mathf.Sin(Time.time * 3f));
+            var mesh = g.renderer.WorldMeshFor(senseId);
+            var rp = new RenderParams(_senseMat) { shadowCastingMode = ShadowCastingMode.Off };
+            for (int s = 0; s < mesh.subMeshCount; s++) Graphics.RenderMesh(rp, mesh, s, inst.transform);
+        }
 
         // ---------------------------------------------------------------- handful
 

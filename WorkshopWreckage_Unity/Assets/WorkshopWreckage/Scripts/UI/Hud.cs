@@ -712,7 +712,10 @@ namespace WorkshopWreckage
                     Panel(r, new Color(0.1f, 0.07f, 0.05f, 0.8f), BrassDim);
                     var fill = Rect("cool", r, Vector2.zero, new Vector2(0, 1), Vector2.zero, Vector2.zero).gameObject.AddComponent<Image>();
                     fill.color = new Color(0.55f, 0.35f, 0.12f, 0.55f);
-                    _skillSlots.Add((u.id, Fill(r, "t", 15, Cream, TextAnchor.MiddleCenter), fill));
+                    var label = Fill(r, "t", 15, Cream, TextAnchor.MiddleCenter);
+                    // five or more slots share the bar: a long name shrinks instead of wrapping its countdown
+                    label.horizontalOverflow = HorizontalWrapMode.Wrap; label.resizeTextForBestFit = true; label.resizeTextMinSize = 10; label.resizeTextMaxSize = 15;
+                    _skillSlots.Add((u.id, label, fill));
                 }
             }
             foreach (var (id, text, fill) in _skillSlots)

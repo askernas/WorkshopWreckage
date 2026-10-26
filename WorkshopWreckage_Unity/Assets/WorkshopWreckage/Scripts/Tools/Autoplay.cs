@@ -1331,7 +1331,14 @@ namespace WorkshopWreckage
             Check("Unibot and Caterpillarbot get Arm Reach (telescopic arms) within their limits", uni.ReachHeight > uniReach0 && uni.ReachHeight <= uni.LimitOf("reach_height") + 1e-3f && catR.ReachHeight <= catR.LimitOf("reach_height") + 1e-3f && catR.ReachHeight > catR.BaseStat("reach_height"),
                   $"Unibot {uniReach0:0.00} -> {uni.ReachHeight:0.00} m, Caterpillarbot {catR.BaseStat("reach_height"):0.00} -> {catR.ReachHeight:0.00} m");
             g.BuyRobotUpgrade("uni_capacity"); g.BuyRobotUpgrade("uni_capacity");
-            Check("Unibot carries more after upgrades but still never stores", uni.Capacity == 3 && !uni.CanDirectStore && !uni.ReachableDest(g.db.boxes.Keys.First()), $"capacity {uni.Capacity}");
+            // playtest 2026-10-26: with full Arm Reach both reach the D drawer row and the second shelf level (tossed in)
+            string dRow = g.db.boxes.Keys.First(b => Json.Str(g.db.boxes[b], "kind") == "drawer" && b.EndsWith("-D1"));
+            string shelf1 = g.db.boxes.Keys.First(b => Json.Str(g.db.boxes[b], "kind") != "drawer" && Json.Str(g.db.boxes[b], "kind") != "floor_pallet" && Mathf.Abs((float)Json.Num(g.db.boxes[b], "elevation_m") - 0.62f) < 0.01f);
+            string cRow = dRow.Replace("-D1", "-C1");
+            Check("Unibot carries more after upgrades; with Arm Reach it stores itself, up to the D drawers and the second shelf level",
+                  uni.Capacity == 3 && uni.CanDirectStore && uni.ReachableDest(dRow) && uni.ReachableDest(shelf1) && !uni.ReachableDest(cRow), $"capacity {uni.Capacity}, reach {uni.ReachHeight:0.00} m");
+            Check("Retrobot with full Arm Reach stores into the D drawers and the second shelf level, not the C drawers",
+                  retro.ReachableDest(dRow) && retro.ReachableDest(shelf1) && !retro.ReachableDest(cRow), $"reach {retro.ReachHeight:0.00} m: {dRow} {retro.ReachableDest(dRow)}, {shelf1} {retro.ReachableDest(shelf1)}, {cRow} {retro.ReachableDest(cRow)}");
             g.BuyRobotUpgrade("retro_speed"); g.BuyRobotUpgrade("retro_speed"); g.BuyRobotUpgrade("retro_speed");
             Check("Retrobot never becomes faster than Unibot", retro.WalkSpeed < uni.BaseStat("walk_speed"), $"{retro.WalkSpeed:0.00} vs {uni.BaseStat("walk_speed"):0.00} m/s");
             g.BuyRobotUpgrade("hover_speed");
@@ -1479,6 +1486,27 @@ namespace WorkshopWreckage
             old["unlocked"] = ((List<object>)old["unlocked"]).Concat(new object[] { "filter_material", "filter_category" }).ToList();
             int pts = pr.skillPoints;
             pr.Load(old);
+            // Robot Part Sense (playtest 2026-10-26): the nearest robot part glows faintly for 5 s, then 90 s recharge
+            {
+                g.tools.ResetState();
+                int sensed = g.tools.PartSense();
+                int sid = g.tools.senseId;
+                var pme = g.player.transform.position;
+                var nearest = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsRobotPart && !g.robotReserved.Contains(i.id))
+                    .OrderBy(i => (i.Position - pme).sqrMagnitude).FirstOrDefault();
+                float cdS = g.tools.CooldownLeft("part_sense");
+                if (sid >= 0)
+                {
+                    var at = g.world.instances[sid].Position;
+                    LookFrom(at + new Vector3(0.7f, 0.9f, 0.6f), at + Vector3.Cross(Vector3.up, at - (at + new Vector3(0.7f, 0.9f, 0.6f))).normalized * 0.3f);
+                    yield return g.Capture(Path.Combine(outDir, "38_part_sense.png"), 2);
+                }
+                float t0 = Time.time;
+                while (Time.time - t0 < 5.3f) yield return null;
+                Check("Robot Part Sense (key 5): the nearest robot part glows for 5 s, then the skill recharges 90 s (screenshot 38)",
+                      sensed == 1 && nearest != null && sid == nearest.id && g.tools.senseId < 0 && Mathf.Abs(cdS - 90) < 0.5f && g.tools.Slot("part_sense") == 5,
+                      $"glowing {(sid >= 0 ? g.world.DefOf(sid).displayName : "none")} (nearest {nearest?.id}), after 5 s {g.tools.senseId}, cooldown {cdS:0.0} s");
+            }
             Check("the glove has ten levels (I-X, level X: 10 parts, 30 s); a save with the retired filter skills refunds their points",
                   g.tools.MagnetLevel == 10 && PlayerTools.Tuned("magnetic_glove", "pull_items", 10, 0) == 10 && g.tools.CooldownOf("magnetic_glove") == 30 && pr.skillPoints == pts + 2 && !pr.unlocked.Contains("filter_material"),
                   $"level {g.tools.MagnetLevel}, pulls {PlayerTools.Tuned("magnetic_glove", "pull_items", 10, 0)}, cooldown {g.tools.CooldownOf("magnetic_glove")} s; points {pts} -> {pr.skillPoints}");
@@ -1548,9 +1576,16 @@ namespace WorkshopWreckage
             yield return g.Capture(Path.Combine(outDir, "22_sorting_tray.png"), 3);
             Time.timeScale = 4;
             float t2 = Time.realtimeSinceStartup;
-            while (Time.realtimeSinceStartup - t2 < 60 && g.TrayCount > inTray - 3) yield return null;
+            int atTray = 0;   // walking robots fetching from the tray at once (playtest 2026-10-26: one at a time)
+            while (Time.realtimeSinceStartup - t2 < 60 && g.TrayCount > inTray - 3)
+            {
+                atTray = Mathf.Max(atTray, g.robots.Count(r => r.Active && r.locomotion != "hover" && r.targetId >= 0
+                                                               && g.world.instances[r.targetId].state == ItemState.InWorld && g.InTray(g.world.instances[r.targetId].Position)));
+                yield return null;
+            }
             Time.timeScale = 1;
-            Check("robots empty the sorting tray first", put > 0 && inTray >= put && g.TrayCount <= inTray - 3, $"{put} put in, {inTray} in tray, {g.TrayCount} left");
+            Check("robots empty the sorting tray first, one walking robot at a time", put > 0 && inTray >= put && g.TrayCount <= inTray - 3 && atTray <= 1,
+                  $"{put} put in, {inTray} in tray, {g.TrayCount} left; at most {atTray} walking robot(s) at the tray");
         }
 
         /// <summary>Puts a part into the player's hands, wherever it lies (test setup).</summary>
@@ -1614,6 +1649,11 @@ namespace WorkshopWreckage
             var pr = g.progression;
             var retro = wb.P("retrobot");
             var uniP = wb.P("unibot");
+            // playtest 2026-10-26: every robot's blueprint is open from level 1 (they are hard enough to
+            // assemble); the lock itself is still exercised here with test levels 2 and 5
+            Check("every robot blueprint unlocks at level 1 (unlocks.json)", wb.projects.All(p => p.level == Unlocks.Robot(p.id, -1) && p.level == 1),
+                  string.Join(", ", wb.projects.Select(p => $"{p.name} lv {p.level}")));
+            retro.level = 2; uniP.level = 5;
             var parts = wb.PartIds(retro);
             Check("Retrobot has 5 assembly parts", parts.Count == 5, $"{parts.Count} parts");
             Check("Retrobot inactive before assembly", !rb.Active && !rb.Operational, rb.Describe());
@@ -1621,8 +1661,7 @@ namespace WorkshopWreckage
             foreach (var id in parts.Concat(wb.PartIds(uniP))) g.progress.Discover(g.world.instances[id].defId);
             pr.level = 1; pr.xp = 0; pr.completedDestinations.Clear();
             wb.CheckBlueprints(false);
-            Check("blueprints lock robots behind the player levels in unlocks.json", !wb.Unlocked(retro) && wb.projects.All(p => p.level == Unlocks.Robot(p.id, -1)),
-                  string.Join(", ", wb.projects.Select(p => $"{p.name} lv {p.level}")));
+            Check("a blueprint above the player's level stays locked", !wb.Unlocked(retro) && !wb.Unlocked(uniP), wb.LockReason(retro));
 
             // 1-2. a part found below its blueprint level can be picked up and carried
             int uniPart = wb.PartIds(uniP)[0];
@@ -1784,6 +1823,7 @@ namespace WorkshopWreckage
                 yield return g.Capture(Path.Combine(outDir, name + ".png"), 1);
                 yield return new WaitForSeconds(1.2f);
             }
+            foreach (var p in wb.projects) p.level = Unlocks.Robot(p.id, p.level);   // back to unlocks.json
         }
 
         /// <summary>Sorting Arm vertical slice (docs/ROBOT_WORKSHOP_ASSET_AUDIT.md §5): one overhead

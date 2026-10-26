@@ -282,6 +282,8 @@ namespace WorkshopWreckage
             _walk = S("walk_speed", 0.7);
             _turn = S("turn_speed", Json.Num(c, "turn_speed_deg", 260));
             _maxPickH = S("reach_height", 0.35);
+            // Unibot (store_with_reach): a courier until it has Arm Reach, then it stores what it can reach (playtest 2026-10-26)
+            _canStore = Json.Bool(c, "can_direct_store", true) || Json.Bool(c, "store_with_reach") && _maxPickH > BaseReach + 1e-3f;
             _climbH = S("climb_height", 0);
             _climbSpeed = S("climb_speed", 0.35);
             _maxItem = S("max_item_size", 0.33);
@@ -1367,10 +1369,17 @@ namespace WorkshopWreckage
         public bool CanPick(int id) { int a = assignedDef; assignedDef = -1; bool ok = Pickable(g.world.instances[id]); assignedDef = a; return ok; }
         public string PickHint(int id) => _unreachable.Contains(id) ? "unreachable" : _deferredUntil.ContainsKey(id) ? "deferred" : g.robotReserved.Contains(id) ? "reserved" : CanPick(id) ? "pickable" : "not pickable";
 
+        /// <summary>Another walking robot is already on its way to (or taking) a part in the sorting tray.</summary>
+        bool TrayTaken() => g.robots.Any(r => r != this && r.Active && !r.Flies && r.targetId >= 0
+                                              && g.world.instances[r.targetId].state == ItemState.InWorld && g.InTray(g.world.instances[r.targetId].Position));
+
         bool Pickable(ItemInstance i)
         {
             if (i.state != ItemState.InWorld || _unreachable.Contains(i.id) || g.robotReserved.Contains(i.id)) return false;
             bool tray = g.InTray(i.Position);   // always within reach (TrayGoal), whatever the work zone or assignment
+            // one walking robot at the tray at a time (playtest 2026-10-26: they blocked each other round
+            // it): while another fetches from it, this one moves on; a part too big for it never draws it there
+            if (tray && !Flies && TrayTaken()) return false;
             if (!tray && i.Position.y > ReachHeight) return false;
             if (_deferredUntil.Count > 0 && _deferredUntil.TryGetValue(i.id, out var deferredUntil) && _time < deferredUntil.until) return false;
             if (!tray && zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
@@ -1389,7 +1398,12 @@ namespace WorkshopWreckage
 
         /// <summary>Can it put a part into this destination itself? Never for a courier
         /// (Unibot); otherwise if the destination is within reach (climbing for a climber).</summary>
-        public bool ReachableDest(string box) => _canStore && g.db.boxes.TryGetValue(box, out var d) && Json.Num(d, "elevation_m") <= ReachHeight && PhysicallyStorable(box);
+        public bool ReachableDest(string box) => _canStore && g.db.boxes.TryGetValue(box, out var d) && Json.Num(d, "elevation_m") <= ReachHeight && (PhysicallyStorable(box) || Tosses(box));
+
+        /// <summary>Telescopic arms (Arm Reach bought) on a walker: a drawer or shelf container within the reach
+        /// rule but above where the claws can place it is still stored: the drawer is pulled out and the part
+        /// tossed in the last bit (playtest 2026-10-26: the D row and the second shelf level).</summary>
+        bool Tosses(string box) => !Flies && !_canClimb && _maxPickH > BaseReach + 1e-3f && Json.Str(g.db.boxes[box], "kind") != "floor_pallet";
 
         readonly Dictionary<string, bool> _physical = new();
         /// <summary>Models with an aim pose (Retrobot): can the claws actually put a part there from the
@@ -1751,11 +1765,13 @@ namespace WorkshopWreckage
                 _clawClose = 0; _clawOpen = 1;
                 minOpenAtRelease = Mathf.Min(minOpenAtRelease, _clawOpen); releases++;
             }
+            bool toss = !Flies && !_climbing && !PhysicallyStorable(_destBox);
             foreach (var itemId in here)
             {
                 var res = g.storage.Deposit(_destBox, itemId, Owner);
                 if (Flies) Debug.Log($"[robotflight] {id} stores {itemId} into {_destBox}: {res}");
                 if (res != StorageSystem.Result.Ok) continue;
+                if (toss) yield return TossIn(itemId);
                 HideCarried(itemId);
                 carried.Remove(itemId);
                 delivered++;
@@ -1786,6 +1802,30 @@ namespace WorkshopWreckage
             TripCheck();
             MaybeGesture();
         }
+
+        /// <summary>The part leaves the claws (or the load) in a short arc up into the open drawer / box.</summary>
+        IEnumerator TossIn(int itemId)
+        {
+            if (!_carryModels.TryGetValue(itemId, out var go)) yield break;
+            _carryModels.Remove(itemId);
+            if (_clawItem == itemId) _clawItem = -1;
+            go.transform.SetParent(null, true);
+            Vector3 from = go.transform.position, to = _destPoint + Vector3.up * 0.03f;
+            float arc = Mathf.Max(0.08f, to.y - from.y + 0.1f), flight = 0.32f;
+            Sfx.Play("servo", from, -14);
+            for (float t = 0; t < flight; t += Time.deltaTime)
+            {
+                float u = t / flight;
+                go.transform.position = Vector3.Lerp(from, to, u) + Vector3.up * (arc * 4 * u * (1 - u));
+                go.transform.Rotate(Vector3.right, 540 * Time.deltaTime, Space.Self);
+                yield return null;
+            }
+            Destroy(go);
+            tosses++;
+            Debug.Log($"[robotplan] {id} tosses {g.world.DefOf(itemId).displayName} into {_destBox} ({_destPoint.y - transform.position.y:0.00} m up)");
+        }
+        /// <summary>QA: parts tossed into a destination too high for the claws.</summary>
+        public int tosses;
 
         /// <summary>A trip ends when the robot has put its whole load down (stored and/or staged).</summary>
         void TripCheck()
