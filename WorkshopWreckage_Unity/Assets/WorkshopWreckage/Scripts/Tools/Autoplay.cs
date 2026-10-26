@@ -598,7 +598,7 @@ namespace WorkshopWreckage
             int need1 = wb.Required(uni);
             bool intact2 = PartsIntact(out var pi2);
             Check("a found head in the player's hands replaces a robot's head (the old one goes to the bench); its own robot, unbuilt, then needs no head",
-                  fit2 && headOn && need1 == need0 - 3 && m.Audit().Count == 0 && intact2,
+                  fit2 && headOn && need1 == need0 - 1 && m.Audit().Count == 0 && intact2,
                   $"fitted {fit2}; head {m.At("retrobot", ModuleSlot.Head)?.id}, Retrobot's own at {m.Get("head.retrobot").location}; Unibot needs {need0} -> {need1}; {pi2}");
             LookAtRobot(0.7f, 0.45f, 0.15f);
             yield return g.Capture(Path.Combine(outDir, "35_loose_parts_fitted.png"), 3);

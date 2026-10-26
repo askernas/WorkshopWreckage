@@ -156,6 +156,12 @@ namespace WorkshopWreckage
             // neck: a dark collar and a bright steel ring the head turns on
             b.Lathe(new Vector3(0, TorsoY + TorsoH / 2, 0), Disc(0.05f, 0.01f, 0.002f), M(P, Gunmetal), null, 20);
             b.Lathe(new Vector3(0, TorsoY + TorsoH / 2 + 0.01f, 0), Disc(0.038f, 0.012f, 0.002f), M(P, BrightSteel), null, 20);
+            // the chest lamp beside the grille, the signal mast up the back
+            b.Lathe(new Vector3(0.1f, 0.58f, front), Disc(0.02f, 0.012f, 0.003f), M("chest lamp", Gunmetal), FwdRot, 16);
+            b.Lathe(new Vector3(0.1f, 0.58f, front - 0.012f), Dome(0.015f, 0.008f), M("chest lamp", Glow), FwdRot, 14);
+            b.Lathe(new Vector3(-0.09f, 0.684f, 0.075f), Disc(0.018f, 0.012f, 0.003f), M("signal mast", Gunmetal), null, 12);
+            b.Lathe(new Vector3(-0.09f, 0.696f, 0.075f), Disc(0.005f, 0.2f, 0.001f), M("signal mast", Gunmetal), null, 8);
+            b.Lathe(new Vector3(-0.09f, 0.894f, 0.075f), Dome(0.011f, 0.011f), M("signal mast", ToyRed), null, 10);
             Done(b, _leanGeo);
         }
 

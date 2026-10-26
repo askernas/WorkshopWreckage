@@ -169,7 +169,25 @@ namespace WorkshopWreckage
                 FramedGrille(b, "battery pack", new Vector3(0, 0.2f, 0.516f), 0.12f, 0.06f, 5, false, 1);
                 b.Lathe(new Vector3(-0.08f, 0.26f, 0.38f), Disc(0.045f, 0.16f, 0.008f), M("drive motor", Gunmetal), RightRot, 16);
                 for (int k = 0; k < 3; k++) b.Lathe(new Vector3(0, 0.488f + k * 0.006f, -0.38f), Disc(0.07f - k * 0.006f, 0.006f, 0.002f), M("chassis", Gunmetal), null, 16);
+                // the searchlight in the nose under the front block, above the grille
+                b.ChamferBox(new Vector3(0, 0.285f, -0.503f), new Vector3(0.1f, 0.05f, 0.012f), 0.004f, M("searchlight", Gunmetal));
+                b.Lathe(new Vector3(0, 0.285f, -0.508f), Ring(0.024f, 0.017f, 0.012f), M("searchlight", Brass), FwdRot, 18);
+                b.Lathe(new Vector3(0, 0.285f, -0.512f), Dome(0.018f, 0.008f), M("searchlight", Glow), FwdRot, 16);
+                // the radio mast and the hazard beacon on the rear corners of the deck, beside the rear cargo box
+                b.Lathe(new Vector3(-0.3f, 0.334f, 0.44f), Disc(0.026f, 0.016f, 0.004f), M("radio mast", Gunmetal), null, 16);
+                b.Lathe(new Vector3(-0.3f, 0.35f, 0.44f), Disc(0.0055f, 0.24f, 0.001f), M("radio mast", Gunmetal), null, 8);
+                b.Lathe(new Vector3(-0.3f, 0.585f, 0.44f), Dome(0.012f, 0.012f), M("radio mast", ToyRed), null, 10);
+                b.Lathe(new Vector3(0.3f, 0.334f, 0.44f), Disc(0.032f, 0.022f, 0.005f), M("hazard beacon", Gunmetal), null, 16);
+                // the track tensioners: a bolted screw block on each skirt, ahead of the rear sprocket
+                foreach (var s in new[] { -1f, 1f })
+                {
+                    string tp = s < 0 ? "left track tensioner" : "right track tensioner";
+                    b.RoundedBox(new Vector3(s * (TrackX + TrackW / 2 + 0.03f), 0.18f, 0.335f), new Vector3(0.028f, 0.055f, 0.04f), 0.006f, M(tp, Gunmetal), 2);
+                    Bolt(b, new Vector3(s * (TrackX + TrackW / 2 + 0.045f), 0.18f, 0.335f), X(s), 0.009f, M(tp, Brass));
+                }
                 Done(b, _chassis);
+                if (Has("hazard beacon"))
+                    beacons.Add(Separate(_chassis, "G_hazard", lb => lb.Lathe(new Vector3(0.3f, 0.356f, 0.44f), Dome(0.026f, 0.03f, 6), BeaconOffMat, null, 16)));
             }
             for (int i = 0; i < 3; i++)
             {
@@ -203,7 +221,7 @@ namespace WorkshopWreckage
             BuildHeadModule(() => FamilyHead(head, "head", new HeadSpec
             {
                 w = 0.42f, h = 0.28f, d = 0.34f, eyes = 1, eyeScale = 1.55f, eyeY = 0.53f, earY = 0.5f, paint = ToyYellow,
-                beacon = true, antennas = true, mouth = true, eyePart = "optical eye", antennaPart = "antenna pair", beaconPart = "siren light",
+                beacon = true, antennas = true, mouth = true, eyePart = "optical eye", antennaPart = "antenna pair",
             }));
         }
 

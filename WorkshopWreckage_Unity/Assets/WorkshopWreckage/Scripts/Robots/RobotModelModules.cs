@@ -105,7 +105,7 @@ namespace WorkshopWreckage
                     FamilyHead(pivot, "head", new HeadSpec
                     {
                         w = 0.42f, h = 0.28f, d = 0.34f, eyes = 1, eyeScale = 1.55f, eyeY = 0.53f, earY = 0.5f, paint = ToyYellow,
-                        beacon = true, antennas = true, mouth = true, eyePart = "optical eye", antennaPart = "antenna pair", beaconPart = "siren light",
+                        beacon = true, antennas = true, mouth = true, eyePart = "optical eye", antennaPart = "antenna pair",
                     });
                     break;
                 default:

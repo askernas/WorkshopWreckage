@@ -168,7 +168,17 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Is the part there? Inside a module build (AsModule) everything of a fitted module is, nothing of an empty slot.</summary>
-        protected bool Has(string part) => _modFinish != null ? !_modEmpty : installed.Contains(part);
+        protected bool Has(string part) => _modFinish != null ? !_modEmpty : installed.Contains(part) || FittingOf.TryGetValue(part, out var o) && o.Any(installed.Contains);
+
+        /// <summary>A head or an arm is one complete item (design-v1): its eyes, antennas, ear caps and gripper
+        /// are drawn under their old keys (so every skin and paint rule stays as it was) but come with it.</summary>
+        static readonly Dictionary<string, string[]> FittingOf = new()
+        {
+            ["optical eye"] = new[] { "head", "head shell" }, ["antenna pair"] = new[] { "head", "head shell" }, ["eye pair"] = new[] { "head" },
+            ["left eye lens"] = new[] { "head" }, ["right eye lens"] = new[] { "head" }, ["left antenna"] = new[] { "head" }, ["right antenna"] = new[] { "head" },
+            ["left ear cap"] = new[] { "head" }, ["right ear cap"] = new[] { "head" },
+            ["left claw"] = new[] { "left arm" }, ["right claw"] = new[] { "right arm" },
+        };
 
         readonly List<(Transform t, float side)> _elbows = new();
 

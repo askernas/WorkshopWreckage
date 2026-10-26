@@ -33,8 +33,7 @@ namespace WorkshopWreckage
     ///
     /// Legacy mapping (saves and the build pipeline from before modules existed): the robot-part items in
     /// robot_parts.json stay what they were, the history of how a chassis was first assembled. When a chassis
-    /// first activates its own modules leave the "factory" and are mounted on it (Spiderbot's single
-    /// "gripping jaws" item stands for both of its arm modules; the crafted Hoverbots #2 and #3 have no part
+    /// first activates its own modules leave the "factory" and are mounted on it (the crafted Hoverbots #2 and #3 have no part
     /// items). An old save maps every operational robot to its own factory modules.</summary>
     public class RobotModules
     {

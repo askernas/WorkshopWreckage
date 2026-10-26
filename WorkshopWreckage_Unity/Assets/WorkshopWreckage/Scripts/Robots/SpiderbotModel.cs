@@ -14,8 +14,8 @@ namespace WorkshopWreckage
     /// IK from the hips; the stride and the turning arc are matched to the ground speed and turn rate),
     /// the swinging tripod lifting and reaching ahead; the body crouches on planted legs to pick up.
     /// Manipulation and attention come from the family layer (Layer A).
-    /// Parts: head, eye pair, antenna pair, body shell, belly dome, front/middle/rear
-    /// left/right leg, gripping jaws, servo controller, battery pack.</summary>
+    /// Parts: head (with its eye pair and antennas), body shell, belly dome, front/middle/rear
+    /// left/right leg, left/right arm (the jaws), servo controller, battery pack, spinneret.</summary>
     public class SpiderbotModel : RobotModel
     {
         static readonly (string part, float x, float z, int group)[] Legs =
@@ -53,7 +53,8 @@ namespace WorkshopWreckage
             carry = Pivot("Carry", _shell, new Vector3(0, 0.46f, -0.15f));   // on its back, behind the head
             for (int i = 0; i < 6; i++) Mount(_hip[i], Legs[i].part, new Vector3(Legs[i].x, 0, 0), 0.035f);
             Mount(head, "head", Vector3.up, 0.045f);
-            Mount(_jawL, "gripping jaws", new Vector3(0, 0, -1), 0.025f);
+            Mount(_jawL, "left arm", new Vector3(0, 0, -1), 0.025f);
+            Mount(_jawR, "right arm", new Vector3(0, 0, -1), 0.025f);
         }
 
         protected override Vector3? ClampPoint => new Vector3(0, 0.31f, Has("body shell") ? 0.21f : 0.1f);
@@ -105,6 +106,9 @@ namespace WorkshopWreckage
                 b.RoundedBox(new Vector3(0, 0.33f, 0.18f), new Vector3(0.14f, 0.08f, 0.03f), 0.01f, M("battery pack", Gunmetal), 2);
                 foreach (var x in new[] { -0.04f, 0f, 0.04f }) b.RoundedBox(new Vector3(x, 0.33f, 0.197f), new Vector3(0.022f, 0.06f, 0.006f), 0.003f, M("battery pack", Brass), 1);
                 b.RoundedBox(new Vector3(0.13f, 0.35f, 0.178f), new Vector3(0.05f, 0.04f, 0.022f), 0.008f, M("servo controller", ToyRed), 2);
+                // the spinneret under the battery pack: a brass nozzle out of the rear
+                b.Lathe(new Vector3(0, 0.262f, 0.17f), Disc(0.03f, 0.02f, 0.005f), M("spinneret", Gunmetal), BackRot, 16);
+                b.Lathe(new Vector3(0, 0.262f, 0.19f), Dome(0.018f, 0.016f), M("spinneret", Brass), BackRot, 12);
                 // hip sockets
                 foreach (var (_, x, z, _) in Legs) b.Lathe(new Vector3(x * 0.17f, HipY, z), Disc(0.045f, 0.03f, 0.006f), M("body shell", Gunmetal), SideRot(x), 18);
                 Done(b, _shell);
@@ -152,7 +156,7 @@ namespace WorkshopWreckage
             }
             // the gripping jaws: two short family arms under the front, the grippers meet below the face
             foreach (var (jaw, sd) in new[] { (_jawL, -1f), (_jawR, 1f) })
-                BuildArmModule(jaw, sd, "gripping jaws", new ArmSpec { paint = ToyGreen, paintDeep = ToyGreenDeep, red = ToyRed, clawScale = 1.15f, twist = 20f });
+                BuildArmModule(jaw, sd, sd < 0 ? "left arm" : "right arm", new ArmSpec { paint = ToyGreen, paintDeep = ToyGreenDeep, red = ToyRed, clawScale = 1.15f, twist = 20f });
             BuildHeadModule(() => FamilyHead(head, "head", new HeadSpec
             {
                 w = 0.34f, h = 0.27f, d = 0.28f, eyes = 2, eyeX = 0.08f, eyeScale = 0.95f, eyeY = 0.52f, earY = 0.5f, paint = ToyGreen,

@@ -29,7 +29,7 @@
 			"limits": {"capacity": 3, "item_types": 3, "walk_speed": 2.3, "max_item_size": 0.28, "reach_height": 0.71},
 			"strengths": ["Twice as fast as Retrobot", "Clears flat floor quickly"],
 			"limitations": ["Stores nothing itself until it has Arm Reach: until then it leaves parts in the staging zone", "One part at a time (upgradable to three small ones)", "Flat floor only, cannot cross heaps", "Cannot climb or fly"],
-			"assembly": {"requires": {"optical eye": ["head shell"], "antenna pair": ["head shell"], "head shell": ["torso"], "left arm": ["torso"], "right arm": ["torso"], "tire": ["wheel hub"]}},
+			"assembly": {"requires": {"chest lamp": ["torso"], "signal mast": ["torso"], "head shell": ["torso"], "left arm": ["torso"], "right arm": ["torso"], "tire": ["wheel hub"]}},
 			"personality": "Energetic, slightly nervous, constantly balancing. A fast courier."
 		},
 		"spiderbot": {
@@ -42,7 +42,7 @@
 			"limits": {"capacity": 3, "climb_height": 1.75, "walk_speed": 1.2, "item_types": 1},
 			"strengths": ["Collects one exact part definition until the set is complete", "Climbs heaps, benches and shelving", "Stores directly into what it can reach"],
 			"limitations": ["Works on one assigned part definition at a time", "Slower than Unibot on open floor", "Cannot fly; the top shelves stay out of reach"],
-			"assembly": {"requires": {"head": ["body shell"], "eye pair": ["head"], "antenna pair": ["head"], "front left leg": ["body shell"], "front right leg": ["body shell"], "middle left leg": ["body shell"], "middle right leg": ["body shell"], "rear left leg": ["body shell"], "rear right leg": ["body shell"], "gripping jaws": ["body shell"]}},
+			"assembly": {"requires": {"head": ["body shell"], "spinneret": ["body shell"], "front left leg": ["body shell"], "front right leg": ["body shell"], "middle left leg": ["body shell"], "middle right leg": ["body shell"], "rear left leg": ["body shell"], "rear right leg": ["body shell"], "left arm": ["body shell"], "right arm": ["body shell"]}},
 			"personality": "Curious, methodical, precise. Clambers over heaps and up the shelving."
 		},
 		"caterpillarbot": {
@@ -55,7 +55,7 @@
 			"limits": {"capacity": 6, "item_types": 6, "walk_speed": 0.7, "heap_step_height": 0.48, "max_item_size": 0.55, "reach_height": 0.5},
 			"strengths": ["Carries three parts of different kinds per trip", "Crosses low and moderate heaps", "Hauls bulky parts"],
 			"limitations": ["Slow, wide turns", "Needs room for its long body", "Cannot climb shelving or fly", "Uses the staging zone below high destinations"],
-			"assembly": {"requires": {"head": ["chassis"], "optical eye": ["head"], "antenna pair": ["head"], "siren light": ["head"], "left track": ["chassis", "left drive sprocket"], "right track": ["chassis", "right drive sprocket"], "front cargo box": ["chassis"], "middle cargo box": ["chassis"], "rear cargo box": ["chassis"], "left claw": ["left arm"], "right claw": ["right arm"]}},
+			"assembly": {"requires": {"head": ["chassis"], "searchlight": ["chassis"], "radio mast": ["chassis"], "hazard beacon": ["chassis"], "left track": ["chassis", "left drive sprocket"], "right track": ["chassis", "right drive sprocket"], "front cargo box": ["chassis"], "middle cargo box": ["chassis"], "rear cargo box": ["chassis"], "left track tensioner": ["chassis"], "right track tensioner": ["chassis"]}},
 			"personality": "Slow, determined, dependable. Hauls loads in three cargo boxes."
 		},
 		"hoverbot": {
@@ -68,7 +68,7 @@
 			"limits": {"capacity": 2, "item_types": 2, "walk_speed": 1.9, "max_item_size": 0.36},
 			"strengths": ["Reaches every storage height", "Empties the staging zones other robots fill", "Up to three can fly at once"],
 			"limitations": ["One part at a time (two at most)", "Light parts only", "Cannot dig parts out from under a heap", "Not a bulk transporter"],
-			"assembly": {"requires": {"upper saucer shell": ["lower saucer shell"], "rim light 1": ["upper saucer shell"], "rim light 2": ["upper saucer shell"], "rim light 3": ["upper saucer shell"], "rim light 4": ["upper saucer shell"], "head": ["upper saucer shell"], "left eye lens": ["head"], "right eye lens": ["head"], "left antenna": ["head"], "right antenna": ["head"], "left ear cap": ["head"], "right ear cap": ["head"], "rotor mast": ["head"], "rotor hub": ["rotor mast"], "propeller blade a": ["rotor hub"], "propeller blade b": ["rotor hub"], "left claw": ["left arm"], "right claw": ["right arm"], "thruster glow plate": ["thruster ring"]}},
+			"assembly": {"requires": {"upper saucer shell": ["lower saucer shell"], "rim light 1": ["upper saucer shell"], "rim light 2": ["upper saucer shell"], "rim light 3": ["upper saucer shell"], "rim light 4": ["upper saucer shell"], "head": ["upper saucer shell"], "left sensor pod": ["upper saucer shell"], "right sensor pod": ["upper saucer shell"], "left stabilizer fin": ["upper saucer shell"], "right stabilizer fin": ["upper saucer shell"], "left vent cover": ["lower saucer shell"], "right vent cover": ["lower saucer shell"], "rotor mast": ["head"], "rotor hub": ["rotor mast"], "propeller blade a": ["rotor hub"], "propeller blade b": ["rotor hub"], "left shoulder servo": ["upper saucer shell"], "right shoulder servo": ["upper saucer shell"], "thruster glow plate": ["thruster ring"]}},
 			"extra_units": [
 				{"id": "hoverbot_2", "name": "Hoverbot #2", "materials": {"Gears": 6, "Bearings": 4, "Springs": 4, "Electronics": 6, "Shafts & Pins": 4}},
 				{"id": "hoverbot_3", "name": "Hoverbot #3", "materials": {"Gears": 8, "Bearings": 6, "Springs": 6, "Electronics": 8, "Machine Parts": 2}}

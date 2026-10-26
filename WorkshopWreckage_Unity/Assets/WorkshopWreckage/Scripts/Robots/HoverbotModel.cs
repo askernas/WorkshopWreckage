@@ -209,6 +209,26 @@ namespace WorkshopWreckage
                     Pinstripe(b, "lower saucer shell", LowerShell, 0.243f, 0.25f, cs);
                 }
             }
+            // body parts: sensor pods on the rim band's front quarters, stabilizer fins on the back of the upper
+            // shell, vent covers on the lower shell's back quarters, a servo over each arm port
+            foreach (var sd in new[] { -1f, 1f })
+            {
+                string side = sd < 0 ? "left " : "right ";
+                var pod = new Vector3(Mathf.Sin(sd * 1.0f), 0, -Mathf.Cos(sd * 1.0f));
+                var podRot = Quaternion.FromToRotation(Vector3.up, Batch.G(pod));
+                b.Lathe(pod * (RimR - 0.004f) + new Vector3(0, 0.29f, 0), Disc(0.026f, 0.018f, 0.005f), M(side + "sensor pod", Gunmetal), podRot, 16);
+                b.Lathe(pod * (RimR + 0.014f) + new Vector3(0, 0.29f, 0), Dome(0.016f, 0.008f), M(side + "sensor pod", Dark), podRot, 12);
+                float fy = 0.37f, fr = ShellR(UpperShell, fy);
+                b.RoundedBox(new Vector3(sd * 0.12f, fy + 0.03f, Mathf.Sqrt(fr * fr - 0.0144f) - 0.02f), new Vector3(0.012f, 0.07f, 0.11f), 0.005f, M(side + "stabilizer fin", ToyRed), 2, Batch.R(Vector3.right, 0.35f));
+                var vent = new Vector3(Mathf.Sin(sd * 2.3f), 0, -Mathf.Cos(sd * 2.3f));
+                float vy = 0.215f, vr = ShellR(LowerShell, vy);
+                var ventRot = Quaternion.FromToRotation(Vector3.up, Batch.G(vent + Vector3.down * 0.6f));
+                b.Lathe(vent * vr + new Vector3(0, vy, 0), Disc(0.04f, 0.008f, 0.003f), M(side + "vent cover", Gunmetal), ventRot, 18);
+                for (int k = -1; k <= 1; k++)
+                    b.RoundedBox(vent * (vr + 0.006f) + new Vector3(0, vy + k * 0.016f, 0), new Vector3(0.05f, 0.005f, 0.005f), 0.002f, M(side + "vent cover", Dark), 1, Batch.R(Vector3.up, -sd * 2.3f));
+                b.Lathe(new Vector3(sd * (RimR - 0.03f), 0.338f, 0), Disc(0.03f, 0.04f, 0.006f), M(side + "shoulder servo", Gunmetal), SideRot(sd), 16);
+                b.Lathe(new Vector3(sd * (RimR + 0.01f), 0.338f, 0), Dome(0.018f, 0.008f), M(side + "shoulder servo", Brass), SideRot(sd), 12);
+            }
             Done(b, _saucer);
             {
                 // rotor mast on the chassis mount (coordinates from the head's top): a bolted foot plate, the

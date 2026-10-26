@@ -21,7 +21,8 @@ namespace WorkshopWreckage
     /// Heads and arms are interchangeable (as modules are on a built robot): another
     /// robot's head or arm can fill a chassis' head or arm slot during assembly, and
     /// then stands for that chassis' own head or arm (with its small fittings) until
-    /// the robot is built. Spiderbot's gripping jaws are one pair and stay its own.
+    /// the robot is built. Every head and arm is one complete item (its eyes, antennas and
+    /// gripper come with it), so a found head or arm fits any robot.
     /// Every part is one instance in exactly one place; all state lives in the item
     /// states / owners plus the small dictionary in ToDict, so saves rebuild it exactly.</summary>
     public class RobotWorkbench : MonoBehaviour
@@ -143,22 +144,15 @@ namespace WorkshopWreckage
 
         /// <summary>The part items that make up each chassis' head and arm modules, the main item first
         /// (the one that can go on another robot; the others are its small fittings, which a donor
-        /// module brings along). Spiderbot's arms are its one pair of gripping jaws: not swappable.</summary>
+        /// module brings along). Design-v1: every head and arm is one complete item, so each list is
+        /// just that item; the lists stay so a future module can carry fittings again.</summary>
         static readonly Dictionary<string, Dictionary<ModuleSlot, string[]>> ModuleParts = new()
         {
             ["retrobot"] = new() { [ModuleSlot.Head] = new[] { "head" }, [ModuleSlot.ArmL] = new[] { "left arm" }, [ModuleSlot.ArmR] = new[] { "right arm" } },
-            ["unibot"] = new() { [ModuleSlot.Head] = new[] { "head shell", "optical eye", "antenna pair" }, [ModuleSlot.ArmL] = new[] { "left arm" }, [ModuleSlot.ArmR] = new[] { "right arm" } },
-            ["spiderbot"] = new() { [ModuleSlot.Head] = new[] { "head", "eye pair", "antenna pair" } },
-            ["caterpillarbot"] = new()
-            {
-                [ModuleSlot.Head] = new[] { "head", "optical eye", "antenna pair", "siren light" },
-                [ModuleSlot.ArmL] = new[] { "left arm", "left claw" }, [ModuleSlot.ArmR] = new[] { "right arm", "right claw" },
-            },
-            ["hoverbot"] = new()
-            {
-                [ModuleSlot.Head] = new[] { "head", "left eye lens", "right eye lens", "left antenna", "right antenna", "left ear cap", "right ear cap" },
-                [ModuleSlot.ArmL] = new[] { "left arm", "left claw" }, [ModuleSlot.ArmR] = new[] { "right arm", "right claw" },
-            },
+            ["unibot"] = new() { [ModuleSlot.Head] = new[] { "head shell" }, [ModuleSlot.ArmL] = new[] { "left arm" }, [ModuleSlot.ArmR] = new[] { "right arm" } },
+            ["spiderbot"] = new() { [ModuleSlot.Head] = new[] { "head" }, [ModuleSlot.ArmL] = new[] { "left arm" }, [ModuleSlot.ArmR] = new[] { "right arm" } },
+            ["caterpillarbot"] = new() { [ModuleSlot.Head] = new[] { "head" }, [ModuleSlot.ArmL] = new[] { "left arm" }, [ModuleSlot.ArmR] = new[] { "right arm" } },
+            ["hoverbot"] = new() { [ModuleSlot.Head] = new[] { "head" }, [ModuleSlot.ArmL] = new[] { "left arm" }, [ModuleSlot.ArmR] = new[] { "right arm" } },
         };
 
         /// <summary>The robot a part item was made for.</summary>
