@@ -52,13 +52,19 @@ namespace WorkshopWreckage.EditorTools
                 picked.AddRange(defs);
             }
             var robots = Shared.ReadObject(Shared.DataPath("robot_parts.json"));
+            var radar = Shared.ReadObject(Shared.DataPath("tools/part_radar.json"));   // its parts, batteries and bin go into every preset
+            robots = new Dictionary<string, object>(robots)
+            {
+                ["items"] = Json.Arr(robots["items"]).Concat(Json.Arr(radar["items"])).ToList(),
+                ["stations"] = Json.Arr(robots["stations"]).Concat(Json.Arr(radar["stations"])).ToList(),
+            };
 
             foreach (var p in orderedPresets)
             {
                 var pc = Json.Obj(p.Value);
                 int tier = Json.Int(pc, "tier");
                 var defs = picked.Where(d => tierOf[d.id] <= tier).OrderBy(d => d.category).ThenBy(d => SortKey(cat, d.id)).ToList();
-                int target = Json.Int(pc, "total_items") - Json.Int(pc, "robot_part_items");
+                int target = Json.Int(pc, "total_items") - Json.Int(pc, "robot_part_items") - Json.Int(pc, "tool_part_items");
                 var prng = new System.Random(Json.Int(a, "seed", 1) * 31 + tier);
                 AssignSpawns(defs, a, target, prng);
                 var (units, dests) = Pack(defs, a);
@@ -117,7 +123,26 @@ namespace WorkshopWreckage.EditorTools
             }
             failures += ValidateComponentScale(all);
             failures += ValidateProgression();
+            failures += ValidatePartRadar(all);
             if (Application.isBatchMode) EditorApplication.Exit(failures == 0 ? 0 : 1);
+        }
+
+        /// <summary>shared/data/tools/part_radar.json (spec v1.2 §7): the derived battery pool and pulse budget,
+        /// and every preset's catalogue holding the configured component and battery counts.</summary>
+        static int ValidatePartRadar(List<ItemDatabase> dbs)
+        {
+            var cfg = PartRadar.Config.Load();
+            int failures = 0;
+            foreach (var e in cfg.errors) { Debug.LogError("[validate] part_radar.json: " + e); failures++; }
+            foreach (var db in dbs)
+            {
+                var have = db.order.Select(db.Get).Where(d => d.IsToolItem).GroupBy(d => d.ToolType).ToDictionary(g => g.Key, g => g.Sum(d => d.spawnCount));
+                foreach (var kv in cfg.spawnCounts)
+                    if (have.GetValueOrDefault(kv.Key) != kv.Value) { Debug.LogError($"[validate] {db.presetId}: {have.GetValueOrDefault(kv.Key)} '{kv.Key}' in the catalogue, part_radar.json spawns {kv.Value}"); failures++; }
+                if (have.GetValueOrDefault("battery") != cfg.Batteries) { Debug.LogError($"[validate] {db.presetId}: {have.GetValueOrDefault("battery")} radar batteries in the catalogue, the distribution has {cfg.Batteries}"); failures++; }
+            }
+            Debug.Log($"[validate] part radar: {cfg.Batteries} batteries, {cfg.Pulses} pulses, {cfg.Pulses * cfg.duration:0} powered seconds");
+            return failures;
         }
 
         /// <summary>component_scale.json against the catalogue: the anchors and the player-only list
@@ -470,8 +495,8 @@ namespace WorkshopWreckage.EditorTools
             var config = new Dictionary<string, object>
             {
                 ["version"] = 2.0, ["preset"] = id, ["label"] = pc["label"], ["default_seed"] = pc["default_seed"],
-                ["total_items"] = pc["total_items"], ["ordinary_items"] = (double)(Json.Int(pc, "total_items") - Json.Int(pc, "robot_part_items")),
-                ["robot_part_items"] = pc["robot_part_items"], ["ordinary_definitions"] = pc["ordinary_definitions"],
+                ["total_items"] = pc["total_items"], ["ordinary_items"] = (double)(Json.Int(pc, "total_items") - Json.Int(pc, "robot_part_items") - Json.Int(pc, "tool_part_items")),
+                ["robot_part_items"] = pc["robot_part_items"], ["tool_part_items"] = (double)Json.Int(pc, "tool_part_items"), ["ordinary_definitions"] = pc["ordinary_definitions"],
                 ["max_spawn_default"] = a["max_spawn_default"], ["max_spawn_high_quantity"] = a["max_spawn_high_quantity"],
                 ["high_quantity_categories"] = a["high_quantity_categories"], ["default_box_capacity"] = a["default_box_capacity"],
                 ["large_box_capacity"] = a["large_box_capacity"], ["item_visual_scale"] = 2.0, ["room"] = pc["room"], ["aisle_rows"] = pc["aisle_rows"],

@@ -41,6 +41,16 @@ namespace WorkshopWreckage
             ["shaft:telescopic_tube"] = TelescopicTube,
             ["gear:servo_horn"] = ServoHorn,
             ["gear:encoder_disc"] = EncoderDisc,
+            // Part Radar components and battery (shared/data/tools/part_radar.json; the assembled device is PartRadarModel)
+            ["robot:radar_housing"] = RadarHousing,
+            ["robot:radar_left_handle"] = b => RadarHandle(b, true),
+            ["robot:radar_right_handle"] = b => RadarHandle(b, false),
+            ["robot:radar_pulse_button"] = RadarButton,
+            ["robot:radar_selector_dial"] = RadarDial,
+            ["robot:radar_led_module"] = RadarLed,
+            ["robot:radar_left_antenna"] = RadarAntennaL,
+            ["robot:radar_right_antenna"] = RadarAntennaR,
+            ["robot:radar_battery"] = RadarBattery,
             // Sorting Arm unique parts (robot_parts.json, yellow enamel with red joints)
             ["robot:sa_coupler"] = b => { b.Box(new Vector3(0, -0.3f, 0), new Vector3(1f, 0.16f, 0.7f), 0, Part); b.Box(new Vector3(0, -0.14f, -0.3f), new Vector3(0.7f, 0.2f, 0.12f), 2, DarkSteel); b.Cyl(new Vector3(0, -0.22f, 0.05f), new Vector3(0, 0.2f, 0.05f), 0.24f, 2, ArmRed); foreach (float x in new[] { -0.4f, 0.4f }) b.Cyl(new Vector3(x, -0.38f, 0.2f), new Vector3(x, -0.2f, 0.2f), 0.05f, 2, Hole); b.Box(new Vector3(0.3f, -0.21f, 0.25f), new Vector3(0.1f, 0.02f, 0.06f), 2, Lens); },
             ["robot:sa_shoulder"] = b => { b.Cyl(new Vector3(0, -0.4f, 0), new Vector3(0, 0.05f, 0), 0.45f, 2, ArmRed); b.Cyl(new Vector3(0, 0.05f, 0), new Vector3(0, 0.15f, 0), 0.38f, 2, DarkSteel); b.Box(new Vector3(0, 0.3f, 0), new Vector3(0.7f, 0.3f, 0.5f), 0, Part); b.Cyl(new Vector3(-0.38f, 0.32f, 0), new Vector3(0.38f, 0.32f, 0), 0.16f, 2, Chrome); },
@@ -56,6 +66,96 @@ namespace WorkshopWreckage
         };
 
         static readonly Color ArmRed = new(0.7f, 0.12f, 0.08f, 0);
+        static readonly Color FadedBlue = new(0.24f, 0.35f, 0.5f, 0), Brass = new(0.66f, 0.5f, 0.22f, 0), CopperC = new(0.62f, 0.32f, 0.17f, 0),
+            RustC = new(0.36f, 0.2f, 0.11f, 0), TapeC = new(0.6f, 0.58f, 0.52f, 0), Amber = new(0.95f, 0.6f, 0.12f, 0), LedGreen = new(0.2f, 0.45f, 0.15f, 0);
+
+        // ------------------------------------------------------------------ Part Radar (resources/part radar, concept sheet)
+
+        /// <summary>The chipped cream controller box: faded blue patch, speaker grille, empty sockets for the
+        /// button, dial and LED, rusty corner screws, the battery hatch on the back.</summary>
+        static void RadarHousing(B b)
+        {
+            b.Box(Vector3.zero, new Vector3(1f, 0.69f, 0.35f), 0, Part);
+            b.Box(new Vector3(0.24f, 0.16f, 0.176f), new Vector3(0.34f, 0.24f, 0.01f), 2, FadedBlue);
+            for (int k = 0; k < 4; k++) b.Box(new Vector3(-0.26f, 0.2f - k * 0.07f, 0.177f), new Vector3(0.3f, 0.025f, 0.01f), 2, Hole);   // grille
+            b.Cyl(new Vector3(0.28f, -0.08f, 0.17f), new Vector3(0.28f, -0.08f, 0.18f), 0.1f, 2, Hole);    // button socket
+            b.Cyl(new Vector3(-0.18f, -0.06f, 0.17f), new Vector3(-0.18f, -0.06f, 0.18f), 0.09f, 2, Hole);   // dial socket
+            b.Box(new Vector3(0, 0.35f, 0), new Vector3(0.3f, 0.02f, 0.2f), 2, Hole);                          // LED cut-out on top
+            foreach (var x in new[] { -0.44f, 0.44f }) foreach (var y in new[] { -0.29f, 0.29f })
+                b.Cyl(new Vector3(x, y, 0.17f), new Vector3(x, y, 0.185f), 0.025f, 2, RustC, 6);
+            b.Box(new Vector3(0, -0.08f, -0.176f), new Vector3(0.5f, 0.32f, 0.01f), 2, DarkSteel);              // battery hatch
+            foreach (var x in new[] { -0.39f, 0.39f }) b.Cyl(new Vector3(x, 0.345f, 0), new Vector3(x, 0.4f, 0), 0.045f, 2, Brass, 8);   // antenna sockets
+        }
+
+        /// <summary>A rubber-ribbed grip on a pipe bracket (brass on the left, gunmetal on the right), taped.</summary>
+        static void RadarHandle(B b, bool left)
+        {
+            b.Box(new Vector3(0, 0.42f, 0), new Vector3(0.34f, 0.12f, 0.16f), 0, Part);                         // bracket
+            b.Cyl(new Vector3(0, -0.36f, 0), new Vector3(0, 0.38f, 0), 0.07f, 0, Part, 10);                     // pipe
+            b.Cyl(new Vector3(0, -0.3f, 0), new Vector3(0, 0.28f, 0), 0.15f, 2, Rubber);                        // grip
+            for (int k = 0; k < 6; k++) b.Cyl(new Vector3(0, -0.24f + k * 0.09f, 0), new Vector3(0, -0.21f + k * 0.09f, 0), 0.165f, 2, Rubber);   // ribs
+            b.Cyl(new Vector3(0, left ? 0.1f : -0.15f, 0), new Vector3(0, left ? 0.2f : -0.05f, 0), 0.168f, 2, TapeC);   // tape
+            b.Cyl(new Vector3(0, -0.4f, 0), new Vector3(0, -0.36f, 0), 0.11f, 2, left ? Brass : DarkSteel);       // end cap
+        }
+
+        static void RadarButton(B b)
+        {
+            b.Box(new Vector3(0, -0.3f, 0), new Vector3(1f, 0.16f, 1f), 2, DarkSteel);
+            b.Cyl(new Vector3(0, -0.22f, 0), new Vector3(0, -0.08f, 0), 0.42f, 2, Chrome);                      // collar
+            b.Cyl(new Vector3(0, -0.08f, 0), new Vector3(0, 0.3f, 0), 0.34f, 0, Part);                          // red cap
+            foreach (var x in new[] { -0.4f, 0.4f }) b.Cyl(new Vector3(x, -0.4f, 0.3f), new Vector3(x, -0.6f, 0.3f), 0.04f, 2, x < 0 ? WireRed : Rubber, 6);   // leads
+        }
+
+        static void RadarDial(B b)
+        {
+            b.Cyl(new Vector3(0, -0.25f, 0), new Vector3(0, -0.02f, 0), 0.5f, 0, Part);                         // cream face plate
+            for (int k = 0; k < 8; k++)
+            {
+                float a = k * Mathf.PI / 4;
+                b.Box(new Vector3(Mathf.Cos(a) * 0.42f, -0.01f, Mathf.Sin(a) * 0.42f), new Vector3(0.05f, 0.02f, 0.05f), 2, Hole);   // tick marks
+            }
+            b.Cyl(new Vector3(0, -0.02f, 0), new Vector3(0, 0.3f, 0), 0.22f, 2, FadedBlue);                    // knob
+            b.Box(new Vector3(0.1f, 0.31f, 0), new Vector3(0.22f, 0.02f, 0.05f), 2, TapeC);                    // pointer
+        }
+
+        static void RadarLed(B b)
+        {
+            b.Box(new Vector3(0, -0.3f, 0), new Vector3(1f, 0.12f, 0.6f), 0, Part);                              // board
+            b.Cyl(new Vector3(-0.15f, -0.24f, 0), new Vector3(-0.15f, -0.05f, 0), 0.3f, 2, Chrome);            // bezel
+            b.Cyl(new Vector3(-0.15f, -0.05f, 0), new Vector3(-0.15f, 0.2f, 0), 0.26f, 2, Amber);              // big amber dome
+            for (int k = 0; k < 4; k++) b.Box(new Vector3(0.22f + k * 0.07f, -0.2f, 0.1f), new Vector3(0.045f, 0.08f, 0.045f), 2, LedGreen);   // charge LEDs
+            b.Cyl(new Vector3(0.4f, -0.3f, -0.2f), new Vector3(0.62f, -0.36f, -0.25f), 0.03f, 2, WireRed, 6);
+        }
+
+        /// <summary>An old telescopic rod: three sections, brass joints, blue insulating tape near the foot.</summary>
+        static void RadarAntennaL(B b)
+        {
+            b.Cyl(new Vector3(0, -0.5f, 0), new Vector3(0, -0.44f, 0), 0.06f, 2, DarkSteel, 8);
+            b.Cyl(new Vector3(0, -0.44f, 0), new Vector3(0, -0.1f, 0), 0.034f, 0, Part, 8);
+            b.Cyl(new Vector3(0, -0.1f, 0), new Vector3(0, 0.22f, 0), 0.026f, 0, Part, 8);
+            b.Cyl(new Vector3(0, 0.22f, 0), new Vector3(0, 0.48f, 0), 0.019f, 0, Part, 8);
+            foreach (var y in new[] { -0.1f, 0.22f }) b.Cyl(new Vector3(0, y - 0.02f, 0), new Vector3(0, y + 0.02f, 0), 0.045f, 2, Brass, 8);
+            b.Cyl(new Vector3(0, -0.38f, 0), new Vector3(0, -0.28f, 0), 0.042f, 2, FadedBlue, 8);
+            b.Cyl(new Vector3(0, 0.48f, 0), new Vector3(0, 0.5f, 0), 0.03f, 2, Brass, 8);                      // tip
+        }
+
+        /// <summary>A mismatched rod wound with copper wire, an exposed red lead and a clamped bracket.</summary>
+        static void RadarAntennaR(B b)
+        {
+            b.Box(new Vector3(0, -0.44f, 0), new Vector3(0.16f, 0.08f, 0.12f), 2, DarkSteel);                  // clamp
+            b.Cyl(new Vector3(0, -0.5f, 0), new Vector3(0, 0.5f, 0), 0.03f, 0, Part, 8);
+            for (int k = 0; k < 12; k++) b.Cyl(new Vector3(0, -0.2f + k * 0.026f, 0), new Vector3(0, -0.187f + k * 0.026f, 0), 0.045f, 2, CopperC, 8);   // winding
+            b.Cyl(new Vector3(0.05f, -0.42f, 0.02f), new Vector3(0.06f, -0.18f, 0.03f), 0.012f, 2, WireRed, 5);
+        }
+
+        /// <summary>A worn cylindrical cell (18650 style): faded blue wrap, scuffed label band, bare terminals.</summary>
+        static void RadarBattery(B b)
+        {
+            b.Cyl(new Vector3(0, -0.46f, 0), new Vector3(0, 0.46f, 0), 0.135f, 0, Part);
+            b.Cyl(new Vector3(0, -0.12f, 0), new Vector3(0, 0.18f, 0), 0.138f, 2, TapeC);
+            b.Cyl(new Vector3(0, 0.46f, 0), new Vector3(0, 0.5f, 0), 0.05f, 2, Chrome, 10);
+            b.Cyl(new Vector3(0, -0.5f, 0), new Vector3(0, -0.46f, 0), 0.115f, 2, Chrome);
+        }
         static readonly Color Pcb = new(0.1f, 0.32f, 0.16f, 0), Chip = new(0.07f, 0.07f, 0.08f, 0), Ivory = new(0.88f, 0.86f, 0.78f, 0), Alu = new(0.72f, 0.74f, 0.76f, 0);
 
         // ------------------------------------------------------------------ Phase D families

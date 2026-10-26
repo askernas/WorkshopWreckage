@@ -242,7 +242,7 @@ namespace WorkshopWreckage
             // can be seen, never buried
             var retro = robotIds.Where(id => world.DefOf(id).craftingPurpose == "robot:retrobot")
                 .OrderBy(id => world.DefOf(id).shape == "Torso" ? 0 : 1).ThenBy(id => id).ToList();
-            foreach (var id in robotIds.Except(retro.Take(layout.retroSpots.Count)))
+            foreach (var id in robotIds.Except(retro.Take(layout.retroSpots.Count)).Where(id => !world.DefOf(id).IsToolItem))
             {
                 var robot = System.Text.RegularExpressions.Regex.Replace(world.DefOf(id).craftingPurpose.Split(':').ElementAtOrDefault(1) ?? "", @"_\d+$", "");   // a further unit's kit lies where its type's does
                 var choices = layout.robotPartPiles.TryGetValue(robot, out var ch) && ch.Count > 0 ? ch : new List<int> { 0 };
@@ -306,8 +306,28 @@ namespace WorkshopWreckage
                 if (!Place(world, surfaces[0], layout.surfaces[0], site, retroPlaced[k], layout, true) && !PlaceAnywhere(world, surfaces[0], layout, floorPile, retroPlaced[k]))
                     errors.Add($"Could not place instance {retroPlaced[k]}");
             }
+            PlaceToolItems(world, robotIds.Where(id => world.DefOf(id).IsToolItem).ToList(), surfaces, layout, floorPile, seed);
             lastGenerationMs = sw.Elapsed.TotalMilliseconds;
             return errors.Count == 0 ? world : null;
+        }
+
+        /// <summary>Part Radar parts and batteries (spec v1.2 §4, §8): spread over the floor piles of the whole
+        /// workshop, on top (placed after everything else, so never buried), from their own random stream: the
+        /// rest of the world lies exactly where it would without them, and older saves keep their positions.</summary>
+        void PlaceToolItems(ItemWorld world, List<int> ids, List<PileSurface> surfaces, WorkshopLayout layout, PileSite floorPile, int seed)
+        {
+            if (ids.Count == 0) return;
+            var keep = _rng;
+            _rng = new System.Random((int)(ItemDatabase.Fnv("part-radar:" + seed) & 0x7fffffff));
+            var piles = Enumerable.Range(0, layout.piles.Count).Where(p => layout.piles[p].surface == 0 && layout.piles[p].kind != "feature").ToList();
+            for (int k = ids.Count - 1; k > 0; k--) { int j = _rng.Next(k + 1); (ids[k], ids[j]) = (ids[j], ids[k]); }
+            for (int k = 0; k < ids.Count; k++)
+            {
+                int p = piles.Count > 0 ? piles[(k + _rng.Next(piles.Count)) % piles.Count] : -1;
+                if (p >= 0 && Place(world, surfaces[0], layout.surfaces[0], layout.piles[p], ids[k], layout)) { pileOf[ids[k]] = p; continue; }
+                if (!PlaceAnywhere(world, surfaces[0], layout, floorPile, ids[k])) errors.Add($"Could not place instance {ids[k]}");
+            }
+            _rng = keep;
         }
 
         bool PlaceAnywhere(ItemWorld world, PileSurface floor, WorkshopLayout layout, PileSite site, int id)

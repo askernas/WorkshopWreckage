@@ -728,7 +728,9 @@ namespace WorkshopWreckage
             if (!active || def == null) return;
             var p = _g.progress;
             var t = $"<size=24><b><color=#d4a352>{def.displayName}</color></b></size>\n<color=#b8a890>{def.CategoryName}  ·  {def.shape}</color>\n\n";
-            if (def.IsRobotPart) t += $"A component of <b>{def.subcategory}</b>.\nCarry it to the Robot Workbench yourself.\n\n";
+            if (def.IsRadarBattery) t += "A worn battery for the Part Radar. Its charge shows once it is in your inventory; it never recharges.\n\n";
+            else if (def.IsToolItem) t += "A component of the <b>Part Radar</b>.\nCarry it to the Robot Workbench: one of each of the eight parts builds the radar.\n\n";
+            else if (def.IsRobotPart) t += $"A component of <b>{def.subcategory}</b>.\nCarry it to the Robot Workbench yourself.\n\n";
             else
             {
                 var mat = def.material == "oxidized" ? "Rusty steel" : char.ToUpper(def.material[0]) + def.material.Substring(1);
@@ -774,7 +776,7 @@ namespace WorkshopWreckage
             if (_g.objectives != null) _objective.text = "<color=#b8a890>Objective:</color>  " + _g.objectives.HudText();
             _level.text = pr == null ? "" : pr.LevelText + (pr.skillPoints > 0 ? $"  ·  {pr.skillPoints} skill pt" : "");
             _progress.text = $"Workshop  {p.OverallPercent:0.0}% parts restored   ({p.sortedTotal} / {_g.world.Count})";
-            _target.text = ActiveTarget();
+            _target.text = _g.radar != null && _g.radar.isOut ? _g.radar.HudText() : ActiveTarget();
             int z = _g.layout.ZoneAt(_g.player.transform.position);
             _zone.text = $"{_g.layout.zones[z].name}  —  {p.ZonePercent(z):0}% restored" + RobotStatus();
             UpdateHeld();
@@ -847,7 +849,8 @@ namespace WorkshopWreckage
                 bool known = _g.progress.IsDiscovered(def.id);
                 _heldName.text = $"In hand:  {(known ? def.displayName : def.shape)}  ×{inv.IdsOf(def.id).Count}";
                 _heldCount.text = def.CategoryName + "  ·  " + _g.progress.CountLabel(def.id);
-                _heldDest.text = "→  " + _g.db.BoxLabel(def.storageBox);
+                _heldDest.text = def.IsRadarBattery ? $"Battery charge  {_g.radar.Charges(id)} / {_g.radar.cfg.maxCharges}" + (_g.radar.assembled ? "   [Y] radar, [L] load" : "")
+                    : "→  " + (def.IsToolItem ? "Robot Workbench (Part Radar)" : _g.db.BoxLabel(def.storageBox));
                 _carried.text = $"Carrying {inv.Count} / {inv.capacity}     [Wheel] switch   [Z] drop   [Tab] inventory";
             }
             if (!_hotbarDirty) return;

@@ -35,6 +35,14 @@ namespace WorkshopWreckage
 
         public string CategoryName => CategoryNames[category];
         public bool IsRobotPart => category == CategoryNames.Length - 1;
+        /// <summary>A Part Radar component or battery (shared/data/tools/part_radar.json): category Robot Parts
+        /// (no drawer, delivered to the Robot Workbench) but no robot's component, no ordinary part.</summary>
+        public bool IsToolItem => craftingPurpose != null && craftingPurpose.StartsWith("tool:");
+        /// <summary>A robot's own component (robot_parts.json): a robot part that is not a tool item.</summary>
+        public bool IsRobotComponent => IsRobotPart && !IsToolItem;
+        /// <summary>The tool item's type ("radar_housing", ..., "battery"); "" for anything else.</summary>
+        public string ToolType => IsToolItem ? craftingPurpose.Substring(craftingPurpose.LastIndexOf(':') + 1) : "";
+        public bool IsRadarBattery => ToolType == "battery";
         public bool IsThreaded => !string.IsNullOrEmpty(threadSize);
 
         public static ItemDefinition FromDict(Dictionary<string, object> d, float defaultVisualScale, List<string> errors)

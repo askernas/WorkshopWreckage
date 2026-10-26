@@ -218,7 +218,7 @@ namespace WorkshopWreckage
             var found = new List<(float d, int id)>();
             foreach (var inst in g.world.instances)
             {
-                if (inst.state != ItemState.InWorld || !g.world.DefOf(inst.id).IsRobotPart || g.robotReserved.Contains(inst.id)) continue;
+                if (inst.state != ItemState.InWorld || !g.world.DefOf(inst.id).IsRobotComponent || g.robotReserved.Contains(inst.id)) continue;
                 found.Add(((inst.Position - me).sqrMagnitude, inst.id));
             }
             if (found.Count == 0) { g.hud.OnFeedback("Robot Part Sense: no robot parts left lying around", false); return 0; }

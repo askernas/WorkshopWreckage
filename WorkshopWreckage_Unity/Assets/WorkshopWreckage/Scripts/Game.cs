@@ -52,6 +52,8 @@ namespace WorkshopWreckage
         public List<int> starterIds = new();   // parts a robot is on its way to: no one else takes them
         public DebrisField debris;
         public PlayerTools tools;
+        /// <summary>The Part Radar (resources/part radar, spec v1.2): built at the workbench, Y takes it out.</summary>
+        public PartRadar radar;
         /// <summary>Per-preset multipliers (world_presets.json "scaling"): bigger worlds get stronger robots and tools.</summary>
         public Dictionary<string, object> presetScaling = new();
         public float Scale(string key) => (float)Json.Num(presetScaling, key, 1);
@@ -120,6 +122,9 @@ namespace WorkshopWreckage
             tools = new GameObject("PlayerTools").AddComponent<PlayerTools>();
             tools.transform.SetParent(transform, false);
             tools.Init(this);
+            radar = new GameObject("PartRadar").AddComponent<PartRadar>();
+            radar.transform.SetParent(transform, false);
+            radar.Init(this);
             interaction.TargetChanged += hud.OnTarget;
             interaction.Feedback += hud.OnFeedback;
             interaction.InspectChanged += hud.ShowInspect;
@@ -234,6 +239,13 @@ namespace WorkshopWreckage
             if (old != ItemState.InWorld || inst.state != ItemState.Carried || inst.owner != "player") return;
             if (!world.DefOf(inst.id).IsRobotPart) return;
             Sfx.Play("robot_part", null, -3, 0);   // always the same pitch: recognisable
+            if (world.DefOf(inst.id).IsToolItem)
+            {
+                if (progress.MarkOnce("tutorial_part_radar"))
+                    hud.ShowTutorial(world.DefOf(inst.id).IsRadarBattery ? "RADAR BATTERY FOUND!" : "PART RADAR COMPONENT FOUND!",
+                        "Parts of an old Part Radar lie about the workshop: a housing, two handles, a pulse button, a selector dial, an LED module and two antennas. Bring one of each to the Robot Workbench and it is built. It runs on batteries, and those are found half-used.");
+                return;
+            }
             if (!progress.MarkOnce(RobotPartTutorialKey)) return;
             hud.ShowTutorial("ROBOT PART DISCOVERED!",
                 "You've found a part of a robot! Keep an eye out for more robot components and visit the Robot Workshop to see what you can build.");
@@ -305,6 +317,7 @@ namespace WorkshopWreckage
             modules = new RobotModules();
             SpawnRobots();
             workbench.Load(save);
+            radar.Load(save);
             foreach (var u in units.Values) { u.labelProvider = LabelFor; u.RefreshLabels(); }
             objectives = new Objectives(this);
             if (save != null) objectives.Load(save.GetValueOrDefault("objectives"));
@@ -1326,7 +1339,8 @@ namespace WorkshopWreckage
                 CheckFullyRestored();
             };
             progress.DefinitionHalf += id => progression.OnDefinitionHalf(id, world.TotalOf(id));
-            progress.Discovered += id => { progression.OnDiscovered(id, db.Get(id).IsRobotPart); if (progression.Has("reveal_totals")) progress.revealed.Add(id); };
+            progress.Discovered += id => { if (!db.Get(id).IsToolItem) progression.OnDiscovered(id, db.Get(id).IsRobotPart);   // Part Radar items: no level progress (spec §1.13)
+                 if (progression.Has("reveal_totals")) progress.revealed.Add(id); };
             progress.DefinitionCompleted += id => progress.revealed.Add(id);   // a finished set shows its total
             progress.Milestone += (key, _) =>
             {

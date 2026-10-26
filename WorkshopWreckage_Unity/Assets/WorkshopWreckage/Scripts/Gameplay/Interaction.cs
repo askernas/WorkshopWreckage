@@ -127,6 +127,8 @@ namespace WorkshopWreckage
                 if (mouse != null && PlayerController.LookReady) game.held.RotateBy(mouse.delta.ReadValue() * new Vector2(1, -1));
                 return;
             }
+            // two hands on the Part Radar (PartRadar reads its own keys): no parts in or out
+            if (game.radar != null && game.radar.isOut) { HideHover(); return; }
             UpdateTarget();
             // two hands on the Sorting Arm: no parts in or out until it is mounted or set down
             if (game.CarriedArm is SortingArm carriedArm)

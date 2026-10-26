@@ -151,7 +151,7 @@ namespace WorkshopWreckage
         }
 
         public List<int> RobotPartIds(string robot = "")
-            => order.Where(id => definitions[id].IsRobotPart && (robot == "" || definitions[id].craftingPurpose == "robot:" + robot)).ToList();
+            => order.Where(id => definitions[id].IsRobotComponent && (robot == "" || definitions[id].craftingPurpose == "robot:" + robot)).ToList();
 
         public int TotalSpawn() => order.Sum(id => definitions[id].spawnCount);
 
@@ -184,14 +184,15 @@ namespace WorkshopWreckage
             int maxDefault = Json.Int(config, "max_spawn_default", 10);
             int maxHigh = Json.Int(config, "max_spawn_high_quantity", 25);
             var highCats = Json.Arr(config.GetValueOrDefault("high_quantity_categories")).Select(x => x.ToString()).ToHashSet();
-            int ordinary = 0, robot = 0;
+            int ordinary = 0, robot = 0, tool = 0;
             var load = new Dictionary<string, int>();
             foreach (var id in order)
             {
                 var d = definitions[id];
                 var label = $"Item {d.id} ({d.displayName})";
                 if (d.spawnCount < 1) errors.Add($"{label}: spawn_count {d.spawnCount} must be at least 1");
-                if (d.IsRobotPart)
+                if (d.IsToolItem) tool += d.spawnCount;   // Part Radar parts and batteries: copies allowed
+                else if (d.IsRobotPart)
                 {
                     robot += d.spawnCount;
                     if (d.spawnCount != 1) errors.Add($"{label}: robot parts are unique; spawn_count must be 1 (is {d.spawnCount})");
@@ -228,7 +229,9 @@ namespace WorkshopWreckage
             int wantOrd = Json.Int(config, "ordinary_items", 4020), wantRobot = Json.Int(config, "robot_part_items", 76), wantTotal = Json.Int(config, "total_items", 4096);
             if (ordinary != wantOrd) errors.Add($"Ordinary items total {ordinary}, configuration requires {wantOrd}");
             if (robot != wantRobot) errors.Add($"Robot part items total {robot}, configuration requires {wantRobot}");
-            if (ordinary + robot != wantTotal) errors.Add($"World population totals {ordinary + robot}, configuration requires exactly {wantTotal}");
+            int wantTool = Json.Int(config, "tool_part_items", 0);
+            if (tool != wantTool) errors.Add($"Part Radar items total {tool}, configuration requires {wantTool}");
+            if (ordinary + robot + tool != wantTotal) errors.Add($"World population totals {ordinary + robot + tool}, configuration requires exactly {wantTotal}");
         }
 
         public string BoxLabel(string id)

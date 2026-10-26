@@ -175,7 +175,7 @@ namespace WorkshopWreckage
         public ModuleSlot? MainSlotOf(int id)
         {
             var d = _g.world.DefOf(id);
-            if (!d.IsRobotPart) return null;
+            if (!d.IsRobotComponent) return null;
             string o = OriginOf(id), key = Robot.PartKey(d);
             if (ModuleParts.TryGetValue(TypeOf(o), out var m)) foreach (var kv in m) if (kv.Value[0] == key) return kv.Key;
             return null;
@@ -502,6 +502,7 @@ namespace WorkshopWreckage
         public Project ProjectFor(int id)
         {
             var def = _g.world.DefOf(id);
+            if (def.IsToolItem) return null;
             if (def.IsRobotPart) return P(def.craftingPurpose.Replace("robot:", ""));
             if (!_g.progress.IsComplete(def.id)) return null;   // design v1.0 §3.4: only stock of a completed destination
             return projects.FirstOrDefault(p => p.crafted && OnBench(p) && Unlocked(p) && MaterialsMissing(p).GetValueOrDefault(def.CategoryName) > 0);
@@ -558,6 +559,7 @@ namespace WorkshopWreckage
             var inst = _g.world.instances[id];
             var def = _g.world.DefOf(id);
             if (inst.state != ItemState.Carried || inst.owner != "player") return (false, "Carry the part here yourself");
+            if (def.IsToolItem) return _g.radar.Deliver(id);   // the Part Radar bin
             if (def.IsRobotPart)
             {
                 if (ProjectFor(id) == null) return (false, "Unknown robot part");

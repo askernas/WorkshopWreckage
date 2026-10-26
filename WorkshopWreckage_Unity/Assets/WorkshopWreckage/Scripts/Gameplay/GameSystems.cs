@@ -204,7 +204,7 @@ namespace WorkshopWreckage
                 if (i.state != ItemState.InWorld)
                 {
                     _collected[i.defId] = _collected.GetValueOrDefault(i.defId) + 1;
-                    if (world.DefOf(i.id).IsRobotPart) robotPartsFound++;
+                    if (world.DefOf(i.id).IsRobotComponent) robotPartsFound++;
                 }
                 if (AcceptedNow(i)) Accept(i, false);
                 if (Accounted(i.state))
@@ -222,14 +222,14 @@ namespace WorkshopWreckage
             if (old == ItemState.InWorld && inst.state != ItemState.InWorld)
             {
                 _collected[inst.defId] = _collected.GetValueOrDefault(inst.defId) + 1;
-                if (def.IsRobotPart) { robotPartsFound++; Mile("robot_part_" + def.id, "Robot component found: " + def.displayName); }
+                if (def.IsRobotComponent) { robotPartsFound++; Mile("robot_part_" + def.id, "Robot component found: " + def.displayName); }
                 Discover(inst.defId);
                 Mile("first_pickup", "First part collected — every piece counts!");
             }
             else if (old != ItemState.InWorld && inst.state == ItemState.InWorld)
             {
                 _collected[inst.defId] = _collected.GetValueOrDefault(inst.defId) - 1;
-                if (def.IsRobotPart) robotPartsFound--;
+                if (def.IsRobotComponent) robotPartsFound--;
             }
             if (AcceptedNow(inst)) Accept(inst, true);
             if (Accounted(inst.state) && !Accounted(old))
@@ -522,6 +522,7 @@ namespace WorkshopWreckage
                 ["objectives"] = g.objectives.ToList(),
                 ["workbench"] = g.workbench.ToDict(),
                 ["modules"] = g.modules.ToDict(),
+                ["radar"] = g.radar.ToDict(),
                 ["items"] = items, ["item_defs"] = itemDefs, ["storage"] = storage,
                 ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),

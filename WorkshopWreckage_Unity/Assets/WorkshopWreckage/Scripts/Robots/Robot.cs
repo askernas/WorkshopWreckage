@@ -1552,6 +1552,7 @@ namespace WorkshopWreckage
             if (!tray && zoneCenter.HasValue && Flat(i.Position - zoneCenter.Value).magnitude > zoneRadius) return false;
             var def = g.db.Get(i.defId);
             // Robot Part Retrieval: robot parts go to the workbench, never in one trip with ordinary parts
+            if (def.IsToolItem) return false;   // Part Radar parts and batteries are the player's
             bool part = def.IsRobotPart;
             if (part ? _retrieveRank <= 0 || carried.Count > 0 && !_benchLoad : carried.Count > 0 && _benchLoad) return false;
             if (!part && !def.robotCarry || g.interaction.busy.Contains(i.id) || ItemDatabase.Extents(def)[0] > _maxItem) return false;   // player-only: the largest 20 %

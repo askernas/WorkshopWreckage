@@ -20,7 +20,7 @@ namespace WorkshopWreckage
 
         /// <summary>Robot components still lying in the workshop or carried by the player.</summary>
         public static List<ItemInstance> LooseRobotParts(Game g) =>
-            g.world.instances.Where(i => g.world.DefOf(i.id).IsRobotPart && (i.state == ItemState.InWorld || i.state == ItemState.Carried)).ToList();
+            g.world.instances.Where(i => g.world.DefOf(i.id).IsRobotComponent && (i.state == ItemState.InWorld || i.state == ItemState.Carried)).ToList();   // Part Radar spares never block the end
 
         /// <summary>Where a copy is, in the audit's words.</summary>
         public static string Where(Game g, ItemInstance i, bool precise)
