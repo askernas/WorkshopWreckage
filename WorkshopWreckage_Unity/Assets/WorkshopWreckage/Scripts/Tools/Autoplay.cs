@@ -93,6 +93,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "tray")
+            {
+                yield return TrayChecks();   // QA: walking robots empty the whole sorting tray (playtest 2026-10-26)
+                Finish();
+                yield break;
+            }
             if (section == "pile")
             {
                 yield return PileChecks();   // QA: dropped parts pile up
@@ -1628,6 +1634,54 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Game Design v1.0 §15: the acceptance tests that can be proven without a long robot run.</summary>
+        /// <summary>Playtest 2026-10-26: "robots are still struggling to pick up things in the sorting tray".
+        /// Retrobot and Unibot are built, the tray is filled with parts they may carry (its back row against the
+        /// wall too), and they must take every one out, however far over the rim it lies.</summary>
+        IEnumerator TrayChecks()
+        {
+            var wb = g.workbench;
+            var bots = new List<Robot>();
+            foreach (var rid in new[] { "retrobot", "unibot" })
+            {
+                var pj = wb.P(rid);
+                foreach (var id in wb.PartIds(pj)) { Take(id); g.interaction.DepositStation(id); }
+                wb.InstallAll(pj);
+                wb.Activate(pj);
+                bots.Add(wb.RobotOf(pj));
+            }
+            float t0 = Time.realtimeSinceStartup;
+            while (bots.Any(b => !b.Active) && Time.realtimeSinceStartup - t0 < 15) yield return null;
+            var r = g.TrayRectU;
+            int maxCarry = 0;
+            var loose = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.InTray(i.Position) && g.db.CanRobotCarry(i.defId)
+                                                      && bots.Any(b => b.CanPick(i.id))).Select(i => i.id).Take(8).ToList();
+            foreach (var id in loose) { Take(id); g.interaction.DropInTray(id, false); }
+            yield return new WaitForSeconds(1f);
+            var inTray = loose.Where(id => g.world.instances[id].state == ItemState.InWorld && g.InTray(g.world.instances[id].Position)).ToList();
+            int back = inTray.Count(id => g.world.instances[id].Position.z > r.center.y + 0.15f || g.world.instances[id].Position.z < r.center.y - 0.15f);
+            Time.timeScale = 4f;
+            float tg = 0;
+            while (tg < 480f && inTray.Any(id => g.world.instances[id].state == ItemState.InWorld && g.InTray(g.world.instances[id].Position)))
+            {
+                tg += Time.deltaTime;
+                maxCarry = Mathf.Max(maxCarry, bots.Sum(b => b.carried.Count));
+                if (Mathf.FloorToInt(tg / 20f) != Mathf.FloorToInt((tg - Time.deltaTime) / 20f))
+                    Debug.Log($"[traytest] {tg:0} s: {inTray.Count(id => g.world.instances[id].state == ItemState.InWorld && g.InTray(g.world.instances[id].Position))} left; " +
+                              string.Join(" | ", bots.Select(b => b.Describe())));
+                yield return null;
+            }
+            Time.timeScale = 1f;
+            var left = inTray.Where(id => g.world.instances[id].state == ItemState.InWorld && g.InTray(g.world.instances[id].Position)).ToList();
+            Check("walking robots take every part they can carry out of the sorting tray, the back row too", inTray.Count >= 6 && left.Count == 0,
+                  $"{inTray.Count} parts in the tray ({back} off its middle line), {left.Count} left after {tg:0} s game time" +
+                  (left.Count > 0 ? ": " + string.Join(", ", left.Select(id => $"{g.world.DefOf(id).displayName} at z {g.world.instances[id].Position.z - r.center.y:+0.00;-0.00} ({string.Join("/", bots.Select(b => b.PickHint(id)))})")) : ""));
+            // the settings screen: values and on/off states must be readable at a glance (same playtest)
+            g.SetState("paused");
+            g.hud.OpenSub("settings");
+            yield return g.Capture(Path.Combine(outDir, "tray_settings.png"), 6);
+            g.SetState("play");
+        }
+
         IEnumerator DesignChecks()
         {
             var pr = g.progression;

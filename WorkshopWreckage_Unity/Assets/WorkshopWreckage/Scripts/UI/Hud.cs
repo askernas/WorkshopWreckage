@@ -428,8 +428,35 @@ namespace WorkshopWreckage
             var s = DefaultControls.CreateSlider(new DefaultControls.Resources());
             s.transform.SetParent(row.transform, false);
             var sl = s.GetComponent<Slider>();
+            // the default controls have no sprites: every piece is the same white box, so the value can't be
+            // seen (playtest 2026-10-26). A dark track, an amber fill, a light handle and the value in words.
+            s.transform.Find("Background").GetComponent<Image>().color = ControlTrack;
+            s.transform.Find("Fill Area/Fill").GetComponent<Image>().color = UiStyle.Amber;
+            var handle = s.transform.Find("Handle Slide Area/Handle").GetComponent<Image>();
+            handle.color = UiStyle.Ink;
+            sl.targetGraphic = handle;
+            sl.colors = ControlColors();
+            var val = Para(row.transform, "", 18, UiStyle.Amber, 32);
+            val.alignment = TextAnchor.MiddleRight;
+            val.GetComponent<LayoutElement>().preferredWidth = 70;
+            val.GetComponent<LayoutElement>().flexibleWidth = 0;
+            System.Action<float> show = v => val.text = lo == 0f && hi == 1f ? $"{Mathf.RoundToInt(v * 100)} %" : $"{v:0.##}";
             sl.minValue = lo; sl.maxValue = hi; sl.value = value;
-            sl.onValueChanged.AddListener(v => cb(v));
+            show(sl.value);
+            sl.onValueChanged.AddListener(v => { show(v); cb(v); });
+        }
+
+        static readonly Color ControlTrack = new(0.04f, 0.1f, 0.17f, 1f);
+
+        /// <summary>Hover and press tints that read on blueprint paper.</summary>
+        static ColorBlock ControlColors()
+        {
+            var c = ColorBlock.defaultColorBlock;
+            c.normalColor = Color.white;
+            c.highlightedColor = new Color(1f, 0.9f, 0.7f);
+            c.selectedColor = new Color(1f, 0.9f, 0.7f);
+            c.pressedColor = new Color(0.85f, 0.75f, 0.55f);
+            return c;
         }
 
         void ToggleRow(Transform parent, string label, bool value, System.Action<bool> cb)
@@ -438,10 +465,23 @@ namespace WorkshopWreckage
             t.transform.SetParent(parent, false);
             t.AddComponent<LayoutElement>().preferredHeight = 30;
             var tg = t.GetComponent<Toggle>();
-            tg.isOn = value;
-            tg.onValueChanged.AddListener(v => cb(v));
+            // a dark box with an amber check, and ON / OFF in the label (the sprite-less default is a white
+            // check on a white box: on and off looked the same)
+            var box = t.transform.Find("Background").GetComponent<Image>();
+            box.color = ControlTrack;
+            box.rectTransform.sizeDelta = new Vector2(22, 22);
+            var check = t.transform.Find("Background/Checkmark").GetComponent<Image>();
+            check.color = UiStyle.Amber;
+            check.rectTransform.anchorMin = Vector2.zero; check.rectTransform.anchorMax = Vector2.one;
+            check.rectTransform.offsetMin = new Vector2(4, 4); check.rectTransform.offsetMax = new Vector2(-4, -4);
+            tg.colors = ControlColors();
             var txt = t.GetComponentInChildren<Text>();
-            txt.text = label; txt.font = TextAtlas.Font; txt.fontSize = 18; txt.color = Cream;
+            txt.font = TextAtlas.Font; txt.fontSize = 18; txt.color = UiStyle.Ink; txt.supportRichText = true;
+            txt.rectTransform.offsetMin = new Vector2(32, txt.rectTransform.offsetMin.y);
+            System.Action<bool> show = on => txt.text = $"{label}   <b><color=#{(on ? "FFBD61" : "8FA3B8")}>{(on ? "ON" : "OFF")}</color></b>";
+            tg.isOn = value;
+            show(value);
+            tg.onValueChanged.AddListener(v => { show(v); cb(v); });
         }
 
         // ------------------------------------------------------------------ screens
@@ -453,6 +493,9 @@ namespace WorkshopWreckage
         }
 
         public void SetHudVisible(bool v) => _hud.gameObject.SetActive(v);
+
+        /// <summary>QA: opens a sub-screen (settings, save, ...) as its menu button does.</summary>
+        public void OpenSub(string name) => ShowSub(name);
 
         void ShowSub(string name)
         {

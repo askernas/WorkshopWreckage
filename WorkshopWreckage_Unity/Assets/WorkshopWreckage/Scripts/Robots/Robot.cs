@@ -1039,7 +1039,9 @@ namespace WorkshopWreckage
                     bool high = !Flies && ip.y > _maxPickH;   // only climbers choose those: they climb up from the path's end
                     bool tray = g.InTray(ip);                 // reached over the rim from outside
                     float fd = Flat(ip - transform.position).magnitude;
-                    bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : ((!high && fd <= _reach * 0.75f) || (Steer(dt) && (fd <= _reach + 0.1f || (high && fd <= 1.0f) || (tray && fd <= 0.65f))));
+                    // a tray part is taken from the end of its path (TrayGoal), however far over the rim it lies:
+                    // the tray backs onto the wall, so its back row is up to 0.9 m from the nearest floor
+                    bool arrived = Flies ? FlyTo(_hoverTarget, dt, true) : ((!high && fd <= _reach * 0.75f) || (Steer(dt) && (tray || fd <= _reach + 0.1f || (high && fd <= 1.0f))));
                     if (arrived) { _step = Step.Picking; StartCoroutine(PickUp(targetId)); }
                     else if (!Flies && _pathIdx >= _path.Count) { _unreachable.Add(targetId); Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; }   // a delivery plans its own path (the spent one would "arrive" with no destination)
                     break;
@@ -1509,7 +1511,7 @@ namespace WorkshopWreckage
             if (Flies && g.debris != null && g.debris.At(i.Position) > i.Position.y + ItemDatabase.Extents(def)[2] * 0.5f + 0.05f) return false;   // buried
             bool staged = i.owner.StartsWith("stage:");
             if (staged && Blocked(def.storageBox)) return false;   // waits until someone clears the strays out of its destination
-            if (ReachableDest(def.storageBox)) return true;
+            if (ReachableDest(def.storageBox) || tray) return true;   // the tray is always emptied, staging caps or not
             if (staged) return false;   // waiting for a robot that can store it
             int inZone = (_stagedNow?.GetValueOrDefault("stage:" + def.storageBox) ?? 0) + (Fleet ? PendingStage(def.storageBox) : 0);
             if (inZone >= StagingCapacity) return false;   // that zone is full (the hard cap holds for every robot)

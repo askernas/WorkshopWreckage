@@ -26,6 +26,7 @@ namespace WorkshopWreckage
             SfxSetting = Mathf.Clamp01(PlayerPrefs.GetFloat("ww_sfx_volume", 0.8f));
             AudioListener.volume = mute ? 0 : MasterSetting;
             masterVolume = mute ? 0 : SfxSetting;
+            Debug.Log($"[audio] master {MasterSetting:0.00}, effects {SfxSetting:0.00}{(mute ? ", muted run" : "")}");
         }
 
         public static void SetMaster(float v)
