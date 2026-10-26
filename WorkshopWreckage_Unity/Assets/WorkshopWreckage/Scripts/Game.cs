@@ -145,12 +145,12 @@ namespace WorkshopWreckage
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
-            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.ContainsKey("splash")) Splash.Show(); StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
+            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.TryGetValue("splash", out var sp)) { Splash.Show(() => hud.SplashBackdrop(true)); if (sp == "backdrop") Splash.Dismiss(); } StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
             else if (args.ContainsKey("robotbench") && _studio != null) { SetState("play"); StartCoroutine(RobotBench()); }
             else if (args.TryGetValue("bench", out var bp)) { SetState("play"); StartCoroutine(new Benchmark().Run(this, bp)); }
             else if (args.TryGetValue("autoplay", out var ap)) { SetState("play"); StartCoroutine(new Autoplay().Run(this, ap)); }
             else if (args.ContainsKey("play")) SetState("play");
-            else { SetState("menu"); Splash.Show(); }
+            else { SetState("menu"); Splash.Show(() => hud.SplashBackdrop(true)); }
         }
 
         IEnumerator ProbeLater()
@@ -1646,6 +1646,14 @@ namespace WorkshopWreckage
 
         public void SetState(string s)
         {
+            // the game begins from the main menu: the splash backdrop goes and the world fades in from
+            // black, so the parts have settled before they are seen (playtest 2026-10-26)
+            if (state == "menu" && s == "play" && !Automated)
+            {
+                Splash.Close();
+                hud.SplashBackdrop(false);
+                Splash.FadeIn();
+            }
             state = s;
             bool playing = s == "play";
             if (!playing && interaction.inspecting && s != "paused") interaction.EndInspect();

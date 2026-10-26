@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -6,27 +7,34 @@ using UnityEngine.UI;
 namespace WorkshopWreckage
 {
     /// <summary>The title splash (resources/splash screen, playtest 2026-10-26): shown over everything when
-    /// the game starts, before the main menu, then fades out. Any key or click skips it.</summary>
+    /// the game starts and stays until a key or click. Then it drops behind the HUD and stays as the main
+    /// menu's backdrop (the menu sits below the painted title) until the game begins; then the game fades in
+    /// from black (FadeIn), so the world has settled before it is seen.</summary>
     public class Splash : MonoBehaviour
     {
-        const float Hold = 3f, Fade = 0.7f;
+        const float Appear = 0.5f;
+        /// <summary>Behind the HUD canvas (sortingOrder 10) once dismissed, so the menu is drawn on top.</summary>
+        const int BackdropOrder = 5;
 
-        public static void Show()
+        static Splash _current;
+        /// <summary>The splash is up as the menu's backdrop (dismissed, the game not begun yet).</summary>
+        public static bool IsBackdrop => _current != null && _current._dismissed;
+
+        Canvas _canvas;
+        CanvasGroup _group;
+        Action _onDismiss;
+        bool _dismissed, _skip;
+
+        /// <summary>QA (--menushot --splash=backdrop): dismisses it as a click would.</summary>
+        public static void Dismiss() { if (_current != null) _current._skip = true; }
+
+        /// <summary>Shows the splash; `onDismiss` runs at the first key or click (the menu appears then).</summary>
+        public static void Show(Action onDismiss = null)
         {
             var tex = Resources.Load<Texture2D>("Splash/splash");
-            if (tex == null) return;
-            var go = new GameObject("Splash");
-            var canvas = go.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = short.MaxValue;
-            go.AddComponent<GraphicRaycaster>();   // swallows clicks meant for the menu below
-            var group = go.AddComponent<CanvasGroup>();
-
-            var back = new GameObject("Back").AddComponent<Image>();
-            back.transform.SetParent(go.transform, false);
-            back.color = Color.black;
-            Stretch(back.rectTransform);
-
+            if (tex == null) { onDismiss?.Invoke(); return; }
+            var go = Overlay("Splash", Color.black, out var canvas, out var group);
+            go.AddComponent<GraphicRaycaster>();   // swallows clicks meant for the menu below until dismissed
             var img = new GameObject("Image").AddComponent<RawImage>();
             img.transform.SetParent(go.transform, false);
             img.texture = tex;
@@ -34,8 +42,39 @@ namespace WorkshopWreckage
             var fit = img.gameObject.AddComponent<AspectRatioFitter>();
             fit.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent;   // fills the screen, crops the overflow
             fit.aspectRatio = (float)tex.width / tex.height;
+            group.alpha = 0;
+            _current = go.AddComponent<Splash>();
+            _current._canvas = canvas;
+            _current._group = group;
+            _current._onDismiss = onDismiss;
+        }
 
-            go.AddComponent<Splash>()._group = group;
+        /// <summary>The game begins: the splash backdrop goes.</summary>
+        public static void Close()
+        {
+            if (_current != null) Destroy(_current.gameObject);
+            _current = null;
+        }
+
+        /// <summary>Black over everything, held `hold` seconds then faded out over `fade` (unscaled time).</summary>
+        public static void FadeIn(float hold = 0.35f, float fade = 0.6f)
+        {
+            var go = Overlay("FadeIn", Color.black, out _, out var group);
+            go.AddComponent<Fader>().Run(group, hold, fade);
+        }
+
+        static GameObject Overlay(string name, Color back, out Canvas canvas, out CanvasGroup group)
+        {
+            var go = new GameObject(name);
+            canvas = go.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = short.MaxValue;
+            group = go.AddComponent<CanvasGroup>();
+            var img = new GameObject("Back").AddComponent<Image>();
+            img.transform.SetParent(go.transform, false);
+            img.color = back;
+            Stretch(img.rectTransform);
+            return go;
         }
 
         static void Stretch(RectTransform r)
@@ -45,24 +84,43 @@ namespace WorkshopWreckage
             r.offsetMin = r.offsetMax = Vector2.zero;
         }
 
-        CanvasGroup _group;
-
         IEnumerator Start()
         {
-            for (float t = 0; t < Hold && !Skipped(); t += Time.unscaledDeltaTime) yield return null;
-            for (float t = 0; t < Fade; t += Time.unscaledDeltaTime)
+            for (float t = 0; t < Appear; t += Time.unscaledDeltaTime)
             {
-                _group.alpha = 1 - t / Fade;
+                _group.alpha = t / Appear;
+                if (Pressed()) break;
                 yield return null;
             }
-            Destroy(gameObject);
+            _group.alpha = 1;
+            while (!Pressed() && !_skip) yield return null;
+            _dismissed = true;
+            _canvas.sortingOrder = BackdropOrder;
+            _group.blocksRaycasts = false;
+            _onDismiss?.Invoke();
         }
 
-        static bool Skipped()
+        static bool Pressed()
         {
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             return (kb != null && kb.anyKey.wasPressedThisFrame) || (mouse != null && (mouse.leftButton.wasPressedThisFrame || mouse.rightButton.wasPressedThisFrame));
+        }
+
+        class Fader : MonoBehaviour
+        {
+            public void Run(CanvasGroup g, float hold, float fade) => StartCoroutine(Go(g, hold, fade));
+
+            IEnumerator Go(CanvasGroup g, float hold, float fade)
+            {
+                for (float t = 0; t < hold; t += Time.unscaledDeltaTime) yield return null;
+                for (float t = 0; t < fade; t += Time.unscaledDeltaTime)
+                {
+                    g.alpha = 1 - Mathf.SmoothStep(0, 1, t / fade);
+                    yield return null;
+                }
+                Destroy(gameObject);
+            }
         }
     }
 }

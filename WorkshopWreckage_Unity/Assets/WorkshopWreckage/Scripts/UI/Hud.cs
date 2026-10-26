@@ -279,12 +279,28 @@ namespace WorkshopWreckage
             return t;
         }
 
+        RectTransform _mainPanel;
+        readonly List<GameObject> _mainTitleBits = new();
+
+        /// <summary>The title splash is the main menu's backdrop (playtest 2026-10-26): the menu drops below
+        /// the painted title, without its own title, help lines or dimming. Off: the menu as it always was.</summary>
+        public void SplashBackdrop(bool on)
+        {
+            if (_mainPanel == null) return;
+            foreach (var go in _mainTitleBits) go.SetActive(!on);
+            var low = new Vector2(0.5f, 0f);
+            _mainPanel.anchorMin = _mainPanel.anchorMax = _mainPanel.pivot = on ? low : new Vector2(0.5f, 0.5f);
+            _mainPanel.anchoredPosition = on ? new Vector2(0, 48) : Vector2.zero;
+            _screens["main"].GetComponent<Image>().color = new Color(0.03f, 0.02f, 0.01f, on ? 0f : 0.55f);
+        }
+
         void BuildMenus()
         {
             var m = Screen("main", 560);
-            Title(m, "WORKSHOP\nWRECKAGE", 60);
-            Para(m, "EST. 1952   ·   SALVAGE & ROBOTICS   ·   WORKSHOP No. 7", 13, Brass, 20);
-            Para(m, "Restore order. Rebuild the robots.", 18, Muted, 28);
+            _mainPanel = m;
+            _mainTitleBits.Add(Title(m, "WORKSHOP\nWRECKAGE", 60).gameObject);
+            _mainTitleBits.Add(Para(m, "EST. 1952   ·   SALVAGE & ROBOTICS   ·   WORKSHOP No. 7", 13, Brass, 20).gameObject);
+            _mainTitleBits.Add(Para(m, "Restore order. Rebuild the robots.", 18, Muted, 28).gameObject);
             _continue = MakeButton(m, "Continue", () => _g.LoadGame(LatestSlot()));
             // world size: cycles through shared/data/world_presets.json
             var presets = ItemDatabase.Presets();
@@ -311,8 +327,8 @@ namespace WorkshopWreckage
             MakeButton(m, "Load Game", () => ShowSub("load"));
             MakeButton(m, "Settings", () => ShowSub("settings"));
             MakeButton(m, "Quit", Application.Quit);
-            Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel select · 1-9 skills (glove, scan, supermagnet, sweep) · K skills · U robots · R/T/H/J robots · Tab log · F5/F9 save/load", 14, Muted, 40);
-            Para(m, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20);
+            _mainTitleBits.Add(Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel select · 1-9 skills (glove, scan, supermagnet, sweep) · K skills · U robots · R/T/H/J robots · Tab log · F5/F9 save/load", 14, Muted, 40).gameObject);
+            _mainTitleBits.Add(Para(m, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20).gameObject);
 
             var p = Screen("pause", 460);
             Title(p, "PAUSED");
