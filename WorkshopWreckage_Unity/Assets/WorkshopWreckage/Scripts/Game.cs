@@ -1280,6 +1280,7 @@ namespace WorkshopWreckage
         string _telemetryFile;
         Dictionary<string, object> _progressionCfg;
         public const int BaseInventory = 10;
+        public const int BaseBatteryPockets = 3;
 
         /// <summary>The chassis type of an actor ("robot:&lt;owner&gt;" as robots deposit), or "".</summary>
         public string RobotTypeOf(string actor) => actor.StartsWith("robot") ? robots.FirstOrDefault(r => r.Owner == actor)?.type ?? "" : "";
@@ -1359,6 +1360,8 @@ namespace WorkshopWreckage
         public void ApplySkills()
         {
             inventory.capacity = BaseInventory + (int)progression.Effect("inventory_capacity");
+            inventory.batteryPockets = BaseBatteryPockets + (int)progression.Effect("battery_pockets");
+            inventory.isBattery = id => world.DefOf(id).IsRadarBattery;
             inventory.stacking = progression.Has("inventory_stacking");
             interaction.reachBonus = (float)progression.Effect("reach_m");
         }

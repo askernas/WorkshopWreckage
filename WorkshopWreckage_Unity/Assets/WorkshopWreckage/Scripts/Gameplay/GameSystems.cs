@@ -77,13 +77,22 @@ namespace WorkshopWreckage
         int _heldSlot = -1;   // without stacking: the held instance
         public event Action Changed;
 
+        /// <summary>Battery pockets (playtest 2026-10-26): Part Radar batteries ride in their own pockets
+        /// (3, the Tool Belt adds more) and never take a part slot.</summary>
+        public int batteryPockets = 3;
+        public Func<int, bool> isBattery = _ => false;
+
         public Inventory(ItemWorld w) { world = w; }
         public int Count => items.Count;
-        public bool IsFull => items.Count >= capacity;
+        public int Batteries => items.Count(isBattery);
+        /// <summary>What counts against the capacity: everything but the batteries.</summary>
+        public int Parts => items.Count - Batteries;
+        public bool IsFull => Parts >= capacity;
+        public bool HasRoomFor(int id) => isBattery(id) ? Batteries < batteryPockets : !IsFull;
 
         public bool Add(int id)
         {
-            if (IsFull || items.Contains(id)) return false;
+            if (!HasRoomFor(id) || items.Contains(id)) return false;
             items.Add(id);
             if (heldDef < 0) { heldDef = world.instances[id].defId; _heldSlot = id; }
             Changed?.Invoke();

@@ -146,7 +146,7 @@ namespace WorkshopWreckage
         /// has been taken — settling parts are busy and would otherwise be skipped.</summary>
         bool Take(int id, float flyTime, bool settleNow = true)
         {
-            if (!Takeable(id) || Inv.IsFull || g.CarriedArm != null) return false;   // both hands on the Sorting Arm
+            if (!Takeable(id) || !Inv.HasRoomFor(id) || g.CarriedArm != null) return false;   // both hands on the Sorting Arm
             var inst = g.world.instances[id];
             var from = inst.transform;
             var def = g.world.DefOf(id);
@@ -175,7 +175,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>How many of `ids` fit in the pockets (the rest go to the tray).</summary>
-        int Fits(int n) => Mathf.Min(n, Mathf.Max(0, Inv.capacity - Inv.Count));
+        int Fits(int n) => Mathf.Min(n, Mathf.Max(0, Inv.capacity - Inv.Parts));
 
         void SettleBatch()
         {
@@ -289,7 +289,7 @@ namespace WorkshopWreckage
             var want = g.db.Get(stacks[0].defId);
             if (!want.magnetic) { g.hud.OnFeedback($"Magnetic Glove: {want.displayName} isn't magnetic", false); return 0; }
             if (!Ready("magnetic_glove", "Magnetic Glove")) return 0;
-            if (Inv.IsFull) { g.hud.OnFeedback($"Your hands are full ({Inv.Count}/{Inv.capacity})", false); return 0; }
+            if (Inv.IsFull) { g.hud.OnFeedback($"Your hands are full ({Inv.Parts}/{Inv.capacity})", false); return 0; }
             float range = Tuned("magnetic_glove", "range_m", lv, 1.5f) * g.Scale("tool_range");
             int max = Fits((int)Tuned("magnetic_glove", "pull_items", lv, lv));
             var hand = MagnetOrigin;
@@ -399,7 +399,7 @@ namespace WorkshopWreckage
                     lineOfSight = dist <= radius && (!los || LineOfSight(hand, inst.Position)) && (inst.state != ItemState.InWorld || !g.Covered(i)),   // not from under a pile
                 };
             }).ToList();
-            var ids = WorkshopWreckage.Supermagnet.Select(def, candidates, cfg, Mathf.Max(0, Inv.capacity - Inv.Count));   // over capacity after a respec: no room
+            var ids = WorkshopWreckage.Supermagnet.Select(def, candidates, cfg, Mathf.Max(0, Inv.capacity - Inv.Parts));   // over capacity after a respec: no room
             if (ids.Count == 0) { g.hud.OnFeedback("Supermagnet: no more of those in range", false); return 0; }
             int toHand = Fits(ids.Count);
             StartCoroutine(Pull(ids));
@@ -448,7 +448,7 @@ namespace WorkshopWreckage
             foreach (var id in ids)
             {
                 float dist = (g.world.instances[id].Position - hand).magnitude;
-                if (Inv.IsFull) { ToTray(id, 0.6f + 0.03f * k++); continue; }   // overflow: the robots sort it from the tray
+                if (!Inv.HasRoomFor(id)) { ToTray(id, 0.6f + 0.03f * k++); continue; }   // overflow: the robots sort it from the tray
                 Take(id, Mathf.Lerp(0.25f, 0.7f, dist / 6f) + 0.04f * k++, false);
             }
             SettleBatch();

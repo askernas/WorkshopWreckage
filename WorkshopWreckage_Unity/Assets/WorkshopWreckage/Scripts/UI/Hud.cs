@@ -849,7 +849,7 @@ namespace WorkshopWreckage
         void RefreshLog()
         {
             var inv = _g.inventory; var p = _g.progress; var db = _g.db;
-            var t = $"<b>Carrying {inv.Count} / {inv.capacity}</b>\n";
+            var t = $"<b>Carrying {inv.Parts} / {inv.capacity}</b>{(inv.Batteries > 0 ? $"   ·   batteries {inv.Batteries} / {inv.batteryPockets}" : "")}\n";
             foreach (var slot in inv.Stacks())
             {
                 var (defId, ids) = slot;
@@ -880,6 +880,7 @@ namespace WorkshopWreckage
 
         public void OnFeedback(string text, bool good)
         {
+            Debug.Log($"[feedback] {(good ? "ok" : "no")}: {text}");   // what the player was told (playtest diagnosis)
             _feedback.text = text;
             _feedback.color = good ? GoodC : BadC;
             _feedbackT = 2.2f;
@@ -1061,7 +1062,7 @@ namespace WorkshopWreckage
                 _heldCount.text = def.CategoryName + "  ·  " + _g.progress.CountLabel(def.id);
                 _heldDest.text = def.IsRadarBattery ? $"Battery charge  {_g.radar.Charges(id)} / {_g.radar.cfg.maxCharges}" + (_g.radar.assembled ? "   [Y] radar, [L] load" : "")
                     : "→  " + (def.IsToolItem ? "Robot Workbench (Part Radar)" : _g.db.BoxLabel(def.storageBox));
-                _carried.text = $"Carrying {inv.Count} / {inv.capacity}     [Wheel] switch   [Z] drop   [Tab] inventory";
+                _carried.text = $"Carrying {inv.Parts} / {inv.capacity}{(inv.Batteries > 0 ? $"  ·  batteries {inv.Batteries} / {inv.batteryPockets}" : "")}     [Wheel] switch   [Z] drop   [Tab] inventory";
             }
             if (!_hotbarDirty) return;
             _hotbarDirty = false;

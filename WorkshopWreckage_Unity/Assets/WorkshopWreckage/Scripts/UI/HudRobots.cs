@@ -11,6 +11,7 @@ namespace WorkshopWreckage
     /// the type's upgrade tree, pause / follow / assignment).</summary>
     public partial class Hud
     {
+        RectTransform _wbRadar;
         RectTransform _wbTabs, _wbActions, _wbSpares, _rbTabs, _rbActions, _rbUpgrades;
         Text _wbHeader, _wbPartsA, _wbPartsB, _rbInfo, _rbHeader;
         RawImage _wbPreview;
@@ -66,6 +67,7 @@ namespace WorkshopWreckage
             _wbPartsB = Block(Col(parts, 500), 16, 310);
             _wbActions = Row(wb, 46, 10);
             _wbSpares = Row(wb, 36, 8);   // modules taken off built robots, for this assembly
+            _wbRadar = Row(wb, 36, 10);   // the Part Radar: its parts in the pool, the plans, Build
             Para(wb, "Robot parts are delivered by hand: carry them here and click the bench.  [F] at the bench: pick the robot up and turn it in your hands.", 14, Muted, 22);
 
             var rs = Screen("robots", 1500);
@@ -104,6 +106,36 @@ namespace WorkshopWreckage
 
         /// <summary>QA: the workbench screen's buttons now on screen (unchanged ones must survive a refresh).</summary>
         public List<GameObject> WorkbenchButtons() => _wbTabs.Cast<Transform>().Concat(_wbActions.Cast<Transform>()).Concat(_wbSpares.Cast<Transform>()).Where(t => t.gameObject.activeSelf).Select(t => t.gameObject).ToList();
+
+        /// <summary>The Part Radar line on the bench screen: which of its parts are in the pool, the plans, and Build.</summary>
+        void RefreshRadarRow()
+        {
+            ClearChildren(_wbRadar);
+            var radar = _g.radar;
+            if (radar == null) return;
+            string text;
+            if (radar.assembled) text = $"<b>Part Radar</b>  <color={Hex(GoodC)}>built</color>  ·  [Y] take it out";
+            else
+            {
+                var missing = radar.MissingNames();
+                string parts = missing.Count == 0 ? $"<color={Hex(GoodC)}>all {PartRadarModel.Parts.Length} parts in the pool</color>"
+                    : $"{PartRadarModel.Parts.Length - missing.Count}/{PartRadarModel.Parts.Length} parts in the pool  <color={Hex(Muted)}>· missing: {string.Join(", ", missing)}</color>";
+                string plans = radar.HasPlans ? $"<color={Hex(GoodC)}>plans bought</color>" : $"<color={Hex(BadC)}>plans not bought</color> <color={Hex(Muted)}>(2 skill points, [K])</color>";
+                text = $"<b>Part Radar</b>  {parts}  ·  {plans}";
+            }
+            var t = Para(_wbRadar, text, 16, Cream, 30);
+            t.GetComponent<LayoutElement>().preferredWidth = 1180;
+            t.alignment = TextAnchor.MiddleLeft;
+            if (radar.assembled) return;
+            var b = MakeButton(_wbRadar, "Build the Part Radar", () =>
+            {
+                bool ok = radar.TryAssemble();
+                OnFeedback(ok ? "PART RADAR ASSEMBLED  ·  [Y] take it out" : radar.WhyNotBuilt(), ok);
+                RefreshWorkbench();
+            });
+            b.GetComponent<LayoutElement>().preferredWidth = 280;
+            b.interactable = radar.WhyNotBuilt() == "";
+        }
 
         void RefreshWorkbench()
         {
@@ -199,6 +231,7 @@ namespace WorkshopWreckage
                 sb.interactable = stock > 0;
                 sb.GetComponent<LayoutElement>().preferredWidth = 300;
             }
+            RefreshRadarRow();
             // a head or arm stripped off a built robot (Modify robots → Take off) goes on here too
             ClearChildren(_wbSpares);
             // the shared pool: any robot's head or arm in it can go on this one instead (the player's choice)

@@ -308,7 +308,7 @@ namespace WorkshopWreckage
             switch (targetType)
             {
                 case "arm":
-                    return Inv.Count > 0
+                    return Inv.Parts > 0
                         ? new TargetInfo { title = "Sorting Arm", sub = targetArm.Describe(), hint = "It takes both hands — put away the parts you carry first", tone = -1 }
                         : new TargetInfo { title = "Sorting Arm", sub = targetArm.Describe(), hint = "[LMB] Pick it up (both hands)", tone = 1 };
                 case "item":
@@ -316,7 +316,7 @@ namespace WorkshopWreckage
                     var def = World.DefOf(targetItem);
                     bool known = game.progress.IsDiscovered(def.id);
                     return new TargetInfo { title = known ? def.displayName : def.shape + "  (unidentified)", sub = def.CategoryName,
-                        hint = Inv.IsFull ? "Hands full — sort what you carry" : "[LMB] Pick up    [F] Inspect" };
+                        hint = !Inv.HasRoomFor(targetItem) ? (Inv.isBattery(targetItem) ? "Battery pockets full" : "Hands full — sort what you carry") : "[LMB] Pick up    [F] Inspect" };
                 }
                 case "dest":
                 {
@@ -418,9 +418,10 @@ namespace WorkshopWreckage
                 Feedback?.Invoke("Both hands on the Sorting Arm — mount it or set it down first", false);
                 return false;
             }
-            if (Inv.IsFull)
+            if (!Inv.HasRoomFor(id))
             {
-                Feedback?.Invoke($"Your hands are full ({Inv.Count}/{Inv.capacity}) — store what you carry first", false);
+                Feedback?.Invoke(Inv.isBattery(id) ? $"Your battery pockets are full ({Inv.Batteries}/{Inv.batteryPockets})"
+                                                   : $"Your hands are full ({Inv.Parts}/{Inv.capacity}) — store what you carry first", false);
                 Sfx.Play("reject", null, -6);
                 return false;
             }

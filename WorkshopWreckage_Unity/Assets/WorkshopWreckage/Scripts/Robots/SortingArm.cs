@@ -270,7 +270,7 @@ namespace WorkshopWreckage
         {
             if (!_r.Operational || place == Place.Carried) return false;
             if (_g.CarriedArm != null) { _g.hud.Toast("You are already carrying a Sorting Arm"); return false; }
-            if (_g.inventory.Count > 0) { _g.hud.Toast("The Sorting Arm takes both hands — put away the parts you carry first"); return false; }
+            if (_g.inventory.Parts > 0) { _g.hud.Toast("The Sorting Arm takes both hands — put away the parts you carry first"); return false; }
             if (place == Place.Mounted && _busy) { _detach = true; _g.hud.Toast($"{_r.displayName}: finishing this move, then it's yours"); return true; }
             CancelCycle();
             Unmount();

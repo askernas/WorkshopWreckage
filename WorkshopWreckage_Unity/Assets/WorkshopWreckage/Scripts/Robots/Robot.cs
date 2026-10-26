@@ -504,7 +504,7 @@ namespace WorkshopWreckage
                 Sfx.Play("complete", transform.position + Vector3.up * 0.3f, -2);
                 g.progression?.OnRobotRepaired(id);
                 GameEvents.Raise(GameEventKind.RobotActivated, Owner, type);
-                bool carried = g.CarriedArm == null && g.inventory.Count == 0 && arm.PickUp();   // PickUp says how to mount it
+                bool carried = g.CarriedArm == null && g.inventory.Parts == 0 && arm.PickUp();   // PickUp says how to mount it
                 if (!carried) g.hud.Toast($"{displayName} is ready — it waits in front of the workbench: with empty hands, click it to pick it up", true);
                 g.workbench?.Refresh();
                 foreach (var r in g.robots) if (r != this && r.mode == Mode.Assembling) r.RefreshAssembly();

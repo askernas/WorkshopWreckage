@@ -1740,6 +1740,11 @@ namespace WorkshopWreckage
             Check("radar parts go into the robot parts pool; without the plans the radar is not built",
                   parts.Count == PartRadarModel.Parts.Length && allOffered && waits && plans != null && plans.cost == 2,
                   $"{parts.Count} part types, offered at the bench {allOffered}, assembled {radar.assembled}, pool {wb.PoolContents().Count}; plans cost {plans?.cost}; \"{last}\"");
+            g.OpenWorkbench("retrobot");
+            yield return Frames(4);
+            yield return g.Capture(Path.Combine(outDir, "radar_bench_screen.png"), 2);
+            g.SetState("play");
+            var pr = g.progression;
             LevelTo(Mathf.Max(2, plans?.unlockLevel ?? 2));
             g.progression.skillPoints = Mathf.Max(g.progression.skillPoints, 2);
             int sp = g.progression.skillPoints;
@@ -1748,6 +1753,20 @@ namespace WorkshopWreckage
             Check("buying the Part Radar plans (2 skill points) builds it from the pool at once",
                   bought && radar.assembled && g.progression.skillPoints == sp - 2 && !parts.Any(id => wb.PoolContents().Contains(id)),
                   $"bought {bought}, assembled {radar.assembled}, points {sp} → {g.progression.skillPoints}");
+
+            // battery pockets: 3 of their own, beside full hands; the Tool Belt adds 3
+            var inv = g.inventory;
+            var filler = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart).Take(inv.capacity - inv.Parts).Select(i => i.id).ToList();
+            foreach (var id in filler) Take(id);
+            var bats = g.world.instances.Where(i => g.world.DefOf(i.id).IsRadarBattery && i.state == ItemState.InWorld).Take(7).Select(i => i.id).ToList();
+            int took = bats.Count(id => { var before = inv.Count; Take(id); return inv.Count > before; });
+            bool three = inv.IsFull && took == 3 && inv.Batteries == 3 && inv.Parts == inv.capacity;
+            pr.level = pr.maxLevel; pr.skillPoints = 99;
+            g.UnlockSkill("pockets_1"); g.UnlockSkill("pockets_2");
+            int took2 = bats.Skip(3).Count(id => { var before = inv.Count; Take(id); return inv.Count > before; });
+            Check("batteries ride in their own 3 pockets beside full hands; the Tool Belt adds 3 more",
+                  three && took2 == 3 && inv.batteryPockets == 6 && inv.Batteries == 6,
+                  $"first {took} taken with hands {inv.Parts}/{inv.capacity}; after the Tool Belt {took2} more, {inv.Batteries}/{inv.batteryPockets} pockets");
         }
 
         /// <summary>A preset sets the pipeline, the look and the shadows; one changed value makes it Custom;

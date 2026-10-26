@@ -39,7 +39,7 @@
 	},
 	"skills": [
 		{"id": "pockets_1", "name": "Deeper Pockets", "group": "inventory", "cost": 1, "requires": [], "effects": {"inventory_capacity": 2}, "status": "active"},
-		{"id": "pockets_2", "name": "Tool Belt", "group": "inventory", "cost": 2, "requires": ["pockets_1"], "effects": {"inventory_capacity": 3}, "status": "active"},
+		{"id": "pockets_2", "name": "Tool Belt", "group": "inventory", "cost": 2, "requires": ["pockets_1"], "effects": {"inventory_capacity": 3, "battery_pockets": 3}, "status": "active"},
 		{"id": "organiser", "name": "Parts Organiser", "group": "inventory", "cost": 1, "requires": [], "effects": {"inventory_stacking": 1}, "status": "active", "comment": "Identical parts stack in one slot and the pockets are sorted by type. Before this every part is its own slot, in pickup order."},
 		{"id": "quick_hands", "name": "Quick Hands", "group": "collection", "cost": 1, "requires": [], "effects": {"pickup_speed": 0.25}, "status": "active"},
 		{"id": "inventory_manifest", "name": "Inventory Manifest", "group": "scanning", "cost": 1, "requires": [], "effects": {"reveal_totals": 1}, "status": "active"},

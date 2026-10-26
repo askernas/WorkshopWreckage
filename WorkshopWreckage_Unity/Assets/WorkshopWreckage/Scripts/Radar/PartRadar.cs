@@ -164,6 +164,22 @@ namespace WorkshopWreckage
         /// them its parts only collect in the robot parts pool.</summary>
         public bool HasPlans => g.progression != null && g.progression.Has("part_radar_plans");
 
+        /// <summary>Names of the parts not yet in the pool.</summary>
+        public List<string> MissingNames()
+        {
+            var have = TypesDelivered();
+            return PartRadarModel.Parts.Where(p => !have.Contains(p)).Select(Name).ToList();
+        }
+
+        /// <summary>Why it can't be built now ("" = it can).</summary>
+        public string WhyNotBuilt()
+        {
+            if (assembled) return "The Part Radar is already built";
+            var missing = MissingNames();
+            if (missing.Count > 0) return $"The Part Radar still needs: {string.Join(", ", missing)}";
+            return HasPlans ? "" : "Buy the Part Radar plans first (2 skill points, [K])";
+        }
+
         /// <summary>Builds the radar if the plans are bought and one of each part is in the pool (after buying the plans).</summary>
         public bool TryAssemble()
         {
