@@ -326,7 +326,10 @@ namespace WorkshopWreckage
         {
             var n = d.displayName;
             int sp = n.IndexOf(' ');
-            return (sp >= 0 ? n.Substring(sp + 1) : n).ToLowerInvariant();
+            n = sp >= 0 ? n.Substring(sp + 1) : n;
+            // a further unit's kit: "Hoverbot #2 Head" is a "head" like the first one's
+            if (n.StartsWith("#") && n.IndexOf(' ') is int u && u > 0) n = n.Substring(u + 1);
+            return n.ToLowerInvariant();
         }
 
         RobotWorkbench.Project Project => g.workbench?.P(id);

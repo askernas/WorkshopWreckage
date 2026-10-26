@@ -16,8 +16,10 @@ namespace WorkshopWreckage
     ///    (robots.json assembly.requires); each one visibly appears on the robot;
     ///  · when every part is installed the player activates the robot (it hops off the
     ///    bench and starts work).
-    /// Extra Hoverbots are crafted on the Hoverbot mat from ordinary parts (recipes by
-    /// category in robots.json extra_units) once the previous Hoverbot is operational.
+    /// Extra Hoverbots and Sorting Arms (robots.json extra_units) are built from their own kits
+    /// (robot_parts.json, all in the world from the start) on their type's mat once the unit before
+    /// them is operational; their delivered parts wait in the type's holding tray until then
+    /// (playtest 2026-10-26). A unit with "materials" is still crafted from ordinary parts by category.
     /// Heads and arms are interchangeable (as modules are on a built robot): another
     /// robot's head or arm can fill a chassis' head or arm slot during assembly, and
     /// then stands for that chassis' own head or arm (with its small fittings) until
@@ -87,9 +89,9 @@ namespace WorkshopWreckage
                     var x = new Project
                     {
                         id = Json.Str(ed, "id"), type = Types[i], name = Json.Str(ed, "name"), level = Unlocks.Robot(Json.Str(ed, "id"), p.level), mat = i,
-                        crafted = true, after = after, requires = req,
+                        crafted = ed.ContainsKey("materials"), after = after, requires = req,
                     };
-                    foreach (var kv in Json.Obj(ed["materials"])) x.materials[kv.Key] = (int)(double)kv.Value;
+                    foreach (var kv in Json.Obj(ed.GetValueOrDefault("materials")) ?? new Dictionary<string, object>()) x.materials[kv.Key] = (int)(double)kv.Value;
                     projects.Add(x);
                     after = x.id;
                 }
@@ -138,7 +140,10 @@ namespace WorkshopWreckage
         /// <summary>The project currently using a mat (the first one not yet operational).</summary>
         public Project ActiveOnMat(int mat) => projects.Where(p => p.mat == mat).FirstOrDefault(p => !Operational(p)) ?? projects.Last(p => p.mat == mat);
 
-        public List<int> PartIds(Project p) => p.crafted ? new List<int>() : _g.db.RobotPartIds(p.type).SelectMany(d => _g.world.IdsOf(d)).ToList();
+        public List<int> PartIds(Project p) => p.crafted ? new List<int>() : _g.db.RobotPartIds(p.id).SelectMany(d => _g.world.IdsOf(d)).ToList();
+
+        /// <summary>The robot type of a unit ("hoverbot_2" -> "hoverbot").</summary>
+        public string TypeOf(string unit) => P(unit)?.type ?? unit;
 
         // ---------------------------------------------------------------- interchangeable heads and arms
 
@@ -155,7 +160,7 @@ namespace WorkshopWreckage
             ["hoverbot"] = new() { [ModuleSlot.Head] = new[] { "head" }, [ModuleSlot.ArmL] = new[] { "left arm" }, [ModuleSlot.ArmR] = new[] { "right arm" } },
         };
 
-        /// <summary>The robot a part item was made for.</summary>
+        /// <summary>The robot (unit) a part item was made for.</summary>
         public string OriginOf(int id) => _g.world.DefOf(id).craftingPurpose.Replace("robot:", "");
 
         /// <summary>Which head/arm slot of `type` the part key belongs to (main item or fitting).</summary>
@@ -172,7 +177,7 @@ namespace WorkshopWreckage
             var d = _g.world.DefOf(id);
             if (!d.IsRobotPart) return null;
             string o = OriginOf(id), key = Robot.PartKey(d);
-            if (ModuleParts.TryGetValue(o, out var m)) foreach (var kv in m) if (kv.Value[0] == key) return kv.Key;
+            if (ModuleParts.TryGetValue(TypeOf(o), out var m)) foreach (var kv in m) if (kv.Value[0] == key) return kv.Key;
             return null;
         }
 
@@ -198,7 +203,7 @@ namespace WorkshopWreckage
             foreach (var id in Mains())
             {
                 var i = _g.world.instances[id];
-                if (i.state == ItemState.Installed && i.owner == owner && OriginOf(id) != p.type && MainSlotOf(id) == s) return id;
+                if (i.state == ItemState.Installed && i.owner == owner && OriginOf(id) != p.id && MainSlotOf(id) == s) return id;
             }
             return -1;
         }
@@ -313,7 +318,7 @@ namespace WorkshopWreckage
 
         /// <summary>The part key an item takes on p (a donor head or arm takes the slot's main key).</summary>
         public string KeyOn(Project p, int id)
-            => OriginOf(id) != p.type && MainSlotOf(id) is ModuleSlot s && TakesDonors(p, s) ? MainKey(p.type, s) : Robot.PartKey(_g.world.DefOf(id));
+            => OriginOf(id) != p.id && MainSlotOf(id) is ModuleSlot s && TakesDonors(p, s) ? MainKey(p.type, s) : Robot.PartKey(_g.world.DefOf(id));
 
         /// <summary>Is that head or arm slot of p filled (its own main item or a donor)?</summary>
         bool SlotFilled(Project p, ModuleSlot s)
@@ -331,7 +336,7 @@ namespace WorkshopWreckage
             foreach (var id in Mains())
             {
                 string o = OriginOf(id);
-                if (o == p.type || _g.world.instances[id].state != ItemState.Stored) continue;
+                if (o == p.id || _g.world.instances[id].state != ItemState.Stored) continue;
                 var own = P(o);
                 if (own != null && CanInstall(own, id) == "") continue;
                 if (CanInstall(p, id) == "") yield return id;
@@ -362,7 +367,8 @@ namespace WorkshopWreckage
         /// <summary>Parts in the trays that can go on p now (its own, and other robots' heads and arms).</summary>
         public int InstallableCount(Project p) => DeliveredIds(p).Count(id => CanInstall(p, id) == "") + DonorCandidates(p).Count();
 
-        public List<int> DeliveredIds(Project p) => p.crafted ? new List<int>() : _g.storage.Stored(StationOf(p.type)).ToList();
+        /// <summary>Its own delivered parts (the units of a type share one holding tray).</summary>
+        public List<int> DeliveredIds(Project p) => p.crafted ? new List<int>() : _g.storage.Stored(StationOf(p.type)).Where(id => OriginOf(id) == p.id).ToList();
 
         public int Required(Project p) => p.crafted ? p.materials.Values.Sum() : NeededIds(p).Count;
         public int InstalledCount(Project p) => InstalledIds(p).Count;
@@ -445,8 +451,8 @@ namespace WorkshopWreckage
             if (Operational(p)) return $"{p.name} is already operational";
             var i = _g.world.instances[id];
             string origin = OriginOf(id);
-            if (i.state != ItemState.Stored || i.owner != "box:" + StationOf(origin)) return "Deliver it to the workbench first";
-            if (origin != p.type)
+            if (i.state != ItemState.Stored || i.owner != "box:" + StationOf(TypeOf(origin))) return "Deliver it to the workbench first";
+            if (origin != p.id)
             {
                 // another robot's head or arm: any chassis takes it in a free slot of its kind
                 if (MainSlotOf(id) is not ModuleSlot s || !TakesDonors(p, s)) return $"It is {RobotModules.OriginName(origin)}'s part";
@@ -467,7 +473,7 @@ namespace WorkshopWreckage
         public bool Install(Project p, int id, bool animate = true)
         {
             if (CanInstall(p, id) != "") return false;
-            _g.storage.Remove(StationOf(OriginOf(id)), id);
+            _g.storage.Remove(StationOf(TypeOf(OriginOf(id))), id);
             _g.world.SetState(id, ItemState.Installed, OwnerOf(p.id));
             var r = RobotOf(p);
             r?.RefreshAssembly();
@@ -692,6 +698,27 @@ namespace WorkshopWreckage
             CheckBlueprints(false);
         }
 
+        /// <summary>After the robots are loaded: a further unit that was crafted from ordinary parts in a
+        /// save from before the kits (playtest 2026-10-26) is built from its kit now, wherever those parts
+        /// lie, so it stays operational and its kit isn't left lying around for a robot that exists.</summary>
+        public void InstallKitsOfBuiltUnits()
+        {
+            foreach (var p in projects.Where(p => !p.crafted && p.after != null && Operational(p) && !Complete(p)))
+            {
+                foreach (var id in PartIds(p))
+                {
+                    var i = _g.world.instances[id];
+                    if (i.state == ItemState.Installed) continue;
+                    if (i.state == ItemState.InWorld) _g.index.Remove(id);
+                    else if (i.state == ItemState.Carried && i.owner == "player") _g.inventory.Remove(id);
+                    else if (i.state == ItemState.Stored) _g.storage.Remove(i.owner.Substring(4), id);
+                    else if (i.state == ItemState.Carried) continue;   // in a robot's hands: it delivers it
+                    _g.world.SetState(id, ItemState.Installed, OwnerOf(p.id));
+                }
+                RobotOf(p)?.RefreshAssembly();
+            }
+        }
+
         public void ResetState()
         {
             _announced.Clear();
@@ -805,7 +832,7 @@ namespace WorkshopWreckage
                 if (_boards[i] != null) _boards[i].sharedMaterial = EnvMaterials.Blueprint(Unlocked(p) ? 1 : 2);
                 var tray = _trays[i];
                 foreach (Transform c in tray) Destroy(c.gameObject);
-                var ids = _g.storage.Stored(StationOf(Types[i]));
+                var ids = _g.storage.Stored(StationOf(Types[i]));   // every unit's parts of that type
                 for (int k = 0; k < ids.Count; k++)
                 {
                     var def = _g.world.DefOf(ids[k]);

@@ -14,6 +14,10 @@ namespace WorkshopWreckage
         public Transform head;
         public bool inputEnabled = true, lookEnabled = true;
         public float sensitivity = 0.22f;
+        /// <summary>The field of view set in Settings; holding the right mouse button zooms in from it.</summary>
+        public float fov = 72f;
+        const float ZoomFactor = 2.5f, ZoomTime = 0.15f;
+        float _zoom;   // 0 = normal view, 1 = fully zoomed in
         public bool invertY;
         CharacterController _cc;
         Vector3 _vel;
@@ -99,10 +103,17 @@ namespace WorkshopWreckage
         {
             var kb = Keyboard.current;
             var mouse = Mouse.current;
+            // hold the right mouse button to zoom (playtest 2026-10-26); the view slows down with it
+            bool zoomHeld = lookEnabled && inputEnabled && mouse != null && mouse.rightButton.isPressed && LookReady;
+            if (zoomHeld || _zoom > 0)
+            {
+                _zoom = Mathf.MoveTowards(_zoom, zoomHeld ? 1 : 0, Time.unscaledDeltaTime / ZoomTime);
+                cam.fieldOfView = Mathf.Lerp(fov, fov / ZoomFactor, Mathf.SmoothStep(0, 1, _zoom));
+            }
             if (lookEnabled && mouse != null && LookReady)
             {
                 var d = mouse.delta.ReadValue();
-                float s = sensitivity * 0.01f;   // radians per pixel, as in Godot
+                float s = sensitivity * 0.01f * cam.fieldOfView / fov;   // radians per pixel, as in Godot (slower when zoomed)
                 _yaw -= d.x * s;
                 _pitch = Mathf.Clamp(_pitch + d.y * s * (invertY ? -1 : 1), -1.536f, 1.536f);
             }

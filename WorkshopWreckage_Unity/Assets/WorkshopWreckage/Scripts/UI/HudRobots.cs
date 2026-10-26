@@ -120,7 +120,7 @@ namespace WorkshopWreckage
             _previewCam.transform.LookAt(at);
 
             ClearChildren(_wbTabs);
-            foreach (var q in wb.projects.Where(q => !q.crafted || wb.Operational(wb.P(q.after)) || wb.Operational(q)))
+            foreach (var q in wb.projects.Where(q => q.after == null || wb.Operational(wb.P(q.after)) || wb.Operational(q)))
             {
                 var s = wb.StatusOf(q);
                 string mark = s == RobotWorkbench.Status.Operational ? "  ✓" : s == RobotWorkbench.Status.AwaitingBlueprint ? $"  (lv {q.level})" : $"  {wb.InstalledCount(q)}/{wb.Required(q)}";
@@ -157,7 +157,7 @@ namespace WorkshopWreckage
                 var have = wb.InstalledKeys(p);
                 foreach (var id in wb.NeededIds(p))
                 {
-                    var key = wb.KeyOn(p, id) + (wb.OriginOf(id) != p.type ? $" ({RobotModules.OriginName(wb.OriginOf(id))}'s)" : "");
+                    var key = wb.KeyOn(p, id) + (wb.OriginOf(id) != p.id ? $" ({RobotModules.OriginName(wb.OriginOf(id))}'s)" : "");
                     var ps = wb.StateOf(id);
                     string why = ps == RobotWorkbench.PartState.Delivered ? wb.CanInstall(p, id) : "";
                     string txt = ps switch

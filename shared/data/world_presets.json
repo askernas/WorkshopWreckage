@@ -5,9 +5,9 @@
 	"presets": {
 		"standard": {
 			"label": "Standard",
-			"total_items": 4096,
+			"total_items": 4176,
 			"ordinary_definitions": 500,
-			"robot_part_items": 88,
+			"robot_part_items": 168,
 			"room": [
 				22,
 				15
@@ -24,9 +24,9 @@
 		},
 		"large": {
 			"label": "Large",
-			"total_items": 7000,
+			"total_items": 7080,
 			"ordinary_definitions": 750,
-			"robot_part_items": 88,
+			"robot_part_items": 168,
 			"room": [
 				27,
 				18
@@ -43,9 +43,9 @@
 		},
 		"massive": {
 			"label": "Massive",
-			"total_items": 10000,
+			"total_items": 10080,
 			"ordinary_definitions": 1000,
-			"robot_part_items": 88,
+			"robot_part_items": 168,
 			"room": [
 				32,
 				21

@@ -70,10 +70,10 @@
 			"limitations": ["One part at a time (two at most)", "Light parts only", "Cannot dig parts out from under a heap", "Not a bulk transporter"],
 			"assembly": {"requires": {"upper saucer shell": ["lower saucer shell"], "rim light 1": ["upper saucer shell"], "rim light 2": ["upper saucer shell"], "rim light 3": ["upper saucer shell"], "rim light 4": ["upper saucer shell"], "head": ["upper saucer shell"], "left sensor pod": ["upper saucer shell"], "right sensor pod": ["upper saucer shell"], "left stabilizer fin": ["upper saucer shell"], "right stabilizer fin": ["upper saucer shell"], "left vent cover": ["lower saucer shell"], "right vent cover": ["lower saucer shell"], "rotor mast": ["head"], "rotor hub": ["rotor mast"], "propeller blade a": ["rotor hub"], "propeller blade b": ["rotor hub"], "left shoulder servo": ["upper saucer shell"], "right shoulder servo": ["upper saucer shell"], "thruster glow plate": ["thruster ring"]}},
 			"extra_units": [
-				{"id": "hoverbot_2", "name": "Hoverbot #2", "materials": {"Gears": 6, "Bearings": 4, "Springs": 4, "Electronics": 6, "Shafts & Pins": 4}},
-				{"id": "hoverbot_3", "name": "Hoverbot #3", "materials": {"Gears": 8, "Bearings": 6, "Springs": 6, "Electronics": 8, "Machine Parts": 2}}
+				{"id": "hoverbot_2", "name": "Hoverbot #2"},
+				{"id": "hoverbot_3", "name": "Hoverbot #3"}
 			],
-			"extra_units_note": "Further Hoverbots are crafted from ordinary parts the player personally carries to the workbench once the first Hoverbot is operational. Materials match by category (any definition of it). A consumed part is INSTALLED: it counts as accounted for in its definition's collection (see DESIGN.md 'Crafting consumption'), so crafting can never make a set impossible to complete.",
+			"extra_units_note": "Hoverbot #2 and #3 are built from their own unique kits (robot_parts.json), which lie in the world from the start like every robot part. A further unit goes on the Hoverbot mat once the one before it is operational; its delivered parts wait in the holding tray until then.",
 			"personality": "Curious, enthusiastic, slightly overactive. Reaches the high shelves and stores the piles the small robots leave."
 		},
 		"sorting_arm": {
@@ -89,10 +89,10 @@
 			"limitations": ["Stationary: serves only the unit it is mounted on (all 36 drawers of a cabinet, or the containers of a shelving unit; wooden crates under a deck are too low to reach into)", "Never picks loose parts from the floor or other units", "The player carries it from mount to mount"],
 			"assembly": {"requires": {"shoulder turret": ["docking coupler"], "control unit": ["shoulder turret"], "upper arm": ["shoulder turret"], "motor cartridge": ["upper arm"], "elbow servo": ["upper arm"], "forearm": ["elbow servo"], "wrist rotator": ["forearm"], "sensor head": ["wrist rotator"], "left finger": ["wrist rotator"], "right finger": ["wrist rotator"], "cable harness": ["control unit", "forearm"]}},
 			"extra_units": [
-				{"id": "sorting_arm_2", "name": "Sorting Arm #2", "materials": {"Machine Parts": 4, "Gears": 6, "Bearings": 4, "Electronics": 6, "Springs": 2}},
-				{"id": "sorting_arm_3", "name": "Sorting Arm #3", "materials": {"Machine Parts": 6, "Gears": 6, "Bearings": 6, "Electronics": 8, "Shafts & Pins": 4}}
+				{"id": "sorting_arm_2", "name": "Sorting Arm #2"},
+				{"id": "sorting_arm_3", "name": "Sorting Arm #3"}
 			],
-			"extra_units_note": "The first arm needs its 12 unique parts; further arms are crafted from ordinary salvage (by category), like Hoverbot #2/#3. At most max_instances arms exist.",
+			"extra_units_note": "Every arm is built from its own kit of 12 unique parts (robot_parts.json), all in the world from the start; a further arm goes on the mat once the one before it is operational. At most max_instances arms exist.",
 			"sockets_note": "Arms mount only on fixed sockets: one overhead rail mount per drawer cabinet and per shelving unit (storage_layout.json sockets: SK-<unit> serves the whole unit; the arm hangs from a trolley and lift mast that run along a ceiling-hung rail, independent of the furniture).",
 			"personality": "Patient, precise, a little proud. Ticks its servos while it waits."
 		}

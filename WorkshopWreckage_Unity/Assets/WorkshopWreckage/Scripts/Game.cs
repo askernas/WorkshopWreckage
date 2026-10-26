@@ -145,12 +145,12 @@ namespace WorkshopWreckage
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
-            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur)
+            else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.ContainsKey("splash")) Splash.Show(); StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
             else if (args.ContainsKey("robotbench") && _studio != null) { SetState("play"); StartCoroutine(RobotBench()); }
             else if (args.TryGetValue("bench", out var bp)) { SetState("play"); StartCoroutine(new Benchmark().Run(this, bp)); }
             else if (args.TryGetValue("autoplay", out var ap)) { SetState("play"); StartCoroutine(new Autoplay().Run(this, ap)); }
             else if (args.ContainsKey("play")) SetState("play");
-            else SetState("menu");
+            else { SetState("menu"); Splash.Show(); }
         }
 
         IEnumerator ProbeLater()
@@ -315,6 +315,7 @@ namespace WorkshopWreckage
             modules.Load(save != null ? Json.Obj(save.GetValueOrDefault("modules")) : null, robots);
             foreach (var e in modules.Audit()) Debug.LogError("[modules] " + e);
             foreach (var r in robots) r.ApplyModules();
+            if (save != null) workbench.InstallKitsOfBuiltUnits();
             // an incomplete robot can't work: wherever it was saved, it is parked at the workbench
             foreach (var r in robots) if (r.Operational && !r.Docked && !modules.Complete(r.id)) r.DockAtSpot();
             foreach (var r in robots) r.RefreshAssembly();   // which crafted Hoverbot is on the bench depends on the others

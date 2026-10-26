@@ -244,7 +244,7 @@ namespace WorkshopWreckage
                 .OrderBy(id => world.DefOf(id).shape == "Torso" ? 0 : 1).ThenBy(id => id).ToList();
             foreach (var id in robotIds.Except(retro.Take(layout.retroSpots.Count)))
             {
-                var robot = world.DefOf(id).craftingPurpose.Split(':').ElementAtOrDefault(1) ?? "";
+                var robot = System.Text.RegularExpressions.Regex.Replace(world.DefOf(id).craftingPurpose.Split(':').ElementAtOrDefault(1) ?? "", @"_\d+$", "");   // a further unit's kit lies where its type's does
                 var choices = layout.robotPartPiles.TryGetValue(robot, out var ch) && ch.Count > 0 ? ch : new List<int> { 0 };
                 assign[choices[_rng.Next(choices.Count)]].Add(id);
             }

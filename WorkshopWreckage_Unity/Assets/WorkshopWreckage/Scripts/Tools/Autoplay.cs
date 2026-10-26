@@ -105,6 +105,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "kits")
+            {
+                KitChecks();   // QA: every unit's robot parts lie in the world from the start (playtest 2026-10-26)
+                Finish();
+                yield break;
+            }
             if (section == "cater")
             {
                 yield return CaterChecks();   // QA: Caterpillarbot fills its boxes for one destination (playtest 2026-10-26)
@@ -982,7 +988,7 @@ namespace WorkshopWreckage
         IEnumerator AllRobotsChecks()
         {
             var wb = g.workbench;
-            var others = g.robots.Where(r => r.id != "retrobot" && !wb.P(r.id).crafted && r.Mobile).ToList();
+            var others = g.robots.Where(r => r.id != "retrobot" && wb.P(r.id).after == null && r.Mobile).ToList();
             Check("base capacities follow the capability matrix (1 / 1 / 1 / 3 / 1, not scaled by world size)",
                   g.robots.First(r => r.id == "retrobot").Capacity == 1 && g.robots.First(r => r.id == "unibot").Capacity == 1 && g.robots.First(r => r.id == "spiderbot").Capacity == 1
                   && g.robots.First(r => r.id == "caterpillarbot").Capacity == 3 && g.robots.First(r => r.id == "hoverbot").Capacity == 1,
@@ -990,7 +996,7 @@ namespace WorkshopWreckage
             var retro = g.retrobot; var uni = g.robots.First(r => r.id == "unibot");
             Check("Unibot is about twice as fast as Retrobot", uni.WalkSpeed / retro.BaseStat("walk_speed") is > 1.8f and < 2.2f, $"{uni.WalkSpeed:0.00} vs {retro.BaseStat("walk_speed"):0.00} m/s");
             var mobile = g.robots.Where(r => r.Mobile).ToList();
-            Check("five robot types at toy scale, up to three Hoverbots", mobile.Count(r => !wb.P(r.id).crafted) == 5 && g.robots.Count(r => r.type == "hoverbot") == 3 && mobile.All(r => r.Height <= 0.31f),
+            Check("five robot types at toy scale, up to three Hoverbots", mobile.Count(r => wb.P(r.id).after == null) == 5 && g.robots.Count(r => r.type == "hoverbot") == 3 && mobile.All(r => r.Height <= 0.31f),
                   string.Join(", ", mobile.Select(r => $"{r.displayName} {r.Height:0.00} m")));
             LevelTo(g.progression.maxLevel);
             // half-built on the bench: ghosts show what is still to find
@@ -1375,40 +1381,28 @@ namespace WorkshopWreckage
             var hovers = g.robots.Where(r => r.type == "hoverbot").ToList();
             Check("Hoverbot upgrades are shared by the whole fleet", hovers.All(h => Mathf.Approximately(h.WalkSpeed, hover.WalkSpeed)) && hover.WalkSpeed > hover.BaseStat("walk_speed"), string.Join(", ", hovers.Select(h => $"{h.displayName} {h.WalkSpeed:0.00}")));
 
-            // 14. a second Hoverbot, crafted from ordinary parts carried to the bench
+            // 14. a second Hoverbot, built from its own kit (playtest 2026-10-26: every robot part is in the world from the start)
             var h2 = wb.P("hoverbot_2");
             var r2 = wb.RobotOf(h2);
             Check("Hoverbot #2's project opens once Hoverbot is operational", wb.Unlocked(h2) && wb.OnBench(h2) && r2.gameObject.activeSelf, wb.Summary(h2));
-            // design v1.0 §3.4 (P-07): a loose part of an unfinished destination is refused at the bench
-            var raw = g.world.instances.First(i => Loose(i) && h2.materials.ContainsKey(g.world.DefOf(i.id).CategoryName) && !g.progress.IsComplete(i.defId));
-            Take(raw.id);
-            bool refused = !g.interaction.DepositStation(raw.id);
-            g.inventory.Remove(raw.id);
-            g.storage.Deposit(g.world.DefOf(raw.id).storageBox, raw.id);
-            Check("P-07: a recipe refuses parts of an unfinished destination", refused, $"{g.world.DefOf(raw.id).displayName}: {g.progress.AcceptedOf(raw.defId)}/{g.world.TotalOf(raw.defId)}");
-            // ...so the materials come from destinations completed first, then built from stock
-            var stockDefs = new List<int>();
-            foreach (var kv in h2.materials)
+            var kit2 = wb.PartIds(h2);
+            Check("Hoverbot #2 has its own kit of 28 unique parts, the same part keys as Hoverbot's",
+                  !h2.crafted && kit2.Count == 28 && kit2.Select(i => Robot.PartKey(g.world.DefOf(i))).ToHashSet().SetEquals(wb.PartIds(wb.P("hoverbot")).Select(i => Robot.PartKey(g.world.DefOf(i)))),
+                  $"{kit2.Count} parts, e.g. {g.world.DefOf(kit2[0]).displayName} -> \"{Robot.PartKey(g.world.DefOf(kit2[0]))}\"");
+            int delivered = 0;
+            foreach (var id in kit2)
             {
-                int have = 0;
-                foreach (var d in g.db.order.Where(d => g.world.TotalOf(d) > 0 && !g.db.Get(d).IsRobotPart && g.db.Get(d).CategoryName == kv.Key).ToList())
-                {
-                    if (have >= kv.Value) break;
-                    if (CompleteDef(d)) { have += g.world.TotalOf(d); stockDefs.Add(d); }
-                }
+                if (g.world.instances[id].state != ItemState.InWorld) continue;
+                Take(id);
+                if (g.interaction.DepositStation(id)) delivered++;
             }
-            int level0 = pr.level, done0 = pr.DestinationsCompleted;
-            int built = wb.BuildFromStock(h2);
-            var consumed = g.world.instances.Where(i => i.state == ItemState.Installed && i.owner == RobotWorkbench.OwnerOf(h2.id)).Select(i => i.id).ToList();
+            wb.InstallAll(h2, false);
             {
                 var (sp, _) = wb.MatSpot(h2.mat);
                 LookFrom(sp + wb.Front * 0.6f + Vector3.up * 0.3f, sp + Vector3.up * 0.1f);
-                yield return g.Capture(Path.Combine(outDir, "15c_hoverbot2_being_crafted.png"), 3);
+                yield return g.Capture(Path.Combine(outDir, "15c_hoverbot2_being_built.png"), 3);
             }
-            Check("recipe materials are built into Hoverbot #2 from stock (installed, not duplicated)", wb.Complete(h2) && built > 0 && consumed.All(i => !g.inventory.items.Contains(i) && g.storage.contents.Values.All(l => !l.Contains(i))), $"{built} from stock; {wb.Summary(h2)}");
-            int cd = g.world.instances[consumed[0]].defId;
-            Check("P-07: crafting from stock never revokes a completed destination or the level", g.progress.IsComplete(cd) && stockDefs.All(g.progress.IsComplete) && pr.level == level0 && pr.DestinationsCompleted == done0,
-                  $"{g.db.Get(cd).displayName}: {g.progress.AcceptedOf(cd)}/{g.world.TotalOf(cd)} accepted, level {level0} -> {pr.level}, completed {done0} -> {pr.DestinationsCompleted}");
+            Check("Hoverbot #2 is built from its delivered kit", wb.Complete(h2) && delivered == 28 && wb.InstalledIds(h2).All(kit2.Contains), $"{delivered} delivered; {wb.Summary(h2)}");
             wb.Activate(h2);
             float t2 = Time.realtimeSinceStartup;
             while (!r2.Active && Time.realtimeSinceStartup - t2 < 12) yield return null;
@@ -1655,6 +1649,28 @@ namespace WorkshopWreckage
         /// <summary>Playtest 2026-10-26: "robots are still struggling to pick up things in the sorting tray".
         /// Retrobot and Unibot are built, the tray is filled with parts they may carry (its back row against the
         /// wall too), and they must take every one out, however far over the rim it lies.</summary>
+        /// <summary>A new game: every robot unit (Hoverbot #2/#3 and Sorting Arm #2/#3 too) has its whole kit of
+        /// unique parts lying in the world, each one with the same part keys as the first unit of its type.</summary>
+        void KitChecks()
+        {
+            var wb = g.workbench;
+            var rows = new List<string>();
+            bool ok = true;
+            foreach (var p in wb.projects)
+            {
+                var ids = wb.PartIds(p);
+                var first = wb.P(p.type);
+                var keys = ids.Select(i => Robot.PartKey(g.world.DefOf(i))).ToHashSet();
+                bool inWorld = ids.All(i => g.world.instances[i].state == ItemState.InWorld);
+                bool same = keys.SetEquals(wb.PartIds(first).Select(i => Robot.PartKey(g.world.DefOf(i))));
+                bool good = !p.crafted && ids.Count > 0 && ids.Count == keys.Count && inWorld && same;
+                ok &= good;
+                rows.Add($"{p.id} {ids.Count}{(good ? "" : $" (crafted {p.crafted}, in world {inWorld}, keys {same})")}");
+            }
+            Check("every robot unit's kit lies in the world from the start (Hoverbot #2/#3, Sorting Arm #2/#3 too)", ok && wb.projects.Count == 10, string.Join(", ", rows));
+            Check("robot parts are unique, each in one place", PartsIntact(out var detail), detail);
+        }
+
         /// <summary>Caterpillarbot alone in the room: every delivery run carries parts for one destination only,
         /// and it leaves with a part short of a full load only when no other part for that place was left that
         /// it could take.</summary>
@@ -1838,7 +1854,7 @@ namespace WorkshopWreckage
         {
             var pr = g.progression;
             var p = g.progress;
-            bool standard = g.world.Count == 4096;
+            bool standard = g.presetId == "standard";
             // a few destinations that are simple to fill: robot-carriable, 3+ copies, none on a robot
             var defs = g.db.order.Where(d => g.world.TotalOf(d) >= 3 && !g.db.Get(d).IsRobotPart && g.db.Get(d).robotCarry && g.storage.Stored(g.db.Get(d).storageBox).Count == 0).Take(60).ToList();
             int levelUps = 0;
@@ -2136,7 +2152,7 @@ namespace WorkshopWreckage
 
             // 15. every preset can reach every blueprint level from completed destinations
             var cfgRobots = Robot.AllConfig();
-            int maxBp = wb.projects.Where(p => !p.crafted).Max(p => p.level), maxCraft = wb.projects.Max(p => p.level);
+            int maxBp = wb.projects.Where(p => p.after == null).Max(p => p.level), maxCraft = wb.projects.Max(p => p.level);
             int dests = g.CompletableDestinations();
             Check("every blueprint level is reachable by completing destinations (robots by 75% of them, crafted Hoverbots and level 25 by 85%)",
                   pr.DestinationsForLevel(maxBp) <= dests * 0.75 && pr.DestinationsForLevel(maxCraft) <= dests * 0.85 && pr.DestinationsForLevel(pr.maxLevel) <= dests * 0.85,
