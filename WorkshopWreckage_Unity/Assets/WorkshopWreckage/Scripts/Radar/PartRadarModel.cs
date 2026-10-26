@@ -23,6 +23,8 @@ namespace WorkshopWreckage
         public bool battery;
         /// <summary>The main amber LED and the four charge LEDs (SetLed / SetCharges switch them).</summary>
         public Renderer mainLed;
+        /// <summary>The amber light the main LED throws (only on the radar in your hands).</summary>
+        public Light ledLight;
         public readonly List<Renderer> chargeLeds = new();
         Transform _antL, _antR, _knob, _button;
 
@@ -41,7 +43,7 @@ namespace WorkshopWreckage
         static Material WireBlue => _wireBlue ??= EnvMaterials.Plain(new Color(0.16f, 0.3f, 0.55f), 0f, 0.45f);
         static Material Tape => _tape ??= RobotFinish.Paint(new Color(0.6f, 0.58f, 0.52f), 1f, 0.6f, 0.9f, 0.4f, 0.3f, 0.3f, 0.15f);
         static Material LedOff => _ledOff ??= EnvMaterials.Plain(new Color(0.42f, 0.27f, 0.08f), 0.1f, 0.92f);
-        static Material LedOn => _ledOn ??= EnvMaterials.Plain(new Color(1f, 0.667f, 0.133f), 0f, 0.92f, 4f);   // #FFAA22
+        static Material LedOn => _ledOn ??= EnvMaterials.Plain(new Color(1f, 0.667f, 0.133f), 0f, 0.92f, 60f);   // #FFAA22, blazing: it has to read under the workshop lights (playtest 2026-10-26)
         static Material ChargeOff => _chargeOff ??= EnvMaterials.Plain(new Color(0.1f, 0.16f, 0.08f), 0.1f, 0.9f);
         static Material ChargeOn => _chargeOn ??= EnvMaterials.Plain(new Color(0.45f, 1f, 0.3f), 0f, 0.9f, 2.5f);
         static Material Cell => _cell ??= RobotFinish.ShaftSteel;
@@ -49,6 +51,29 @@ namespace WorkshopWreckage
         protected override Material Skin(Material m) => m == StainMat ? m : FamilySkin(m);
 
         public void SetLed(bool on) { if (mainLed != null) mainLed.sharedMaterial = on ? LedOn : LedOff; }
+
+        /// <summary>Adds the LED's own light (the radar in hand): amber, off until SetLight.</summary>
+        public void AddLedLight()
+        {
+            if (mainLed == null || ledLight != null) return;
+            var go = new GameObject("LedLight");
+            go.transform.SetParent(mainLed.transform, false);
+            go.transform.position = mainLed.bounds.center;
+            ledLight = go.AddComponent<Light>();
+            ledLight.type = LightType.Point;
+            ledLight.color = new Color(1f, 0.667f, 0.133f);
+            ledLight.range = 3.5f;
+            ledLight.shadows = LightShadows.None;
+            ledLight.intensity = 0;
+            ledLight.enabled = false;
+        }
+
+        public void SetLight(float intensity)
+        {
+            if (ledLight == null) return;
+            ledLight.intensity = intensity;
+            ledLight.enabled = intensity > 0.01f;
+        }
         public void SetCharges(int n) { for (int i = 0; i < chargeLeds.Count; i++) chargeLeds[i].sharedMaterial = i < n ? ChargeOn : ChargeOff; }
         /// <summary>The knob's turn (degrees) and the ping button pressed in (0..1).</summary>
         public void Pose(float dialDeg, float press)

@@ -1767,6 +1767,31 @@ namespace WorkshopWreckage
             Check("batteries ride in their own 3 pockets beside full hands; the Tool Belt adds 3 more",
                   three && took2 == 3 && inv.batteryPockets == 6 && inv.Batteries == 6,
                   $"first {took} taken with hands {inv.Parts}/{inv.capacity}; after the Tool Belt {took2} more, {inv.Batteries}/{inv.batteryPockets} pockets");
+
+            // the LED reads under the workshop lights: a big flash as the pulse goes out, then a steady bright amber glow
+            g.SetState("play");
+            radar.Put(true);
+            radar.TrySwap();
+            float tw = Time.time;
+            while (radar.Swapping && Time.time - tw < 5) yield return null;
+            yield return new WaitForSeconds(0.4f);
+            radar.TryPulse();
+            yield return Frames(2);
+            float flash = radar.LightNow;
+            yield return g.Capture(Path.Combine(outDir, "radar_flash.png"), 1);
+            float lit = 0;
+            if (radar.Locked >= 0)
+            {
+                var cam = g.player.cam.transform;
+                var to = g.world.instances[radar.Locked].Position;
+                LookFrom(cam.position, new Vector3(to.x, cam.position.y - 0.3f, to.z));
+                yield return new WaitForSeconds(0.7f);
+                lit = radar.LightNow;
+                yield return g.Capture(Path.Combine(outDir, "radar_lit.png"), 1);
+            }
+            Check("the radar LED flashes bright as a pulse goes out and glows bright amber while on target (screenshots radar_flash, radar_lit)",
+                  flash > 20 && lit > 4, $"flash light {flash:0.0}, on-target light {lit:0.0}, locked {radar.Locked}");
+            radar.Put(false);
         }
 
         /// <summary>A preset sets the pipeline, the look and the shadows; one changed value makes it Custom;

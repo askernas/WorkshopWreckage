@@ -87,11 +87,17 @@ namespace WorkshopWreckage
         float _pulseT, _swapT, _press, _dial, _dialGoal, _raise;
         int _swapIn = -1;
         PartRadarModel _view;
+        bool _ledOn;
+        float _flash;   // 1 = a bright flash, fading fast (each time the LED comes on, and as a pulse goes out)
+        const float LedLight = 6f, FlashLight = 30f;
         List<int> _parts;
         ItemWorld _partsWorld;
 
         public bool Pulsing => _pulseT > 0;
         public bool Swapping => _swapT > 0;
+        /// <summary>QA: the part a pulse is locked on (-1 none) and the LED light's intensity now.</summary>
+        public int Locked => _locked;
+        public float LightNow => _view != null && _view.ledLight != null && _view.ledLight.enabled ? _view.ledLight.intensity : 0;
 
         public void Init(Game game)
         {
@@ -340,6 +346,8 @@ namespace WorkshopWreckage
                 _view.Build(new HashSet<string>(PartRadarModel.Parts.Append("")));
                 foreach (var c in go.GetComponentsInChildren<Collider>()) Destroy(c);
                 foreach (var r in go.GetComponentsInChildren<Renderer>()) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                _view.AddLedLight();
+                _ledOn = false; _flash = 0;
                 go.transform.SetParent(g.player.cam.transform, false);
                 _raise = 0;
                 Pose();
@@ -382,6 +390,7 @@ namespace WorkshopWreckage
             charges[battery] -= cfg.perPulse;   // spent as the pulse begins, together with the lock
             _locked = t;
             _pulseT = cfg.duration;
+            _flash = 1.5f;   // the pulse goes out: a big amber flash
             Sfx.Play("inspect", null, -8, 0);
             Debug.Log($"[radar] pulse: target {target}, locked {_locked} ({g.world.DefOf(_locked).displayName}), battery {battery} now {Charges(battery)}");
         }
@@ -390,7 +399,7 @@ namespace WorkshopWreckage
         {
             _pulseT = 0;
             _locked = -1;
-            if (_view != null) _view.SetLed(false);
+            Led(false);
         }
 
         /// <summary>L: the loaded battery comes out (kept with what it has left) and the fullest one in the
@@ -457,7 +466,13 @@ namespace WorkshopWreckage
             {
                 _pulseT -= dt;
                 if (_pulseT <= 0 || _locked < 0 || !Eligible(_locked)) EndPulse();   // picked up or moved off: the signal stops, no retarget
-                else _view?.SetLed(Lit(Time.time));
+                else Led(Lit(Time.time));
+            }
+            _flash = Mathf.MoveTowards(_flash, 0, dt * 5);
+            if (_view != null)
+            {
+                _view.SetLed(_ledOn || _flash > 0.25f);
+                _view.SetLight((_ledOn ? LedLight : 0) + _flash * FlashLight);
             }
             Pose();
         }
@@ -473,6 +488,13 @@ namespace WorkshopWreckage
             if (diff > cfg.tolerance) return false;
             if (to.magnitude > cfg.closeRange) return true;
             return Mathf.Repeat(time * cfg.blinkHz, 1f) < 0.5f;
+        }
+
+        /// <summary>The main LED on or off; each time it comes on it flashes bright first.</summary>
+        void Led(bool on)
+        {
+            if (on && !_ledOn) _flash = Mathf.Max(_flash, 1f);
+            _ledOn = on;
         }
 
         static float Yaw(Vector3 v) => Mathf.Atan2(v.x, v.z) * Mathf.Rad2Deg;
