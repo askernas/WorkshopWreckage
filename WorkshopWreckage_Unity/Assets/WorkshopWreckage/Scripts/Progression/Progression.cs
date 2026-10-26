@@ -62,6 +62,7 @@ namespace WorkshopWreckage
         int[] _levelStart;
 
         public event Action<int> LeveledUp;                 // new level
+        public event Action<int> MidLevelPoints;            // halfway through this level: points earned
         public event Action<long, string> XpGained;         // amount, reason
 
         public Progression(Dictionary<string, object> cfg, string preset)
@@ -76,6 +77,7 @@ namespace WorkshopWreckage
             _destExp = Json.Num(dc, "exponent", 1.2);
             _destReference = Json.Num(dc, "reference_destinations", 500);
             _pointsPerLevel = Json.Int(lv, "skill_points_per_level", 1);
+            _midPoints = Json.Int(lv, "mid_level_skill_points", 0);
             foreach (var kv in Json.Obj(lv.GetValueOrDefault("bonus_skill_points")) ?? new Dictionary<string, object>())
                 _bonusPoints[int.Parse(kv.Key)] = (int)(double)kv.Value;
             foreach (var kv in Json.Obj(cfg["xp_rewards"])) _rewards[kv.Key] = (double)kv.Value;
@@ -221,6 +223,26 @@ namespace WorkshopWreckage
         }
 
         int PointsAt(int lvl) => _pointsPerLevel + _bonusPoints.GetValueOrDefault(lvl);
+        int _midPoints;
+
+        /// <summary>Completions at which level `l` pays its mid-level points: halfway to the next level
+        /// (rounded up), or -1 when the step is a single completion (no halfway).</summary>
+        int MidLevelAt(int l) => l >= maxLevel || DestinationsForLevel(l + 1) - DestinationsForLevel(l) < 2 ? -1
+            : (DestinationsForLevel(l) + DestinationsForLevel(l + 1) + 1) / 2;
+
+        /// <summary>Pays mid_level_skill_points for every level whose halfway mark is passed, once each
+        /// (kept in the once-rewards, so a reload never pays twice and an older save is paid up).</summary>
+        void GrantMidLevelPoints(bool announce)
+        {
+            if (_midPoints <= 0) return;
+            for (int l = 1; l <= level; l++)
+            {
+                int at = MidLevelAt(l);
+                if (at < 0 || DestinationsCompleted < at || !_onceRewarded.Add("mid:" + l)) continue;
+                skillPoints += _midPoints;
+                if (announce && l == level) MidLevelPoints?.Invoke(_midPoints);
+            }
+        }
 
         /// <summary>Sets the world's completable destination count (scales the level curve).</summary>
         public void SetDestinationTotal(int n)
@@ -342,6 +364,7 @@ namespace WorkshopWreckage
                 skillPoints += PointsAt(level);
                 LeveledUp?.Invoke(level);
             }
+            GrantMidLevelPoints(true);
         }
 
         public void OnZoneRestored(int zone, int percentStep)
@@ -457,6 +480,7 @@ namespace WorkshopWreckage
             int earned = LevelFor(DestinationsCompleted);
             for (int l = level + 1; l <= earned; l++) skillPoints += PointsAt(l);
             level = Math.Max(level, earned);
+            GrantMidLevelPoints(false);
         }
     }
 

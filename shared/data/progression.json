@@ -5,9 +5,9 @@
 		"max_level": 25,
 		"destination_curve": {"type": "power", "coefficient": 0.8, "exponent": 1.2, "reference_destinations": 500, "comment": "Levels come only from completed storage destinations (every assigned copy stored or installed; each destination counts once per game). Completions needed to go from level L to L+1 = max(1, round(scale * coefficient * L^exponent)), level 1 -> 2 always 1; scale = the preset's completable destinations / reference_destinations (Standard 500 -> 1, Large 751 -> 1.5, Massive 1000 -> 2). Level 25 needs about 83% of the destinations on every preset."},
 		"xp_curve": {"type": "power", "base": 19, "exponent": 1.55, "comment": "Legacy: XP is still counted (telemetry, workshop score) but no longer raises the level."},
-		"skill_points_per_level": 2,
+		"skill_points_per_level": 2, "mid_level_skill_points": 1,
 		"bonus_skill_points": {"5": 1, "10": 1, "15": 1, "20": 1, "23": 1, "24": 1, "25": 1},
-		"comment": "Two points per level (three at 5, 10, 15, 20 and 23-25, the levels without a new blueprint or skill): player skills and the five robot upgrade trees share the pool, and there are more ranks than points on purpose (choices matter)."
+		"comment": "Two points per level (three at 5, 10, 15, 20 and 23-25, the levels without a new blueprint or skill), plus mid_level_skill_points halfway between two levels (once the step is 2+ completions): player skills and the five robot upgrade trees share the pool, and there are more ranks than points on purpose (choices matter)."
 	},
 	"xp_rewards": {
 		"sort_item": 1,
@@ -55,7 +55,11 @@
 		{"id": "magnet_8", "name": "Magnetic Glove VIII", "group": "magnet", "cost": 1, "requires": ["magnet_7"], "effects": {"magnet_level": 1}, "status": "active"},
 		{"id": "magnet_9", "name": "Magnetic Glove IX", "group": "magnet", "cost": 1, "requires": ["magnet_8"], "effects": {"magnet_level": 1}, "status": "active"},
 		{"id": "magnet_10", "name": "Magnetic Glove X", "group": "magnet", "cost": 1, "requires": ["magnet_9"], "effects": {"magnet_level": 1}, "status": "active"},
-		{"id": "part_sense", "name": "Robot Part Sense", "group": "scanning", "cost": 1, "requires": [], "effects": {"part_sense": 1}, "status": "active"},
+		{"id": "part_sense", "name": "Robot Part Sense I", "group": "scanning", "cost": 1, "requires": [], "effects": {"part_sense": 1}, "status": "active"},
+		{"id": "part_sense_2", "name": "Robot Part Sense II", "group": "scanning", "cost": 1, "requires": ["part_sense"], "effects": {"part_sense": 1}, "status": "active"},
+		{"id": "part_sense_3", "name": "Robot Part Sense III", "group": "scanning", "cost": 1, "requires": ["part_sense_2"], "effects": {"part_sense": 1}, "status": "active"},
+		{"id": "part_sense_4", "name": "Robot Part Sense IV", "group": "scanning", "cost": 1, "requires": ["part_sense_3"], "effects": {"part_sense": 1}, "status": "active"},
+		{"id": "part_sense_5", "name": "Robot Part Sense V", "group": "scanning", "cost": 1, "requires": ["part_sense_4"], "effects": {"part_sense": 1}, "status": "active"},
 		{"id": "scanner_1", "name": "Parts Scanner", "group": "scanning", "cost": 1, "requires": [], "effects": {"scan_radius_m": 4.0, "scan_highlights_destination": 1}, "status": "active"},
 		{"id": "scanner_2", "name": "Advanced Scanning", "group": "scanning", "cost": 1, "requires": ["scanner_1"], "effects": {"scan_radius_m": 8.0, "scan_shows_remaining": 1}, "status": "active"},
 		{"id": "supermagnet", "name": "Supermagnet — Exact Match", "group": "magnet", "cost": 3, "requires": ["magnet_2"], "effects": {"supermagnet": 1}, "status": "active"},

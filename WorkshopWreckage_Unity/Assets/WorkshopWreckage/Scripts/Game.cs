@@ -1280,6 +1280,11 @@ namespace WorkshopWreckage
                 Sfx.Play("milestone", null, -4);
                 telemetry.LevelReached(lv, playTime, progress.sortedTotal);
             };
+            progression.MidLevelPoints += n =>
+            {
+                hud.Toast($"Halfway to level {progression.level + 1}!  +{n} skill point{(n == 1 ? "" : "s")} (Esc → Skills)", true);
+                Sfx.Play("milestone", null, -10);
+            };
             // XP is earned only for meaningful, non-repeatable progress (see progression.json)
             storage.Deposited += (box, id) =>
             {

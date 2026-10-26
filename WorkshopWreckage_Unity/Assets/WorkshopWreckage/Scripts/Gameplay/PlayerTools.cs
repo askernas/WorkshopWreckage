@@ -44,7 +44,7 @@ namespace WorkshopWreckage
             Destroy(c);
         }
 
-        public void ResetState() { _scanned.Clear(); _scanUntil = 0; _ready.Clear(); senseId = -1; }
+        public void ResetState() { _scanned.Clear(); _scanUntil = 0; _ready.Clear(); senseId = -1; senseIds.Clear(); }
 
         // ---------------------------------------------------------------- usable skills
 
@@ -62,7 +62,7 @@ namespace WorkshopWreckage
             "scanner" => P.Has("scan_radius_m") ? 1 : 0,
             "supermagnet" => P.Has("supermagnet") ? 1 : 0,
             "area_sweep" => P.Has("area_collect_radius_m") ? 1 : 0,
-            "part_sense" => P.Has("part_sense") ? 1 : 0,
+            "part_sense" => (int)P.Effect("part_sense"),   // ranks I-V
             _ => 0,
         };
 
@@ -202,44 +202,57 @@ namespace WorkshopWreckage
 
         /// <summary>The robot part glowing faintly, until when (playtest 2026-10-26).</summary>
         public int senseId = -1;
+        /// <summary>Every part glowing now (higher ranks sense several), nearest first; senseId is the first.</summary>
+        public readonly List<int> senseIds = new();
         float _senseUntil;
         Material _senseMat;
 
-        /// <summary>The nearest robot part lying in the workshop glows faintly for duration_s.</summary>
+        /// <summary>The nearest robot parts lying in the workshop glow faintly for duration_s; the rank sets
+        /// how many (parts), how long and the cooldown (unlocks.json skill_tuning).</summary>
         public int PartSense()
         {
             if (!P.Has("part_sense")) { g.hud.OnFeedback("You need the Robot Part Sense skill (K → Skills)", false); return 0; }
             if (!Ready("part_sense", "Robot Part Sense")) return 0;
             var me = g.player.transform.position;
-            int best = -1; float bd = float.MaxValue;
+            int rank = Level("part_sense"), want = Mathf.Max(1, (int)Tuned("part_sense", "parts", rank, 1));
+            var found = new List<(float d, int id)>();
             foreach (var inst in g.world.instances)
             {
                 if (inst.state != ItemState.InWorld || !g.world.DefOf(inst.id).IsRobotPart || g.robotReserved.Contains(inst.id)) continue;
-                float d = (inst.Position - me).sqrMagnitude;
-                if (d < bd) { bd = d; best = inst.id; }
+                found.Add(((inst.Position - me).sqrMagnitude, inst.id));
             }
-            if (best < 0) { g.hud.OnFeedback("Robot Part Sense: no robot parts left lying around", false); return 0; }
-            senseId = best;
-            _senseUntil = Time.time + Tuned("part_sense", "duration_s", 1, 5);
+            if (found.Count == 0) { g.hud.OnFeedback("Robot Part Sense: no robot parts left lying around", false); return 0; }
+            found.Sort((a, b) => a.d.CompareTo(b.d));
+            senseIds.Clear();
+            for (int i = 0; i < want && i < found.Count; i++) senseIds.Add(found[i].id);
+            senseId = senseIds[0];
+            _senseUntil = Time.time + Tuned("part_sense", "duration_s", rank, 5);
             Recharge("part_sense");
             Sfx.Play("discover", null, -10, 0);
-            g.hud.OnFeedback($"Robot Part Sense: something glows {Mathf.Sqrt(bd):0} m away", true);
+            float near = Mathf.Sqrt(found[0].d);
+            g.hud.OnFeedback(senseIds.Count == 1 ? $"Robot Part Sense: something glows {near:0} m away"
+                                                 : $"Robot Part Sense: {senseIds.Count} parts glow, the nearest {near:0} m away", true);
             g.telemetry?.SkillUsed("part_sense");
             return 1;
         }
 
         void DrawSense()
         {
-            if (senseId < 0 || g.world == null) return;
-            var inst = g.world.instances[senseId];
-            if (Time.time > _senseUntil || inst.state != ItemState.InWorld) { senseId = -1; return; }
+            if (senseIds.Count == 0 || g.world == null) return;
+            if (Time.time > _senseUntil) senseIds.Clear();
+            senseIds.RemoveAll(id => g.world.instances[id].state != ItemState.InWorld);   // picked up: its glow goes
+            senseId = senseIds.Count > 0 ? senseIds[0] : -1;
+            if (senseId < 0) return;
             if (_senseMat == null) { _senseMat = new Material(EnvMaterials.Outline); _senseMat.SetColor("_Color", new Color(0.35f, 0.85f, 1f)); }
             // faint: the soft glow only (no bright edge), breathing slowly
             _senseMat.SetFloat("_Width", 0);
             _senseMat.SetFloat("_Glow", 5f + 2f * Mathf.Sin(Time.time * 3f));
-            var mesh = g.renderer.WorldMeshFor(senseId);
             var rp = new RenderParams(_senseMat) { shadowCastingMode = ShadowCastingMode.Off };
-            for (int s = 0; s < mesh.subMeshCount; s++) Graphics.RenderMesh(rp, mesh, s, inst.transform);
+            foreach (var id in senseIds)
+            {
+                var mesh = g.renderer.WorldMeshFor(id);
+                for (int s = 0; s < mesh.subMeshCount; s++) Graphics.RenderMesh(rp, mesh, s, g.world.instances[id].transform);
+            }
         }
 
         // ---------------------------------------------------------------- handful

@@ -563,16 +563,50 @@ namespace WorkshopWreckage
             if (pr == null) return;
             _skillHeader.text = $"{pr.LevelText}   ·   {pr.skillPoints} skill point{(pr.skillPoints == 1 ? "" : "s")}";
             foreach (Transform c in _skillList) Destroy(c.gameObject);
-            foreach (var s in pr.skills.OrderBy(s => s.unlockLevel))
+            // a skill with ranks is one row: its rank now and the next one to buy (not a line per rank)
+            foreach (var chain in SkillChains(pr.skills).OrderBy(c => (c.FirstOrDefault(s => !pr.unlocked.Contains(s.id)) ?? c[^1]).unlockLevel))   // by the level of the next rank
             {
-                bool owned = pr.unlocked.Contains(s.id);
-                string why = s.Active ? pr.CanUnlock(s.id) : "coming in a later milestone";
-                string state = owned ? "UNLOCKED" : why == "" ? $"unlock ({s.cost} pt)" : why;
-                var b = MakeButton(_skillList, $"Lv {s.unlockLevel,2}  {s.name}  —  {state}", () => { if (_g.UnlockSkill(s.id)) RefreshSkills(); });
-                b.interactable = !owned && s.Active && why == "";
+                int have = chain.TakeWhile(s => pr.unlocked.Contains(s.id)).Count();
+                var next = have < chain.Count ? chain[have] : null;
+                string why = next == null ? "" : next.Active ? pr.CanUnlock(next.id) : "coming in a later milestone";
+                string name = RankBase(chain[0].name), label;
+                if (chain.Count == 1)
+                    label = $"Lv {next?.unlockLevel ?? chain[0].unlockLevel,2}  {name}  —  {(next == null ? "UNLOCKED" : why == "" ? $"unlock ({next.cost} pt)" : why)}";
+                else
+                {
+                    string rank = have == 0 ? "not learned" : $"rank {have} / {chain.Count}";
+                    string step = next == null ? "MAX" : $"{(have == 0 ? "learn" : "upgrade")} to rank {have + 1} ({next.cost} pt){(RankBase(next.name) != name ? $": {next.name}" : "")}";
+                    label = $"Lv {next?.unlockLevel ?? chain[^1].unlockLevel,2}  {name}  ·  {rank}  —  {(next == null || why == "" ? step : $"rank {have + 1}: {why}")}";
+                }
+                var b = MakeButton(_skillList, label, () => { if (next != null && _g.UnlockSkill(next.id)) RefreshSkills(); });
+                b.interactable = next != null && next.Active && why == "";
                 b.GetComponent<LayoutElement>().preferredHeight = 30;
             }
         }
+
+        /// <summary>The skills grouped into rank chains: a skill whose only requirement is the previous skill
+        /// and which raises one of the same effects is its next rank (Magnetic Glove I-X, Robot Part Sense I-V,
+        /// Deeper Pockets → Tool Belt).</summary>
+        static List<List<SkillDef>> SkillChains(List<SkillDef> skills)
+        {
+            SkillDef NextOf(SkillDef a)
+            {
+                var n = skills.Where(b => b.requires.Count == 1 && b.requires[0] == a.id && b.effects.Keys.Intersect(a.effects.Keys).Any()).ToList();
+                return n.Count == 1 ? n[0] : null;
+            }
+            var ranks = new HashSet<string>(skills.Select(NextOf).Where(n => n != null).Select(n => n.id));
+            var chains = new List<List<SkillDef>>();
+            foreach (var s in skills.Where(s => !ranks.Contains(s.id)))
+            {
+                var c = new List<SkillDef> { s };
+                for (var n = NextOf(s); n != null && !c.Contains(n); n = NextOf(n)) c.Add(n);
+                chains.Add(c);
+            }
+            return chains;
+        }
+
+        /// <summary>A rank's name without its numeral ("Magnetic Glove IV" → "Magnetic Glove").</summary>
+        static string RankBase(string name) => System.Text.RegularExpressions.Regex.Replace(name, @"\s+[IVX]+$", "");
 
         static string LatestSlot()
         {

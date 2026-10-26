@@ -1679,6 +1679,15 @@ namespace WorkshopWreckage
             g.SetState("paused");
             g.hud.OpenSub("settings");
             yield return g.Capture(Path.Combine(outDir, "tray_settings.png"), 6);
+            // the skills screen: a skill with ranks is one row (its rank, the next rank's cost); levels 2-12 pay
+            // 2 points each, 3 at 5 and 10, plus a point halfway through every level of 2+ completions
+            int pts0 = g.progression.skillPoints;
+            LevelTo(12);
+            int gained = g.progression.skillPoints - pts0;
+            Check("skill points are also paid halfway between levels", gained > 24, $"levels 1-12 paid {gained} points (24 without the halfway points)");
+            foreach (var id in new[] { "magnet_1", "magnet_2", "magnet_3", "part_sense", "part_sense_2" }) g.UnlockSkill(id);
+            g.hud.OpenSub("skills");
+            yield return g.Capture(Path.Combine(outDir, "tray_skills.png"), 6);
             g.SetState("play");
         }
 
