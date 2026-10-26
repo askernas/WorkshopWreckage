@@ -232,6 +232,8 @@ namespace WorkshopWreckage
             if (key == "propeller") return g.world.DefOf(id).shape.StartsWith("Propeller");
             if (key.StartsWith("type:")) return wb.TypeOf(wb.OriginOf(id)) == key.Substring(5);
             if (key.StartsWith("part:")) return g.world.instances[id].defId.ToString() == key.Substring(5);
+            if (key.StartsWith("pkey:") && key.Substring(5).Split('|') is var pk && pk.Length == 2)   // any copy of a pooled kit's part
+                return wb.TypeOf(wb.OriginOf(id)) == pk[0] && Robot.PartKey(g.world.DefOf(id)) == pk[1];
             return false;
         }
 
@@ -248,7 +250,10 @@ namespace WorkshopWreckage
             Kind("propeller", "Any propeller");
             foreach (var t in RobotWorkbench.Types) Kind("type:" + t, $"Any {g.workbench.P(t)?.name ?? t} part");
             var p = g.workbench.P(g.workbench.selected);
-            if (p != null)
+            if (RobotWorkbench.IsPooled(p))
+                foreach (var key in g.workbench.PoolIds(p).Where(Eligible).Select(id => Robot.PartKey(g.world.DefOf(id))).Distinct())
+                    o.Add(($"pkey:{p.type}|{key}", $"Any {g.workbench.P(p.type)?.name ?? p.type} {key}"));
+            else if (p != null)
                 foreach (var id in g.workbench.PartIds(p).Where(Eligible))
                     o.Add(("part:" + g.world.instances[id].defId, g.world.DefOf(id).displayName));
             if (o.Count == 0) o.Add(("any", "Any robot part"));

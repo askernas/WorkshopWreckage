@@ -157,7 +157,7 @@ namespace WorkshopWreckage
                 var have = wb.InstalledKeys(p);
                 foreach (var id in wb.NeededIds(p))
                 {
-                    var key = wb.KeyOn(p, id) + (wb.OriginOf(id) != p.id ? $" ({RobotModules.OriginName(wb.OriginOf(id))}'s)" : "");
+                    var key = wb.KeyOn(p, id) + (wb.OriginOf(id) != p.id && !RobotWorkbench.IsPooled(p) ? $" ({RobotModules.OriginName(wb.OriginOf(id))}'s)" : "");
                     var ps = wb.StateOf(id);
                     string why = ps == RobotWorkbench.PartState.Delivered ? wb.CanInstall(p, id) : "";
                     string txt = ps switch

@@ -105,6 +105,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "armpool")
+            {
+                ArmPoolChecks();   // QA: the three Sorting Arm kits are copies; any part goes on the arm being built (playtest 2026-10-26)
+                Finish();
+                yield break;
+            }
             if (section == "kits")
             {
                 KitChecks();   // QA: every unit's robot parts lie in the world from the start (playtest 2026-10-26)
@@ -1668,6 +1674,25 @@ namespace WorkshopWreckage
                 rows.Add($"{p.id} {ids.Count}{(good ? "" : $" (crafted {p.crafted}, in world {inWorld}, keys {same})")}");
             }
             Check("every robot unit's kit lies in the world from the start (Hoverbot #2/#3, Sorting Arm #2/#3 too)", ok && wb.projects.Count == 10, string.Join(", ", rows));
+            Check("robot parts are unique, each in one place", PartsIntact(out var detail), detail);
+        }
+
+        void ArmPoolChecks()
+        {
+            var wb = g.workbench;
+            var (a1, a2) = (wb.P("sorting_arm"), wb.P("sorting_arm_2"));
+            g.progression.level = 25;
+            var kit1 = wb.PartIds(a1);
+            var kit2 = wb.PartIds(a2);
+            foreach (var id in kit2) { Take(id); g.interaction.DepositStation(id); }
+            wb.InstallAll(a1, false);
+            Check("Sorting Arm #2's kit builds Sorting Arm #1, the arm on the mat", wb.Complete(a1) && wb.InstalledIds(a1).All(kit2.Contains), wb.Summary(a1));
+            Take(kit1[0]); g.interaction.DepositStation(kit1[0]);
+            Check("Sorting Arm #1's own part then waits in the holding tray", g.world.instances[kit1[0]].state == ItemState.Stored && wb.CanInstall(a1, kit1[0]) != "", wb.CanInstall(a1, kit1[0]));
+            foreach (var id in kit1.Skip(1)) { Take(id); g.interaction.DepositStation(id); }
+            wb.RobotOf(a1).SetOperational();
+            wb.InstallAll(a2, false);
+            Check("Sorting Arm #1's kit then builds Sorting Arm #2", wb.Unlocked(a2) && wb.Complete(a2) && wb.InstalledIds(a2).All(kit1.Contains), wb.Summary(a2));
             Check("robot parts are unique, each in one place", PartsIntact(out var detail), detail);
         }
 

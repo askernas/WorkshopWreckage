@@ -145,6 +145,35 @@ namespace WorkshopWreckage
         /// <summary>The robot type of a unit ("hoverbot_2" -> "hoverbot").</summary>
         public string TypeOf(string unit) => P(unit)?.type ?? unit;
 
+        // ---------------------------------------------------------------- interchangeable Sorting Arm parts
+
+        /// <summary>Types whose units are three copies of one kit (the Sorting Arms, playtest 2026-10-26): any
+        /// unit's part goes on whichever unit of the type is being built, in the same place. The parts pool
+        /// between the units; how a part works does not change.</summary>
+        static readonly HashSet<string> PooledTypes = new() { "sorting_arm" };
+        public static bool IsPooled(Project p) => p != null && !p.crafted && PooledTypes.Contains(p.type);
+
+        /// <summary>Every unit's kit of p's type (world ids).</summary>
+        public List<int> PoolIds(Project p) => projects.Where(q => q.type == p.type && !q.crafted).SelectMany(PartIds).ToList();
+
+        /// <summary>A pooled unit's parts, one per part key: the one installed on it, else the copy nearest to
+        /// going on (delivered, carried, found, missing; its own kit first).</summary>
+        List<int> PooledNeeded(Project p)
+        {
+            var owner = OwnerOf(p.id);
+            var o = new List<int>();
+            foreach (var gr in PoolIds(p).GroupBy(id => Robot.PartKey(_g.world.DefOf(id))))
+            {
+                var on = gr.Where(id => _g.world.instances[id].state == ItemState.Installed && _g.world.instances[id].owner == owner).ToList();
+                if (on.Count > 0) { o.Add(on[0]); continue; }
+                var free = gr.Where(id => _g.world.instances[id].state != ItemState.Installed)
+                    .OrderBy(id => StateOf(id) switch { PartState.Delivered => 0, PartState.Carried => 1, PartState.Discovered => 2, _ => 3 })
+                    .ThenBy(id => OriginOf(id) == p.id ? 0 : 1).ToList();
+                o.Add(free.Count > 0 ? free[0] : gr.FirstOrDefault(id => OriginOf(id) == p.id));
+            }
+            return o;
+        }
+
         // ---------------------------------------------------------------- interchangeable heads and arms
 
         /// <summary>The part items that make up each chassis' head and arm modules, the main item first
@@ -310,6 +339,7 @@ namespace WorkshopWreckage
         public List<int> NeededIds(Project p)
         {
             if (p.crafted) return new List<int>();
+            if (IsPooled(p)) return PooledNeeded(p);
             var o = PartIds(p).Where(id => !Displaced(p, id)).ToList();
             foreach (var s in new[] { ModuleSlot.Head, ModuleSlot.ArmL, ModuleSlot.ArmR })
                 if (DonorIn(p, s) is int d && d >= 0) o.Add(d);
@@ -359,7 +389,7 @@ namespace WorkshopWreckage
         {
             var owner = OwnerOf(p.id);
             var o = new List<int>();
-            if (p.crafted) { foreach (var i in _g.world.instances) if (i.state == ItemState.Installed && i.owner == owner) o.Add(i.id); }
+            if (p.crafted || IsPooled(p)) { foreach (var i in _g.world.instances) if (i.state == ItemState.Installed && i.owner == owner) o.Add(i.id); }
             else foreach (var id in NeededIds(p)) if (_g.world.instances[id].state == ItemState.Installed && _g.world.instances[id].owner == owner) o.Add(id);
             return o;
         }
@@ -367,8 +397,8 @@ namespace WorkshopWreckage
         /// <summary>Parts in the trays that can go on p now (its own, and other robots' heads and arms).</summary>
         public int InstallableCount(Project p) => DeliveredIds(p).Count(id => CanInstall(p, id) == "") + DonorCandidates(p).Count();
 
-        /// <summary>Its own delivered parts (the units of a type share one holding tray).</summary>
-        public List<int> DeliveredIds(Project p) => p.crafted ? new List<int>() : _g.storage.Stored(StationOf(p.type)).Where(id => OriginOf(id) == p.id).ToList();
+        /// <summary>Its own delivered parts (the units of a type share one holding tray; a pooled type: all of them).</summary>
+        public List<int> DeliveredIds(Project p) => p.crafted ? new List<int>() : _g.storage.Stored(StationOf(p.type)).Where(id => OriginOf(id) == p.id || IsPooled(p)).ToList();
 
         public int Required(Project p) => p.crafted ? p.materials.Values.Sum() : NeededIds(p).Count;
         public int InstalledCount(Project p) => InstalledIds(p).Count;
@@ -452,7 +482,12 @@ namespace WorkshopWreckage
             var i = _g.world.instances[id];
             string origin = OriginOf(id);
             if (i.state != ItemState.Stored || i.owner != "box:" + StationOf(TypeOf(origin))) return "Deliver it to the workbench first";
-            if (origin != p.id)
+            if (IsPooled(p) && TypeOf(origin) == p.type)
+            {
+                // any Sorting Arm's part goes on the arm being built, in the same place
+                if (InstalledKeys(p).Contains(KeyOn(p, id))) return $"{p.name} already has a {KeyOn(p, id)}";
+            }
+            else if (origin != p.id)
             {
                 // another robot's head or arm: any chassis takes it in a free slot of its kind
                 if (MainSlotOf(id) is not ModuleSlot s || !TakesDonors(p, s)) return $"It is {RobotModules.OriginName(origin)}'s part";
@@ -602,6 +637,10 @@ namespace WorkshopWreckage
             if (p == null || !def.IsRobotPart) return (false, "Unknown robot part");
             _g.storage.Deposit(StationOf(p.type), id, by);
             if (Install(p, id)) return (true, $"Installed on {p.name}: {def.displayName}  ({InstalledCount(p)}/{Required(p)})");
+            // a Sorting Arm part goes on whichever arm is on the mat (the kits are copies)
+            if (IsPooled(p))
+                foreach (var q in projects.Where(q => q.type == p.type && q != p && OnBench(q)))
+                    if (Install(q, id)) return (true, $"Installed on {q.name}: {def.displayName}  ({InstalledCount(q)}/{Required(q)})");
             // a head or arm its own robot cannot take now goes on the robot being built (the one
             // selected at the bench first), as any robot takes any head and arms
             if (MainSlotOf(id) != null)
