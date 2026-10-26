@@ -154,6 +154,7 @@ namespace WorkshopWreckage
             else if (args.ContainsKey("robotbench") && _studio != null) { SetState("play"); StartCoroutine(RobotBench()); }
             else if (args.TryGetValue("bench", out var bp)) { SetState("play"); StartCoroutine(new Benchmark().Run(this, bp)); }
             else if (args.TryGetValue("autoplay", out var ap)) { SetState("play"); StartCoroutine(new Autoplay().Run(this, ap)); }
+            else if (args.TryGetValue("balance", out var bal)) { SetState("play"); StartCoroutine(new BalanceSim().Run(this, bal)); }   // QA: robot-only balance run (balance_profiles)
             else if (args.ContainsKey("play")) SetState("play");
             else { SetState("menu"); Splash.Show(() => hud.SplashBackdrop(true)); }
         }
@@ -165,7 +166,7 @@ namespace WorkshopWreckage
             builder.RefreshProbe();
         }
 
-        public bool Automated => args.ContainsKey("shot") || args.ContainsKey("bench") || args.ContainsKey("robotbench") || args.ContainsKey("autoplay");
+        public bool Automated => args.ContainsKey("shot") || args.ContainsKey("bench") || args.ContainsKey("robotbench") || args.ContainsKey("autoplay") || args.ContainsKey("balance");
 
         // ---------------------------------------------------------------- world lifecycle
 
@@ -1328,12 +1329,14 @@ namespace WorkshopWreckage
                 var def = world.DefOf(id);
                 GameEvents.Raise(GameEventKind.PartSorted, storage.lastDepositor, RobotTypeOf(storage.lastDepositor), def.id, def.CategoryName, box);
                 progression.OnSorted(id, robot);
+                if (robot) robots.FirstOrDefault(r => r.Owner == storage.lastDepositor)?.stats.Dropped(id, def.id, Time.time, false);
                 telemetry.Sorted(robot, playTime, progress.sortedTotal);
             };
             // the level point: once per destination, whoever (player or robot) stored the last copy
             progress.DefinitionCompleted += id =>
             {
                 bool fresh = !progression.completedDestinations.Contains(id);
+                if (fresh && robots.FirstOrDefault(r => r.Owner == storage.lastDepositor) is Robot last) last.stats.finals++;   // it stored the last copy
                 progression.OnDefinitionCompleted(id, world.TotalOf(id));
                 if (fresh) hud.Toast($"Destination complete: {db.Get(id).displayName}  ({world.TotalOf(id)}/{world.TotalOf(id)})   ·   {progression.LevelText}", true);
                 CheckFullyRestored();
@@ -1365,6 +1368,23 @@ namespace WorkshopWreckage
             telemetry.SkillUnlocked(id, playTime);
             hud.Toast("Skill unlocked: " + progression.Skill(id).name, true);
             return true;
+        }
+
+        /// <summary>Full respec: every skill and robot upgrade refunded (Progression.RespecAll), then what the
+        /// refunded skills were running stops safely. Nothing carried is lost: a smaller inventory keeps what it
+        /// holds (it only takes no more), robots finish delivering a load larger than their new capacity, and
+        /// installed robot modules stay where they are.</summary>
+        public int Respec()
+        {
+            int n = progression.RespecAll();
+            if (n <= 0) return 0;
+            ApplySkills();
+            int slots = (int)progression.Effect("robot_command_slots");
+            foreach (var r in robots.Where(r => r.zoneCenter.HasValue).Skip(slots).ToList()) r.AssignZone(null);
+            if (!progression.Has("destination_orders")) foreach (var r in robots.Where(r => r.orderState != "").ToList()) r.CancelOrder();
+            telemetry.SkillUsed("respec");
+            hud.Toast($"Respec: {n} skill points back to spend", true);
+            return n;
         }
 
         /// <summary>Buys the next rank of a robot upgrade (its type must be operational).</summary>

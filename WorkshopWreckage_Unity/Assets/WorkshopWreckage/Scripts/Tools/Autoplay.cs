@@ -45,6 +45,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "camshake")
+            {
+                yield return CamShake(g.args.GetValueOrDefault("apslot", "slot1"));   // QA: the view holds still while the player stands still
+                Finish();
+                yield break;
+            }
             if (section == "loadslot")
             {
                 yield return LoadSlotChecks(g.args.GetValueOrDefault("apslot", "slot1"));   // QA: a player's save loads with its loose parts at rest
@@ -108,6 +114,12 @@ namespace WorkshopWreckage
             if (section == "armpool")
             {
                 ArmPoolChecks();   // QA: the three Sorting Arm kits are copies; any part goes on the arm being built (playtest 2026-10-26)
+                Finish();
+                yield break;
+            }
+            if (section == "respec")
+            {
+                yield return RespecChecks();   // QA: full respec, upgrade previews, robot telemetry (skill progression spec §6-8)
                 Finish();
                 yield break;
             }
@@ -1677,6 +1689,57 @@ namespace WorkshopWreckage
             Check("robot parts are unique, each in one place", PartsIntact(out var detail), detail);
         }
 
+        /// <summary>Full respec gives back exactly what was spent and loses nothing carried; the previews show
+        /// "now → after" within the limits; a robot's measured record survives a save.</summary>
+        IEnumerator RespecChecks()
+        {
+            var wb = g.workbench;
+            var pr = g.progression;
+            var pj = wb.P("retrobot");
+            foreach (var id in wb.PartIds(pj)) { Take(id); g.interaction.DepositStation(id); }
+            wb.InstallAll(pj);
+            var retro = wb.RobotOf(pj);
+            retro.SetOperational();
+            pr.level = 12;
+            pr.skillPoints = 30;   // QA: a budget to spend; the check is that respec neither creates nor loses any
+            int total = pr.skillPoints + pr.SkillPointsSpent;
+            foreach (var s in new[] { "pockets_1", "pockets_2", "quick_hands", "robot_coordination", "destination_orders" }) g.UnlockSkill(s);
+            foreach (var u in new[] { "retro_capacity", "retro_capacity", "retro_speed" }) g.BuyRobotUpgrade(u);
+            Check("previews: the next rank shows now → after", g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_speed"), 2).Contains("→")
+                  && g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_persistence"), 1).Contains("m"), g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_speed"), 2));
+            Check("previews: a capped stat says so", g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_reach"), 3).Contains("→"), g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_reach"), 3));
+            // a full inventory (15 with both pockets) and a robot carrying a full load of 3
+            var loose = g.world.instances.Where(i => i.state == ItemState.InWorld && g.db.CanRobotCarry(i.defId) && !g.world.DefOf(i.id).IsRobotPart).Select(i => i.id).Take(18).ToList();
+            foreach (var id in loose.Take(g.inventory.capacity)) Take(id);
+            int held = g.inventory.Count;
+            var load = loose.Skip(held).Take(3).ToList();
+            foreach (var id in load) { g.index.Remove(id); g.world.SetState(id, ItemState.Carried, retro.Owner); retro.carried.Add(id); }
+            int mods = g.world.instances.Count(i => i.state == ItemState.Installed);
+            retro.preferDef = g.world.instances[loose[0]].defId; retro.orderState = "WORKING";   // a lasting order (Destination Orders)
+            int spent = pr.SkillPointsSpent;
+            int back = g.Respec();
+            Check("respec: every point back, none created", back == spent && pr.SkillPointsSpent == 0 && pr.skillPoints == total, $"spent {spent}, back {back}, now {pr.skillPoints} of {total}");
+            Check("respec: skills and upgrades are gone, their effects too", pr.unlocked.Count == 0 && pr.RanksBought == 0 && g.inventory.capacity == 10 && retro.Capacity == 1,
+                  $"{pr.unlocked.Count} skills, {pr.RanksBought} ranks, inventory {g.inventory.capacity}, Retrobot capacity {retro.Capacity}");
+            Check("respec: nothing carried is lost (over capacity only takes no more)", g.inventory.Count == held && held > 10 && g.inventory.IsFull
+                  && load.All(id => g.world.instances[id].state == ItemState.Carried && g.world.instances[id].owner == retro.Owner) && retro.carried.Count == 3,
+                  $"inventory {g.inventory.Count}/{g.inventory.capacity} (had {held}), Retrobot carries {retro.carried.Count}/{retro.Capacity}");
+            Check("respec: robot modules stay installed; a lasting order without Destination Orders ends", g.world.instances.Count(i => i.state == ItemState.Installed) == mods && retro.orderState == "",
+                  $"installed {mods} -> {g.world.instances.Count(i => i.state == ItemState.Installed)}, order '{retro.orderState}'");
+            Check("respec: prerequisites hold again (Tool Belt needs Deeper Pockets)", pr.CanUnlock("pockets_2") != "" && pr.CanUnlock("pockets_1") == "", pr.CanUnlock("pockets_2"));
+            pr.level = 11;
+            Check("respec: closed below the respec level", g.Respec() == 0 && pr.respecLevel == 12, $"respec level {pr.respecLevel}");
+            // telemetry: real counts, saved with the robot
+            retro.stats.Picked(load[0], 10); retro.stats.Dropped(load[0], g.world.instances[load[0]].defId, 22, false); retro.stats.Tick(30, "WORKING"); retro.stats.Tick(10, "STAGING FULL");
+            g.SaveGame("autotest_respec");
+            g.LoadGame("autotest_respec");
+            yield return Frames(5);
+            var r2 = g.robots.First(r => r.id == "retrobot");
+            Check("telemetry: a robot's record survives a save", r2.stats.stored == 1 && System.Math.Abs(r2.stats.AvgDeliveryS - 12) < 0.01 && System.Math.Abs(r2.stats.Share(r2.stats.blockedS) - 0.25) < 0.01,
+                  $"stored {r2.stats.stored}, {r2.stats.AvgDeliveryS:0.0} s per part, blocked {r2.stats.Share(r2.stats.blockedS) * 100:0}%");
+            File.Delete(SaveSystem.PathOf("autotest_respec"));
+        }
+
         void ArmPoolChecks()
         {
             var wb = g.workbench;
@@ -1849,6 +1912,48 @@ namespace WorkshopWreckage
 
         /// <summary>Loads a save slot (read only) and checks that its loose parts rest on something: a save
         /// converted to a new catalog, or written right after one, must not leave parts in mid-air.</summary>
+        /// <summary>A save is loaded and the player stands still for 10 s: frame times and how far the eye moves
+        /// from frame to frame (playtest 2026-10-26: "the camera is shaking").</summary>
+        IEnumerator CamShake(string slot)
+        {
+            if (slot != "new") g.LoadGame(slot);
+            g.player.enabled = true;   // the controller runs (no input): gravity, standing on parts, head bob
+            yield return Frames(120);
+            var head = g.player.head;
+            var dts = new List<float>(); var dy = new List<float>(); var dxz = new List<float>(); var rot = new List<float>();
+            Vector3 lastP = head.position; Quaternion lastR = head.rotation;
+            for (float t = 0; t < 10; t += Time.unscaledDeltaTime)
+            {
+                yield return null;
+                dts.Add(Time.unscaledDeltaTime * 1000);
+                var p = head.position;
+                dy.Add(Mathf.Abs(p.y - lastP.y) * 1000); dxz.Add(new Vector2(p.x - lastP.x, p.z - lastP.z).magnitude * 1000);
+                rot.Add(Quaternion.Angle(lastR, head.rotation));
+                lastP = p; lastR = head.rotation;
+            }
+            float P(List<float> l, float q) { var o = l.OrderBy(x => x).ToList(); return o[Mathf.Min(o.Count - 1, (int)(q * o.Count))]; }
+            Debug.Log($"[camshake] {dts.Count} frames: frame ms p50 {P(dts, .5f):0.0} p95 {P(dts, .95f):0.0} max {dts.Max():0.0}, over 25 ms {dts.Count(x => x > 25)}; eye mm/frame vertical p50 {P(dy, .5f):0.00} p95 {P(dy, .95f):0.00} max {dy.Max():0.00}, horizontal max {dxz.Max():0.00}; turn deg max {rot.Max():0.000}; robots working {g.robots.Count(r => r.Operational)}");
+            Check("standing still: the eye moves under 1 mm per frame", P(dy, .95f) < 1 && dxz.Max() < 1, $"vertical p95 {P(dy, .95f):0.00} mm, horizontal max {dxz.Max():0.00} mm");
+            Check("standing still: frames under 25 ms (95 %)", P(dts, .95f) < 25, $"p95 {P(dts, .95f):0.0} ms, max {dts.Max():0.0} ms");
+            // standing ON loose parts, with uneven frames (every 4th frame 40-90 ms late): the eye stays put
+            var spot = g.world.instances.Where(i => i.state == ItemState.InWorld && i.Position.y < 0.3f)
+                .Select(i => i.Position).FirstOrDefault(p => g.debris.Under(p, 0.16f) is float h && h > 0.04f && h < 0.2f && g.debris.At(p) > 0.04f);
+            g.player.Teleport(new Vector3(spot.x, g.debris.Under(spot, 0.16f), spot.z));
+            yield return Frames(90);
+            float lo = float.MaxValue, hi = float.MinValue, step = 0;
+            var rng = new System.Random(3);
+            float lastY = head.position.y;
+            for (int f = 0; f < 240; f++)
+            {
+                if (f % 4 == 0) System.Threading.Thread.Sleep(40 + rng.Next(50));
+                yield return null;
+                float y = head.position.y;
+                lo = Mathf.Min(lo, y); hi = Mathf.Max(hi, y); step = Mathf.Max(step, Mathf.Abs(y - lastY)); lastY = y;
+            }
+            Debug.Log($"[camshake] on parts at {spot} (debris {g.debris.Under(spot, 0.16f) * 100:0.0} cm): eye range {(hi - lo) * 1000:0.0} mm, largest frame step {step * 1000:0.0} mm");
+            Check("standing on loose parts with uneven frames: the eye holds still (under 3 mm)", hi - lo < 0.003f, $"eye range {(hi - lo) * 1000:0.0} mm, largest step {step * 1000:0.0} mm");
+        }
+
         IEnumerator LoadSlotChecks(string slot)
         {
             g.LoadGame(slot);

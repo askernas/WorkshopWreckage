@@ -399,7 +399,7 @@ namespace WorkshopWreckage
                     lineOfSight = dist <= radius && (!los || LineOfSight(hand, inst.Position)) && (inst.state != ItemState.InWorld || !g.Covered(i)),   // not from under a pile
                 };
             }).ToList();
-            var ids = WorkshopWreckage.Supermagnet.Select(def, candidates, cfg, Inv.capacity - Inv.Count);
+            var ids = WorkshopWreckage.Supermagnet.Select(def, candidates, cfg, Mathf.Max(0, Inv.capacity - Inv.Count));   // over capacity after a respec: no room
             if (ids.Count == 0) { g.hud.OnFeedback("Supermagnet: no more of those in range", false); return 0; }
             int toHand = Fits(ids.Count);
             StartCoroutine(Pull(ids));

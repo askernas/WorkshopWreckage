@@ -42,6 +42,8 @@ namespace WorkshopWreckage
         public int preferDef = -1;
         public string status = "";
         public int delivered, staged, lastStagedId = -1;
+        /// <summary>Measured performance for the Robots screen and the balance runs (RobotStats).</summary>
+        public readonly RobotStats stats = new();
         /// <summary>QA: parts a stowing robot put into / took out of its hold with the grippers.</summary>
         public int stows, unstows;
         public Vector3 home;
@@ -652,7 +654,7 @@ namespace WorkshopWreckage
                 ["order"] = orderState != "" ? (double)preferDef : -1.0,
                 ["following"] = mode == Mode.Following, ["battery"] = (double)Battery,
                 ["summon"] = mode == Mode.Docked ? "docked" : mode == Mode.Summoned || _summonPending ? "summoned" : "",
-                ["delivered"] = (double)delivered, ["staged"] = (double)staged,
+                ["delivered"] = (double)delivered, ["staged"] = (double)staged, ["stats"] = stats.ToDict(),
                 ["pos"] = new List<object> { (double)transform.position.x, (double)transform.position.y, (double)transform.position.z },
                 ["yaw"] = (double)transform.eulerAngles.y,
             };
@@ -667,6 +669,7 @@ namespace WorkshopWreckage
             Battery = (float)Json.Num(d, "battery", 1);
             delivered = Json.Int(d, "delivered");
             staged = Json.Int(d, "staged");
+            stats.Load(Json.Obj(d.GetValueOrDefault("stats")));
             var z = Json.Arr(d.GetValueOrDefault("zone"));
             zoneCenter = z.Count == 2 ? new Vector3(Json.F(z[0]), 0, Json.F(z[1])) : null;
             paused = Json.Bool(d, "paused");
@@ -939,6 +942,7 @@ namespace WorkshopWreckage
             float dt = Time.deltaTime;
             _time += dt;
             if (Stationary) return;   // SortingArm drives the arm
+            if (mode == Mode.Working && !paused) stats.Tick(dt, StatusWord());
             if (_setDownPending) SetDownPlayerOnly();
             var fwd0 = transform.forward;
             if (_summonPending && Active && _step != Step.Picking && _step != Step.Depositing && !_climbing) BeginReturn();
@@ -1253,6 +1257,7 @@ namespace WorkshopWreckage
         IEnumerable<ItemInstance> OneDestination(IEnumerable<ItemInstance> pool, List<ItemInstance> tray, Vector3 me, ref System.Func<ItemInstance, float> score)
         {
             if (carried.Count == 0) _fillSkip.Clear();
+            if (carried.Count > 0 && RouteByDestinations) return LoadMore(pool, tray, me, ref score);
             if (carried.Count > 0)
             {
                 var box = g.world.DefOf(carried[0]).storageBox;
@@ -1275,12 +1280,60 @@ namespace WorkshopWreckage
             return list;
         }
 
+        /// <summary>Route Planning as destinations per load (robots.json robot_ai route_mode "destinations"; QA:
+        /// --routemode=destinations|adjacent). The default "adjacent" tops a load up only from destinations right
+        /// beside its own (0.6 m per rank).</summary>
+        bool RouteByDestinations => (g.args.TryGetValue("routemode", out var m) ? m : Json.Str(AI, "route_mode", "adjacent")) == "destinations";
+
+        /// <summary>A Caterpillarbot with a part on board: parts for the destinations already on board, from anywhere;
+        /// none left and Route Planning allows another destination (route_destinations per rank: 1 without it), parts
+        /// for a further one: the nearest, near the destinations on board, where several wait (a fuller box first).</summary>
+        IEnumerable<ItemInstance> LoadMore(IEnumerable<ItemInstance> pool, List<ItemInstance> tray, Vector3 me, ref System.Func<ItemInstance, float> score)
+        {
+            var boxes = carried.Select(c => g.world.DefOf(c).storageBox).ToHashSet();
+            bool OnBoard(ItemInstance i) => boxes.Contains(g.db.Get(i.defId).storageBox) && !_fillSkip.Contains(i.id);
+            var same = (pool == tray ? g.world.instances : pool).Where(i => OnBoard(i) && Pickable(i)).ToList();
+            int maxDest = _routeRank <= 0 ? 1 : Mathf.RoundToInt(AiRank("route_destinations", _routeRank, 2));
+            if (same.Count > 0 || boxes.Count >= maxDest) return same;
+            var spots = boxes.Select(StagingSpot).Where(s => s.HasValue).Select(s => s.Value).ToList();
+            if (spots.Count == 0) return same;
+            var more = g.world.instances.Where(i => Pickable(i) && !_fillSkip.Contains(i.id) && StagingSpot(g.db.Get(i.defId).storageBox).HasValue).ToList();
+            var waiting = more.GroupBy(i => g.db.Get(i.defId).storageBox).ToDictionary(gr => gr.Key, gr => gr.Count());
+            var plain = score;
+            int room = Mathf.Max(1, _capacity - SlotsUsed);
+            float detour = AiNum("route_detour_weight", 1);
+            score = i =>
+            {
+                var b = g.db.Get(i.defId).storageBox;
+                var s = StagingSpot(b).Value;
+                return plain(i) + detour * spots.Min(p => Flat(p - s).magnitude) - 1.5f * Mathf.Min(waiting[b] - 1, room - 1);
+            };
+            return more;
+        }
+
+        /// <summary>Route Planning III (route_mode "destinations"): the stop order with the shortest straight-line
+        /// tour through the staging spots of the destinations on board (at most 4 stops, every order tried).</summary>
+        List<string> BestStopOrder(List<string> boxes, Vector3 me)
+        {
+            if (boxes.Count < 2 || boxes.Count > 4) return boxes;
+            List<string> best = boxes;
+            float bestLen = float.MaxValue;
+            IEnumerable<List<string>> Perms(List<string> l) => l.Count <= 1 ? new[] { l } : l.SelectMany(x => Perms(l.Where(y => y != x).ToList()).Select(r => new[] { x }.Concat(r).ToList()));
+            foreach (var order in Perms(boxes))
+            {
+                float len = 0; var at = me;
+                foreach (var b in order) { var s = StagingSpot(b) ?? at; len += Flat(s - at).magnitude; at = s; }
+                if (len < bestLen) { bestLen = len; best = order; }
+            }
+            return best;
+        }
+
         // ---------------------------------------------------------------- bought intelligence (design v1.0 §6–7)
 
         static Dictionary<string, object> _ai;
         static Dictionary<string, object> AI => _ai ??= Json.Obj(RootConfig().GetValueOrDefault("robot_ai")) ?? new Dictionary<string, object>();
-        static float AiNum(string k, double def) => (float)Json.Num(AI, k, def);
-        static float AiRank(string k, int rank, double def)
+        public static float AiNum(string k, double def) => (float)Json.Num(AI, k, def);
+        public static float AiRank(string k, int rank, double def)
         {
             var l = Json.Arr(AI.GetValueOrDefault(k));
             return l.Count == 0 ? (float)Json.Num(AI, k, def) : Json.F(l[Mathf.Clamp(rank - 1, 0, l.Count - 1)]);
@@ -1793,6 +1846,7 @@ namespace WorkshopWreckage
                 g.interaction.SettleNeighbours(from, g.world.DefOf(itemId));
                 carried.Add(itemId);
                 _lastDef = inst.defId; _lastPickPos = inst.Position; _lastPickT = _time;   // Local Persistence
+                stats.Picked(itemId, Time.time);
                 if (inst.defId == preferDef && orderState == "") _preferPicked = true;     // a one-load R request
                 if (Stows) _clawItem = itemId;   // in the grippers until it is stowed
                 ShowCarried(itemId);
@@ -1892,6 +1946,7 @@ namespace WorkshopWreckage
             var boxes = carried.Select(c => g.world.DefOf(c).storageBox).Distinct()
                 .Where(b => g.db.boxes.ContainsKey(b) && g.units.ContainsKey(Json.Str(g.db.boxes[b], "unit")))
                 .OrderBy(b => ((StagingSpot(b) ?? me) - me).sqrMagnitude).ToList();
+            if (FillsOneDest && _routeRank >= 3 && RouteByDestinations) boxes = BestStopOrder(boxes, me);
             if (boxes.Count == 0) return false;
             var box = boxes[0];
             var d = g.db.boxes[box];
@@ -2360,6 +2415,7 @@ namespace WorkshopWreckage
                 g.index.Insert(itemId);
                 g.piles.Drop(itemId);   // let go: it settles into the staging pile
                 staged++;
+                stats.Dropped(itemId, def.id, Time.time, true);
                 _tripParts++;
                 lastStagedId = itemId;
                 Sfx.Play("drop_floor", spot, -6);

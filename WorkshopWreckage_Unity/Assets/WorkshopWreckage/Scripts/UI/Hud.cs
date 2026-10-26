@@ -598,6 +598,8 @@ namespace WorkshopWreckage
                 b.interactable = next != null && next.Active && why == "";
                 b.GetComponent<LayoutElement>().preferredHeight = 30;
             }
+            RespecButton(_skillList, RefreshSkills);
+            if (pr.level < pr.respecLevel) Para(_skillList, $"Respec (every skill and robot upgrade back at what it cost) opens at level {pr.respecLevel}.", 13, Muted, 18);
         }
 
         /// <summary>The skills grouped into rank chains: a skill whose only requirement is the previous skill

@@ -334,6 +334,7 @@ namespace WorkshopWreckage
                 t2 += $"<b><color={Hex(Brass)}>{u.displayName}</color></b>  —  [{u.StatusWord()}]  {Detail(u)}\n";
                 t2 += $"   battery {u.Battery * 100:0}%  ·  stored {u.delivered}, staged {u.staged}" + (u.paused ? "  ·  <color=#d98a4a>PAUSED</color>" : "") + (u.zoneCenter.HasValue ? "  ·  zone" : "")
                     + (u.strategy == "assigned_definition" ? $"\n   assignment: {(u.assignedDef >= 0 ? _g.db.Get(u.assignedDef).displayName + (u.autoAssigned ? " (its own choice)" : "") : "none")}  ·  {(u.specialistState == "" ? "WORKING" : u.specialistState)}" : "") + "\n";
+                t2 += $"   <color={Hex(Muted)}>{Measured(u)}</color>\n";
             }
             t2 += $"\n<b>Capabilities</b>  <color={Hex(Muted)}>base  →  upgraded</color>\n";
             t2 += Stat("Speed", rb.BaseStat("walk_speed"), rb.WalkSpeed, " m/s", "walk_speed");
@@ -359,7 +360,8 @@ namespace WorkshopWreckage
                 b.interactable = why == "";
                 b.GetComponent<LayoutElement>().preferredHeight = 30;
                 b.GetComponentInChildren<Text>().fontSize = 18;
-                var d = Para(_rbUpgrades, u.description, 13, Muted, 18);
+                var preview = rank < u.maxRank ? UpgradePreview(pr, rb, u, rank + 1) : "";
+                var d = Para(_rbUpgrades, u.description + (preview != "" ? $"\n<color={Hex(GoodC)}>Next rank: {preview}</color>" : ""), 13, Muted, 18);
                 d.alignment = TextAnchor.UpperLeft;
             }
 
@@ -375,7 +377,81 @@ namespace WorkshopWreckage
             }
             if (pr.level >= pr.respecLevel && pr.RanksBought > 0)
                 Btn("Refund robot upgrades", 280, () => { int n = pr.RefundRobotUpgrades(); OnFeedback($"{n} skill points refunded", true); RefreshRobots(); });
+            RespecButton(_rbActions, RefreshRobots);
         }
+
+        bool _respecArmed;
+
+        /// <summary>Full respec (skills and robot upgrades), from the respec level; the first click only arms it.</summary>
+        void RespecButton(RectTransform parent, System.Action refresh)
+        {
+            var pr = _g.progression;
+            int spent = pr.SkillPointsSpent;
+            if (pr.level < pr.respecLevel || spent == 0) { _respecArmed = false; return; }
+            var b = MakeButton(parent, _respecArmed ? $"Confirm: refund all {spent} points" : $"Respec all skills and upgrades ({spent} pt)", () =>
+            {
+                if (!_respecArmed) { _respecArmed = true; refresh(); return; }
+                _respecArmed = false;
+                int n = _g.Respec();
+                OnFeedback($"{n} skill points refunded — every skill and robot upgrade can be chosen again", true);
+                refresh();
+            });
+            b.GetComponent<LayoutElement>().preferredWidth = 380;
+            b.GetComponentInChildren<Text>().fontSize = 18;
+        }
+
+        /// <summary>The robot's measured record (RobotStats): real counts since it was built, nothing estimated.</summary>
+        string Measured(Robot u)
+        {
+            var s = u.stats;
+            var done = _g.progression.completedDestinations;
+            string o = $"measured: {s.stored} stored · {s.staged} staged · {s.Assisted(done)} completed destinations assisted · {s.finals} completed by its delivery";
+            o += s.AvgDeliveryS >= 0 ? $" · {s.AvgDeliveryS:0} s pick-up to drop" : "";
+            if (s.ServiceS >= 1) o += $"\n   time at work: busy {s.Share(s.busyS) * 100:0}% · idle {s.Share(s.idleS) * 100:0}% · blocked {s.Share(s.blockedS) * 100:0}% · charging {s.Share(s.chargingS) * 100:0}%";
+            return o;
+        }
+
+        static readonly Dictionary<string, (string label, string unit, int dec)> StatText = new()
+        {
+            ["walk_speed"] = ("speed", " m/s", 2), ["turn_speed"] = ("turning", "°/s", 0), ["capacity"] = ("parts per trip", "", 0),
+            ["item_types"] = ("part kinds per trip", "", 0), ["reach_height"] = ("reach height", " m", 2), ["climb_height"] = ("climbs up to", " m", 2),
+            ["climb_speed"] = ("climbing speed", " m/s", 2), ["max_item_size"] = ("largest part", " m", 3), ["heap_step_height"] = ("crosses heaps up to", " m", 2),
+            ["scan_radius"] = ("detection range", " m", 0), ["gather_radius"] = ("gathering radius", " m", 1), ["cycle_speed"] = ("servo speed", "×", 2),
+            ["pick_time"] = ("pick-up / drop time", "×", 2),
+        };
+
+        /// <summary>What the next rank changes: "now → after" for every stat it touches (capped by the robot's
+        /// permanent limits, whole parts for capacities), or the behaviour a rank of robot intelligence adds.</summary>
+        public string UpgradePreview(Progression pr, Robot rb, RobotUpgradeDef u, int next)
+        {
+            if (u.mode == "rank") return RankPreview(u.stat, next, rb);
+            var o = new List<string>();
+            foreach (var k in new[] { u.stat }.Concat(u.also.Keys).Concat(u.alsoPercent.Keys).Distinct())
+            {
+                if (!StatText.TryGetValue(k, out var t)) continue;
+                double b = k == "pick_time" ? 1 : rb.BaseStat(k, k is "capacity" or "item_types" ? 1 : 0), lim = rb.LimitOf(k);
+                double now = pr.RobotStat(u.robot, k, b, lim), after = pr.RobotStat(u.robot, k, b, lim, u.id, next), raw = pr.RobotStat(u.robot, k, b, double.PositiveInfinity, u.id, next);
+                bool whole = k is "capacity" or "item_types";
+                string F(double v) => whole ? System.Math.Floor(v + 1e-4).ToString("0") : v.ToString(t.dec == 0 ? "0" : t.dec == 1 ? "0.0" : t.dec == 2 ? "0.00" : "0.000");
+                string note = raw > lim + 1e-6 ? $" (capped at its limit {F(lim)})" : whole && System.Math.Abs(after - System.Math.Floor(after + 1e-4)) > 1e-3 ? $" ({after:0.0}: counts once it reaches {System.Math.Ceiling(after):0})" : "";
+                o.Add($"{t.label} {F(now)}{t.unit} → {F(after)}{t.unit}{note}");
+            }
+            return string.Join(";  ", o);
+        }
+
+        /// <summary>The behaviour of rank `r` of a robot-intelligence upgrade, from robots.json robot_ai and the strategy code.</summary>
+        static string RankPreview(string stat, int r, Robot rb) => stat switch
+        {
+            "local_persistence" => $"keeps to the part kind it just picked within {Robot.AiRank("persistence_radius_m", r, 4):0} m for {Robot.AiRank("persistence_s", r, 60):0} s; switching kind costs {Robot.AiNum("switch_penalty_m", 1.5) * r:0.0} m of walking",
+            "set_awareness" => $"prefers nearly complete destinations it can finish (up to {Robot.AiNum("focus_bonus_m", 2.5):0.0} m of walking)",
+            "completion_strategist" => $"set focus up to {Robot.AiNum("strategist_bonus_m", 4):0.0} m and also skips copies that are covered or given up on; retries unreachable parts after 180 s instead of 60 s",
+            "courier_handoff" => $"stops feeding a staging zone at {Robot.StagingSoftLimit} parts, or when no robot or arm downstream can store it",
+            "search_efficiency" => $"checks {6 + 3 * r} candidate parts per decision instead of {6 + 3 * (r - 1)}",
+            "route_planning" => $"with nothing left for its destination, tops the load up with parts for destinations within {0.6f * r:0.0} m of it",
+            "staging_priority" => $"empties the fullest staging zones first (each waiting part counts as {0.6f * r:0.0} m less flying)",
+            "part_retrieval" => "picks up robot parts it finds and delivers them to the Robot Workbench",
+            _ => $"rank {r}",
+        };
 
         /// <summary>Describe() without the leading "Name [WORD]: ".</summary>
         static string Detail(Robot u)

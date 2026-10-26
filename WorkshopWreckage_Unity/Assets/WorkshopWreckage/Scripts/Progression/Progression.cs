@@ -171,16 +171,37 @@ namespace WorkshopWreckage
             return refund;
         }
 
+        /// <summary>Points spent on player skills and robot upgrades, at what each one cost.</summary>
+        public int SkillPointsSpent => unlocked.Sum(id => Skill(id)?.cost ?? 0) + upgradeRanks.Sum(kv => Enumerable.Range(0, kv.Value).Sum(r => Upgrade(kv.Key)?.CostOf(r) ?? 0));
+
+        /// <summary>Full respec (from respecLevel): every player skill and robot upgrade back at exactly what it
+        /// cost, so points spent + points to spend never changes (no points are created). Returns the refund.</summary>
+        public int RespecAll()
+        {
+            if (level < respecLevel) return 0;
+            int refund = 0;
+            foreach (var id in unlocked.ToList())
+            {
+                var s = Skill(id);
+                if (s == null) continue;
+                refund += s.cost;
+                unlocked.Remove(id);
+            }
+            skillPoints += refund;
+            return refund + RefundRobotUpgrades();
+        }
+
         /// <summary>A robot type's stat after its upgrades: add (base + ranks * effect),
         /// percent (base * (1 + ranks * effect)) or rank (ranks * effect), including the
-        /// secondary "also" effects of other upgrades, capped by the permanent `limit`.</summary>
-        public double RobotStat(string robot, string stat, double baseValue, double limit = double.PositiveInfinity)
+        /// secondary "also" effects of other upgrades, capped by the permanent `limit`. With `what`: as if
+        /// that upgrade had `whatRank` ranks (the "now → after" previews).</summary>
+        public double RobotStat(string robot, string stat, double baseValue, double limit = double.PositiveInfinity, string what = null, int whatRank = 0)
         {
             double add = 0, pct = 0;
             foreach (var u in robotUpgrades)
             {
                 if (u.robot != robot || !u.Active) continue;
-                int r = RankOf(u.id);
+                int r = u.id == what ? whatRank : RankOf(u.id);
                 if (r == 0) continue;
                 if (u.stat == stat) { if (u.mode == "percent") pct += r * u.effectPerRank; else add += r * u.effectPerRank; }
                 if (u.also.TryGetValue(stat, out var a)) add += r * a;

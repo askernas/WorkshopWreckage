@@ -563,6 +563,7 @@ namespace WorkshopWreckage
             _g.world.SetState(itemId, ItemState.Carried, _r.Owner);
             _g.interaction.SettleNeighbours(from, def);
             heldId = itemId;
+            _r.stats.Picked(itemId, Time.time);
             _held = HeldView.MakeModel(def);
             _held.transform.localScale = Vector3.one * def.worldScale;
             _heldOff = Vector3.ProjectOnPlane(p0 - _m.GripPoint, Vector3.up);
