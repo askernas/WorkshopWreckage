@@ -285,8 +285,8 @@ namespace WorkshopWreckage
             // the previous world's simulation goes first: the settle hands its last falling parts
             // on to play, and clearing after it froze them in mid-air
             piles.Clear();
-            if (save != null) SettleAfterLoad();
-            else piles.SettleWorld();   // nothing starts in mid-air
+            if (save != null && !UnsettledSave()) SettleAfterLoad();
+            else piles.SettleWorld(save == null ? 4 : 10);   // nothing starts in mid-air (a new world, or a save whose loose parts never settled)
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
             interaction.ResetState();
@@ -377,6 +377,21 @@ namespace WorkshopWreckage
 
         /// <summary>A part saved while it was still falling would load hanging in the air: after a
         /// load every moved part comes down onto its real support (lowest first, so stacks settle).</summary>
+        /// <summary>Loose parts a save holds no position for stand where the generator put them, in mid-air
+        /// above their piles. A settled world gives most of them a position; a save converted to a new catalog
+        /// (its loose parts go back to the generator's spots) or one written right after such a conversion
+        /// does not, so the whole room is settled again, as in a new game.</summary>
+        bool UnsettledSave()
+        {
+            if (migrationReport != "") return true;
+            int loose = 0, unsettled = 0;
+            foreach (var i in world.instances)
+                if (i.state == ItemState.InWorld) { loose++; if (!i.moved) unsettled++; }
+            bool redo = loose > 0 && unsettled > loose / 2;
+            if (redo) Debug.Log($"[load] {unsettled} of {loose} loose parts were never settled: settling the room");
+            return redo;
+        }
+
         void SettleAfterLoad()
         {
             var moved = world.instances.Where(i => i.state == ItemState.InWorld && i.moved).OrderBy(i => i.Position.y).ToList();

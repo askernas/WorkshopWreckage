@@ -39,6 +39,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "loadslot")
+            {
+                yield return LoadSlotChecks(g.args.GetValueOrDefault("apslot", "slot1"));   // QA: a player's save loads with its loose parts at rest
+                Finish();
+                yield break;
+            }
             if (section == "loose")
             {
                 yield return LooseChecks();   // QA: found heads and arms go straight on a built robot (Modify robots)
@@ -1689,6 +1695,34 @@ namespace WorkshopWreckage
             g.hud.OpenSub("skills");
             yield return g.Capture(Path.Combine(outDir, "tray_skills.png"), 6);
             g.SetState("play");
+        }
+
+        /// <summary>Loads a save slot (read only) and checks that its loose parts rest on something: a save
+        /// converted to a new catalog, or written right after one, must not leave parts in mid-air.</summary>
+        IEnumerator LoadSlotChecks(string slot)
+        {
+            g.LoadGame(slot);
+            g.player.enabled = false;
+            yield return Frames(30);
+            // the contact probe also misses some parts at rest (thin ones, deep in a heap): a new world, which
+            // is always settled, is the yardstick
+            float Unsupported(out int n)
+            {
+                var loose = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.InTray(i.Position) && i.Position.y < Game.MaxDropDeck + 0.4f).ToList();
+                n = loose.Count;
+                var bad = loose.Where(i => !g.piles.Contact(i.id).supported).ToList();
+                foreach (var i in bad.Take(12))
+                    Debug.Log($"[loadslot] unsupported {g.world.DefOf(i.id).displayName} at {i.Position} (moved {i.moved}), bounds min y {g.index.WorldBounds(i.id).min.y:0.000}");
+                return n == 0 ? 1 : bad.Count / (float)n;
+            }
+            float loaded = Unsupported(out int nLoaded);
+            yield return g.Capture(Path.Combine(outDir, "loadslot.png"), 3);
+            g.StartWorld(g.world.seed, null);
+            g.player.enabled = false;
+            yield return Frames(30);
+            float fresh = Unsupported(out int nFresh);
+            Check($"the loose parts of save '{slot}' rest on something after loading, as in a new world", nLoaded > 0 && loaded <= fresh * 1.5f + 0.02f,
+                  $"unsupported by the probe: loaded {loaded:P1} of {nLoaded}, new world {fresh:P1} of {nFresh}");
         }
 
         IEnumerator DesignChecks()

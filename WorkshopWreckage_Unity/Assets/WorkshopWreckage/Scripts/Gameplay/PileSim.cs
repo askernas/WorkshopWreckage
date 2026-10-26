@@ -44,10 +44,12 @@ namespace WorkshopWreckage
 
         public void Init(Game game) => g = game;
 
-        /// <summary>New world or load: nothing is falling any more.</summary>
+        /// <summary>New world or load: nothing is falling any more. The bodies go at once (DestroyImmediate
+        /// here and below): a settle runs in the same frame, and a deferred Destroy left the last world's parts
+        /// in the physics scene for it, so a loaded save's parts came to rest on them, in mid-air (playtest 2026-10-26).</summary>
         public void Clear()
         {
-            foreach (var b in _bodies.Values) if (b.go != null) Destroy(b.go);
+            foreach (var b in _bodies.Values) if (b.go != null) DestroyImmediate(b.go);
             _bodies.Clear();
         }
 
@@ -242,7 +244,7 @@ namespace WorkshopWreckage
                 foreach (var id in gone)
                 {
                     var at = _bodies[id].go.transform.position;
-                    Destroy(_bodies[id].go);
+                    DestroyImmediate(_bodies[id].go);
                     _bodies.Remove(id);
                     foreach (var o in _bodies.Values) if (o.rb != null && (o.go.transform.position - at).magnitude < 0.25f) o.rb.WakeUp();
                 }
@@ -290,8 +292,9 @@ namespace WorkshopWreckage
 
         /// <summary>A new world: the generator only estimates where parts rest, so every loose
         /// part (not the tray, not up on the storage units) falls once until the whole room is
-        /// at rest (playtest 2026-10-25: parts floating in the starting heaps).</summary>
-        public void SettleWorld()
+        /// at rest (playtest 2026-10-25: parts floating in the starting heaps). maxSeconds: a converted save's
+        /// parts fall further (their heaps are half gone) and need longer.</summary>
+        public void SettleWorld(float maxSeconds = 4)
         {
             if (g == null || g.layout == null) return;
             EnsureScene();
@@ -321,7 +324,8 @@ namespace WorkshopWreckage
             // its parts only creep by millimetres a second, and a bolt may spin on its shank in place
             bool Fast(Rigidbody r) => !r.IsSleeping() && r.linearVelocity.sqrMagnitude > 0.03f * 0.03f;
             int steps = 0, awake = rbs.Count;
-            for (; steps < 480; steps++)   // up to 4 s simulated
+            int maxSteps = Mathf.RoundToInt(maxSeconds * 120);
+            for (; steps < maxSteps; steps++)   // up to maxSeconds simulated
             {
                 _phys.Simulate(Bulk);
                 if (steps % 12 == 11 && (awake = rbs.Count(Fast)) <= rbs.Count / 1000) break;
@@ -384,7 +388,7 @@ namespace WorkshopWreckage
                     g.index.Insert(id);
                     moved++;
                 }
-                Destroy(b.go);
+                DestroyImmediate(b.go);
             }
             lastInfo = $"{_bodies.Count} in the pile, {moved} moved, {reverted} put back, {_since:0.0} s";
             _bodies.Clear();
