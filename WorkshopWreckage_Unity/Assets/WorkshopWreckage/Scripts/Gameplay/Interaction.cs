@@ -576,9 +576,11 @@ namespace WorkshopWreckage
 
         /// <summary>What the workbench would take from your hands: robot parts, and recipe
         /// materials for a crafted robot under construction (the held one first).</summary>
-        List<int> StationParts()
+        public List<int> StationParts()
         {
-            var o = Inv.items.Where(id => game.workbench.ProjectFor(id) != null).ToList();
+            // robot parts and recipe materials, and Part Radar parts and spent batteries (a battery with charge is kept)
+            var o = Inv.items.Where(id => game.workbench.ProjectFor(id) != null
+                                          || World.DefOf(id).IsToolItem && (!World.DefOf(id).IsRadarBattery || game.radar.Charges(id) == 0)).ToList();
             int held = Inv.HeldId();
             if (o.Remove(held)) o.Insert(0, held);
             return o;

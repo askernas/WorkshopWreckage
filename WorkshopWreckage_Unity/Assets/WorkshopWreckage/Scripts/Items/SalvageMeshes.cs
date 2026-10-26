@@ -208,7 +208,8 @@ namespace WorkshopWreckage
         {
             foreach (float y in new[] { -0.18f, 0.18f }) b.Cyl(new Vector3(0, y - 0.04f, 0), new Vector3(0, y + 0.04f, 0), 0.5f, 0, Part);   // flanges
             b.Cyl(new Vector3(0, -0.14f, 0), new Vector3(0, 0.14f, 0), 0.4f, 0, Part);               // running rim
-            b.Cyl(new Vector3(0, -0.22f, 0), new Vector3(0, 0.22f, 0), 0.13f, 2, Chrome);            // axle hub
+            b.Cyl(new Vector3(0, -0.26f, 0), new Vector3(0, 0.26f, 0), 0.13f, 2, Chrome);            // axle hub, standing proud of the flanges (flush caps z-fought: playtest 2026-10-26)
+            foreach (float y in new[] { -0.265f, 0.26f }) b.Cyl(new Vector3(0, y, 0), new Vector3(0, y + 0.005f, 0), 0.06f, 2, Hole, 10);   // axle bore
             for (int k = 0; k < 4; k++)
             {
                 float a = k * Mathf.PI / 2 + 0.4f;

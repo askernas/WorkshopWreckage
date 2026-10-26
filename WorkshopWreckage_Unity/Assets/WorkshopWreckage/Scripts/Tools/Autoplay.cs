@@ -117,6 +117,22 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "idler")
+            {
+                // QA: close-ups of a Track Idler Wheel (its hub caps z-fought with the flanges, playtest 2026-10-26)
+                g.player.enabled = false;
+                var ids = g.world.instances.Where(i => g.world.DefOf(i.id).subcategory == "track_idler" && i.state == ItemState.InWorld && !g.Covered(i.id)).Take(2).ToList();
+                for (int k = 0; k < ids.Count; k++)
+                {
+                    var at = ids[k].Position;
+                    LookFrom(at + new Vector3(0.12f, 0.18f, 0.1f), at);
+                    yield return Frames(4);
+                    yield return g.Capture(Path.Combine(outDir, $"idler_{k}.png"), 2);
+                }
+                Check("track idler close-ups", ids.Count > 0, $"{ids.Count} uncovered idler wheels");
+                Finish();
+                yield break;
+            }
             if (section == "radarplans")
             {
                 yield return RadarPlanChecks();   // QA: the robot parts pool and the Part Radar plans (playtest 2026-10-26)
@@ -1714,12 +1730,16 @@ namespace WorkshopWreckage
                          .GroupBy(i => g.world.DefOf(i.id).ToolType).Select(gr => gr.First().id).ToList();
             var plans = g.progression.skills.FirstOrDefault(s => s.id == "part_radar_plans");
             string last = "";
-            foreach (var id in parts) { Take(id); last = radar.Deliver(id).text; }
+            foreach (var id in parts) Take(id);
+            // handed over the way the player does it ([G] at the bench: everything the bench takes from your hands)
+            var offered = g.interaction.StationParts();
+            bool allOffered = parts.All(offered.Contains);
+            foreach (var id in offered.ToList()) { var r = g.workbench.Deliver(id); if (parts.Contains(id)) last = r.text; }
             yield return Frames(2);
             bool waits = !radar.assembled && !radar.HasPlans && parts.All(id => wb.PoolContents().Contains(id)) && last.Contains("plans");
             Check("radar parts go into the robot parts pool; without the plans the radar is not built",
-                  parts.Count == PartRadarModel.Parts.Length && waits && plans != null && plans.cost == 2,
-                  $"{parts.Count} part types, assembled {radar.assembled}, pool {wb.PoolContents().Count}; plans cost {plans?.cost}; \"{last}\"");
+                  parts.Count == PartRadarModel.Parts.Length && allOffered && waits && plans != null && plans.cost == 2,
+                  $"{parts.Count} part types, offered at the bench {allOffered}, assembled {radar.assembled}, pool {wb.PoolContents().Count}; plans cost {plans?.cost}; \"{last}\"");
             LevelTo(Mathf.Max(2, plans?.unlockLevel ?? 2));
             g.progression.skillPoints = Mathf.Max(g.progression.skillPoints, 2);
             int sp = g.progression.skillPoints;
