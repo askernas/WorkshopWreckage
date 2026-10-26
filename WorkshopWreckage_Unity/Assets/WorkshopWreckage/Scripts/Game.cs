@@ -1261,6 +1261,7 @@ namespace WorkshopWreckage
                 // and a destination the ledger finished but never paid out pays now (once)
                 foreach (var d in progression.completedDestinations) progress.completedDefs.Add(d);
                 foreach (var d in progress.completedDefs.ToList()) progression.OnDefinitionCompleted(d, world.TotalOf(d));
+                _restoredAnnounced = FullyRestored;
             }
             // gameplay counters: from the save, or (a save from before they existed) seeded from what it shows
             stats = save == null ? new GameStats()
@@ -1294,6 +1295,7 @@ namespace WorkshopWreckage
                 bool fresh = !progression.completedDestinations.Contains(id);
                 progression.OnDefinitionCompleted(id, world.TotalOf(id));
                 if (fresh) hud.Toast($"Destination complete: {db.Get(id).displayName}  ({world.TotalOf(id)}/{world.TotalOf(id)})   ·   {progression.LevelText}", true);
+                CheckFullyRestored();
             };
             progress.DefinitionHalf += id => progression.OnDefinitionHalf(id, world.TotalOf(id));
             progress.Discovered += id => { progression.OnDiscovered(id, db.Get(id).IsRobotPart); if (progression.Has("reveal_totals")) progress.revealed.Add(id); };
@@ -1442,6 +1444,36 @@ namespace WorkshopWreckage
         public int AssignedCount(string dest) => _assignments.TryGetValue(dest, out var defs) ? defs.Sum(world.TotalOf) : 0;
 
         /// <summary>Destinations with at least one part assigned (each gives one level point when complete).</summary>
+        /// <summary>The end condition (design v1.0 §13.4), separate from level 25: every destination
+        /// permanently complete and no robot component left lying about.</summary>
+        public bool FullyRestored => progression != null && progress != null && progress.completedDefs.Count >= progression.destinationTotal
+                                     && InventoryAudit.LooseRobotParts(this).Count == 0;
+        bool _restoredAnnounced;
+        float _recoverT;
+
+        void CheckFullyRestored()
+        {
+            if (_restoredAnnounced || !FullyRestored) return;
+            _restoredAnnounced = true;
+            Sfx.Play("complete", null, 0);
+            hud.Toast($"THE WORKSHOP IS FULLY RESTORED  ·  all {progression.destinationTotal} destinations complete", true);
+            Debug.Log($"[endgame] fully restored at {playTime / 60:0} min");
+        }
+
+        /// <summary>Recovery states (§13.2): every 30 s, parts that ended up where nobody can reach them are moved
+        /// to the sorting tray (never copied, never counted as sorted) and logged.</summary>
+        void AutoRecover(float dt)
+        {
+            if ((_recoverT += dt) < 30f) return;
+            _recoverT = 0;
+            var bad = UnreachableParts();
+            if (bad.Count == 0) return;
+            foreach (var (id, why) in bad) Debug.Log($"[recovery] {world.DefOf(id).displayName} #{id}: {why} → sorting tray");
+            int n = RecoverUnreachable();
+            hud.Toast($"{n} stuck part{(n == 1 ? "" : "s")} recovered to the sorting tray");
+            CheckFullyRestored();
+        }
+
         public int CompletableDestinations() => _assignments.Keys.Count(d => db.boxes.ContainsKey(d) && AssignedCount(d) > 0);
 
         public (string, string, string, bool) LabelFor(string dest)
@@ -1483,6 +1515,7 @@ namespace WorkshopWreckage
             }
             if (world != null && progress != null && builder != null) RestorationLighting();
             if (world != null && objectives != null && state == "play") objectives.Tick(Time.deltaTime);
+            if (world != null && progress != null && state == "play" && !Automated) AutoRecover(Time.deltaTime);
             if (world != null && telemetry != null && state == "play")
             {
                 playTime += Time.deltaTime;

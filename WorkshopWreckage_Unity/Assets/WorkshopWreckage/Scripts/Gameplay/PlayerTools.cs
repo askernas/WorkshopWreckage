@@ -300,6 +300,7 @@ namespace WorkshopWreckage
         /// within range and shows where it belongs.</summary>
         public int Scan()
         {
+            if (HeldDef < 0 && g.interaction.targetType != "item" && InventoryAudit.Precise(g)) return AuditScan();
             float r = (float)P.Effect("scan_radius_m");
             if (r <= 0) { g.hud.OnFeedback("You need the Parts Scanner skill (K → Skills)", false); return 0; }
             int def = HeldDef >= 0 ? HeldDef : g.interaction.targetType == "item" ? g.world.instances[g.interaction.targetItem].defId : -1;
@@ -317,6 +318,20 @@ namespace WorkshopWreckage
             g.hud.OnFeedback($"Scanner: {_scanned.Count} × {d.displayName} within {r:0} m  →  {g.db.BoxLabel(d.storageBox)}{remaining}", true);
             Sfx.Play("discover", null, -8, 0);
             g.telemetry?.SkillUsed("scanner");
+            return _scanned.Count;
+        }
+
+        /// <summary>The 99 % inventory audit (design v1.0 §13.3): empty-handed, the scanner outlines every
+        /// remaining part in the workshop, whatever its range or skill, so the last ones are never lost.</summary>
+        int AuditScan()
+        {
+            _scanned.Clear();
+            _scanned.AddRange(InventoryAudit.Remaining(g).Concat(InventoryAudit.LooseRobotParts(g)).Where(i => i.state == ItemState.InWorld).Select(i => i.id));
+            _scanDest = null;
+            _scanUntil = Time.time + 20;
+            lastScanCount = _scanned.Count;
+            g.hud.OnFeedback($"Inventory audit: {_scanned.Count} remaining part{(_scanned.Count == 1 ? "" : "s")} outlined (Tab lists where)", _scanned.Count > 0);
+            Sfx.Play("discover", null, -8, 0);
             return _scanned.Count;
         }
 

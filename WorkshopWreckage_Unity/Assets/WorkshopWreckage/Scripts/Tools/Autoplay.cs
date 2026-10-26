@@ -87,6 +87,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "design")
+            {
+                yield return DesignChecks();   // QA: Game Design v1.0 acceptance tests (P/R/S/E, §15)
+                Finish();
+                yield break;
+            }
             if (section == "pile")
             {
                 yield return PileChecks();   // QA: dropped parts pile up
@@ -1349,29 +1355,36 @@ namespace WorkshopWreckage
             var h2 = wb.P("hoverbot_2");
             var r2 = wb.RobotOf(h2);
             Check("Hoverbot #2's project opens once Hoverbot is operational", wb.Unlocked(h2) && wb.OnBench(h2) && r2.gameObject.activeSelf, wb.Summary(h2));
-            var consumed = new List<int>();
+            // design v1.0 §3.4 (P-07): a loose part of an unfinished destination is refused at the bench
+            var raw = g.world.instances.First(i => Loose(i) && h2.materials.ContainsKey(g.world.DefOf(i.id).CategoryName) && !g.progress.IsComplete(i.defId));
+            Take(raw.id);
+            bool refused = !g.interaction.DepositStation(raw.id);
+            g.inventory.Remove(raw.id);
+            g.storage.Deposit(g.world.DefOf(raw.id).storageBox, raw.id);
+            Check("P-07: a recipe refuses parts of an unfinished destination", refused, $"{g.world.DefOf(raw.id).displayName}: {g.progress.AcceptedOf(raw.defId)}/{g.world.TotalOf(raw.defId)}");
+            // ...so the materials come from destinations completed first, then built from stock
+            var stockDefs = new List<int>();
             foreach (var kv in h2.materials)
             {
-                var pick = g.world.instances.Where(i => Loose(i) && g.world.DefOf(i.id).CategoryName == kv.Key).Take(kv.Value).ToList();
-                foreach (var i in pick) { Take(i.id); if (g.interaction.DepositStation(i.id)) consumed.Add(i.id); }
-                if (consumed.Count > 6 && consumed.Count < 12)
+                int have = 0;
+                foreach (var d in g.db.order.Where(d => g.world.TotalOf(d) > 0 && !g.db.Get(d).IsRobotPart && g.db.Get(d).CategoryName == kv.Key).ToList())
                 {
-                    var (sp, _) = wb.MatSpot(h2.mat);
-                    LookFrom(sp + wb.Front * 0.6f + Vector3.up * 0.3f, sp + Vector3.up * 0.1f);
-                    yield return g.Capture(Path.Combine(outDir, "15c_hoverbot2_being_crafted.png"), 3);
+                    if (have >= kv.Value) break;
+                    if (CompleteDef(d)) { have += g.world.TotalOf(d); stockDefs.Add(d); }
                 }
             }
-            Check("recipe materials are built into Hoverbot #2 (installed, not duplicated)", wb.Complete(h2) && consumed.All(i => g.world.instances[i].state == ItemState.Installed && !g.inventory.items.Contains(i)), wb.Summary(h2));
-            // a consumed part still counts for its set, so crafting never makes a set impossible
-            int cd = g.world.instances[consumed[0]].defId;
-            foreach (var i in g.world.IdsOf(cd).Where(i => g.world.instances[i].state != ItemState.Stored && g.world.instances[i].state != ItemState.Installed).ToList())
+            int level0 = pr.level, done0 = pr.DestinationsCompleted;
+            int built = wb.BuildFromStock(h2);
+            var consumed = g.world.instances.Where(i => i.state == ItemState.Installed && i.owner == RobotWorkbench.OwnerOf(h2.id)).Select(i => i.id).ToList();
             {
-                if (g.world.instances[i].state == ItemState.Carried && g.world.instances[i].owner != "player") continue;
-                Take(i);
-                g.inventory.Remove(i);
-                g.storage.Deposit(g.world.DefOf(i).storageBox, i);
+                var (sp, _) = wb.MatSpot(h2.mat);
+                LookFrom(sp + wb.Front * 0.6f + Vector3.up * 0.3f, sp + Vector3.up * 0.1f);
+                yield return g.Capture(Path.Combine(outDir, "15c_hoverbot2_being_crafted.png"), 3);
             }
-            Check("a set with parts used in crafting can still be completed", g.progress.IsComplete(cd), $"{g.db.Get(cd).displayName}: {g.progress.SortedOf(cd)}/{g.world.TotalOf(cd)} accounted");
+            Check("recipe materials are built into Hoverbot #2 from stock (installed, not duplicated)", wb.Complete(h2) && built > 0 && consumed.All(i => !g.inventory.items.Contains(i) && g.storage.contents.Values.All(l => !l.Contains(i))), $"{built} from stock; {wb.Summary(h2)}");
+            int cd = g.world.instances[consumed[0]].defId;
+            Check("P-07: crafting from stock never revokes a completed destination or the level", g.progress.IsComplete(cd) && stockDefs.All(g.progress.IsComplete) && pr.level == level0 && pr.DestinationsCompleted == done0,
+                  $"{g.db.Get(cd).displayName}: {g.progress.AcceptedOf(cd)}/{g.world.TotalOf(cd)} accepted, level {level0} -> {pr.level}, completed {done0} -> {pr.DestinationsCompleted}");
             wb.Activate(h2);
             float t2 = Time.realtimeSinceStartup;
             while (!r2.Active && Time.realtimeSinceStartup - t2 < 12) yield return null;
@@ -1594,6 +1607,151 @@ namespace WorkshopWreckage
             var i = g.world.instances[id];
             if (i.state == ItemState.InWorld) { g.index.Remove(id); g.world.SetState(id, ItemState.Carried, "player"); }
             if (i.state == ItemState.Carried && i.owner == "player" && !g.inventory.items.Contains(id)) g.inventory.Add(id);
+        }
+
+        /// <summary>Stores every copy of a definition that the player could pick up (loose, in hand or in the
+        /// wrong place) into its destination; true if the destination is complete afterwards.</summary>
+        bool CompleteDef(int defId)
+        {
+            string box = g.db.Get(defId).storageBox;
+            if (g.world.IdsOf(defId).Any(i => g.world.instances[i].state == ItemState.Carried && g.world.instances[i].owner != "player")) return false;
+            foreach (var i in g.world.IdsOf(defId).ToList())
+            {
+                var inst = g.world.instances[i];
+                if (g.progress.accepted.Contains(i) || inst.state == ItemState.Installed) continue;
+                if (inst.state == ItemState.Stored && inst.owner.StartsWith("box:")) { g.storage.Remove(inst.owner.Substring(4), i); g.world.SetState(i, ItemState.InWorld, ""); g.index.Insert(i); }
+                Take(i);
+                g.inventory.Remove(i);
+                if (g.storage.Deposit(box, i) != StorageSystem.Result.Ok) return false;
+            }
+            return g.progress.IsComplete(defId);
+        }
+
+        /// <summary>Game Design v1.0 §15: the acceptance tests that can be proven without a long robot run.</summary>
+        IEnumerator DesignChecks()
+        {
+            var pr = g.progression;
+            var p = g.progress;
+            bool standard = g.world.Count == 4096;
+            // a few destinations that are simple to fill: robot-carriable, 3+ copies, none on a robot
+            var defs = g.db.order.Where(d => g.world.TotalOf(d) >= 3 && !g.db.Get(d).IsRobotPart && g.db.Get(d).robotCarry && g.storage.Stored(g.db.Get(d).storageBox).Count == 0).Take(60).ToList();
+            int levelUps = 0;
+            pr.LeveledUp += _ => levelUps++;
+
+            // P-01: many correctly stored parts across unfinished destinations give no level
+            int stored = 0;
+            foreach (var d in defs.Skip(4))
+                foreach (var i in g.world.IdsOf(d).Take(g.world.TotalOf(d) - 1).ToList())
+                {
+                    Take(i); g.inventory.Remove(i);
+                    if (g.storage.Deposit(g.db.Get(d).storageBox, i) == StorageSystem.Result.Ok) stored++;
+                }
+            Check("P-01: correctly stored parts in unfinished destinations give no level", stored > 100 && pr.level == 1 && levelUps == 0 && pr.DestinationsCompleted == 0 && pr.xp > 0,
+                  $"{stored} parts stored over {defs.Count - 4} destinations: level {pr.level}, {pr.DestinationsCompleted} completed, xp {pr.xp}");
+            // P-02: the last part of the first destination raises level 1 -> 2
+            bool c0 = CompleteDef(defs[0]);
+            Check("P-02: completing the first destination raises the level from 1 to 2", c0 && pr.level == 2 && levelUps == 1, $"{g.db.Get(defs[0]).displayName}: level {pr.level}");
+            // P-03: a robot's last part completes exactly like the player's
+            var d1 = defs[1];
+            foreach (var i in g.world.IdsOf(d1).ToList())
+            {
+                Take(i); g.inventory.Remove(i);
+                g.storage.Deposit(g.db.Get(d1).storageBox, i, "robot:retrobot");
+            }
+            Check("P-03: a robot completes a destination exactly like the player", p.IsComplete(d1) && pr.completedDestinations.Contains(d1) && pr.DestinationsCompleted == 2, $"{pr.DestinationsCompleted} completed");
+            // P-05: taking a copy out and storing it again pays nothing twice
+            {
+                int ups = levelUps, done = pr.DestinationsCompleted;
+                long xp = pr.xp;
+                var i = g.world.IdsOf(defs[0])[0];
+                string box = g.db.Get(defs[0]).storageBox;
+                g.storage.Remove(box, i); g.world.SetState(i, ItemState.InWorld, ""); g.index.Insert(i);
+                bool still = p.IsComplete(defs[0]);
+                Take(i); g.inventory.Remove(i); g.storage.Deposit(box, i);
+                Check("P-05: a destination is rewarded once, even after a part is taken out and stored again", still && levelUps == ups && pr.DestinationsCompleted == done && pr.xp == xp,
+                      $"completed {done} -> {pr.DestinationsCompleted}, xp {xp} -> {pr.xp}");
+            }
+            // P-04: picking up, staging and score never give a level; the level always follows completions
+            {
+                int lv = pr.level;
+                var loose = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart).Take(5).Select(i => i.id).ToList();
+                foreach (var i in loose) Take(i);
+                for (int k = 0; k < 30; k++) pr.OnDiscovered(-900000 - k, false);   // score only
+                foreach (var i in loose) { g.inventory.Remove(i); g.world.SetState(i, ItemState.InWorld, "stage:" + g.world.DefOf(i).storageBox); g.index.Insert(i); }
+                Check("P-04: pickup, staging and score never raise the level", pr.level == lv && pr.level == pr.LevelFor(pr.DestinationsCompleted), $"level {lv} -> {pr.level}, xp {pr.xp}");
+            }
+            // P-06: only destinations that really hold parts count towards the curve
+            Check("P-06: the level curve counts only assigned destinations", pr.destinationTotal == g.CompletableDestinations() && pr.destinationTotal == g.db.order.Count(d => g.world.TotalOf(d) > 0 && !g.db.Get(d).IsRobotPart),
+                  $"{pr.destinationTotal} on the curve, {g.CompletableDestinations()} completable");
+            // P-08: level 25 at 414 of 500 on Standard
+            if (standard)
+                Check("P-08: level 25 needs 414 completed destinations on Standard", pr.LevelFor(414) == 25 && pr.LevelFor(413) == 24, $"413 -> {pr.LevelFor(413)}, 414 -> {pr.LevelFor(414)} (of {pr.destinationTotal})");
+
+            // R-01/R-02: robot intelligence is bought, never given by the player's level
+            var retro = g.robots.First(r => r.type == "retrobot");
+            // a started destination whose last copy lies within Retrobot's reach, stored by Retrobot itself
+            var started = defs.Skip(4).First(d => !p.IsComplete(d) && retro.ReachableDest(g.db.Get(d).storageBox)
+                && g.world.IdsOf(d).Where(i => !p.accepted.Contains(i)).All(i => g.world.instances[i].state == ItemState.InWorld && g.world.instances[i].Position.y <= retro.ReachHeight
+                    && ItemDatabase.Extents(g.world.DefOf(i))[0] <= retro.MaxItemSize));
+            LevelTo(20);
+            retro.ApplyUpgrades();
+            Check("R-01/R-02: a robot without AI upgrades has no set bonus, even at level 20", retro.FocusBonus(started) == 0, $"level {pr.level}, bonus {retro.FocusBonus(started):0.00} m");
+            // R-04: Set Awareness pulls towards a nearly complete, reachable destination
+            pr.upgradeRanks["retro_set"] = 1;
+            retro.ApplyUpgrades();
+            yield return null;
+            float bonus = retro.FocusBonus(started);
+            Check("R-04: Set Awareness gives a nearly complete, reachable destination a pull", bonus > 1f, $"{g.db.Get(started).displayName} {p.AcceptedOf(started)}/{g.world.TotalOf(started)}: {bonus:0.00} m");
+            // R-05: ...but none to a destination whose last copy only the player can carry
+            var pos = g.db.order.Where(d => g.world.TotalOf(d) >= 2 && !g.db.Get(d).IsRobotPart && !g.db.Get(d).robotCarry && !p.IsComplete(d)).Take(1).ToList();
+            if (pos.Count > 0)
+            {
+                int po = pos[0];
+                var first = g.world.IdsOf(po)[0];
+                Take(first); g.inventory.Remove(first); g.storage.Deposit(g.db.Get(po).storageBox, first);
+                yield return null;
+                Check("R-05: a destination robots can't finish draws no set bonus", retro.FocusBonus(po) == 0, $"{g.db.Get(po).displayName} {p.AcceptedOf(po)}/{g.world.TotalOf(po)}: {retro.FocusBonus(po):0.00} m");
+            }
+            pr.upgradeRanks.Remove("retro_set");
+            retro.ApplyUpgrades();
+
+            // S-01: the staging hard cap and the Courier Hand-off soft limit
+            Check("S-01: a staging zone holds at most 14 parts; coordinated couriers stop at 10", Robot.StagingCapacity == 14 && Robot.StagingSoftLimit == 10, $"hard {Robot.StagingCapacity}, soft {Robot.StagingSoftLimit}");
+
+            // E-03: save and load keep the ledger, the level and every part
+            {
+                var acc = p.accepted.ToList();
+                int lv = pr.level, done = pr.DestinationsCompleted, ups = levelUps;
+                var states = g.world.instances.Select(i => (int)i.state).ToList();
+                g.SaveGame("autotest_design");
+                g.StartWorld(g.world.seed, null);
+                g.LoadGame("autotest_design");
+                yield return Frames(5);
+                pr = g.progression; p = g.progress;
+                bool same = p.accepted.SetEquals(acc) && pr.level == lv && pr.DestinationsCompleted == done && g.world.instances.Select(i => (int)i.state).SequenceEqual(states);
+                Check("E-03: save/load keeps accepted parts, completions and the level, with no part lost or doubled", same && g.world.Count == states.Count,
+                      $"accepted {acc.Count} -> {p.accepted.Count}, level {lv} -> {pr.level}, completed {done} -> {pr.DestinationsCompleted}");
+                File.Delete(SaveSystem.PathOf("autotest_design"));
+            }
+            // E-04: a respec returns exactly the robot points spent
+            {
+                pr.skillPoints += 10;
+                int before = pr.skillPoints;
+                pr.upgradeRanks["retro_persistence"] = 2;   // 1 + 1 points
+                pr.skillPoints -= 2;
+                int back = pr.RefundRobotUpgrades();
+                Check("E-04: a robot respec returns exactly the robot points invested", back == 2 && pr.skillPoints == before && pr.RanksBought == 0, $"{back} back, {pr.skillPoints} (was {before})");
+            }
+            // E-06: the inventory audit accounts for every remaining part, wherever it is
+            {
+                var left = InventoryAudit.Remaining(g);
+                int expect = g.world.instances.Count(i => !g.world.DefOf(i.id).IsRobotPart && i.state != ItemState.Installed && !p.accepted.Contains(i.id));
+                Check("E-06: the inventory audit finds every remaining part and says where it is", left.Count == expect && left.All(i => InventoryAudit.Where(g, i, true) != ""),
+                      $"{left.Count} remaining, {expect} expected");
+            }
+            // E-07: Large and Massive have their own destinations
+            Check("E-07: this preset's destinations are its own (one per definition with parts)", g.CompletableDestinations() > 0 && g.CompletableDestinations() == g.db.order.Count(d => g.world.TotalOf(d) > 0 && !g.db.Get(d).IsRobotPart),
+                  $"{g.world.Count} parts, {g.CompletableDestinations()} destinations");
         }
 
         /// <summary>Earns real level points (completions of stand-in destinations) until the level is reached.</summary>

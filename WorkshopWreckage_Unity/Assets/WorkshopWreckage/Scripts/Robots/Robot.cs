@@ -185,6 +185,7 @@ namespace WorkshopWreckage
         /// <summary>A lasting R order (Destination Orders): WORKING, WAITING FOR ACCESS or PLAYER HELP NEEDED; "" for none.</summary>
         public string orderState = "";
         int _handoffSkips;
+        string _handoffBox;   // the zone it last refused to feed (for the status line)
         bool _canStore = true, _canClimb, _climbing;
         float _climbPitch, _unreachableT;
         Dictionary<string, object> _cfg, _limits;
@@ -1227,7 +1228,7 @@ namespace WorkshopWreckage
             }
             if (carried.Count > 0) { _step = Step.ToDest; _path = null; return; }
             _idleT = 0.5f;
-            if (tries == 0) status = _handoffSkips > 0 ? "staging full — needs a high-reach sorter" : "nothing left it can reach";
+            if (tries == 0) status = _handoffSkips > 0 ? $"staging full below {g.db.BoxLabel(_handoffBox)} — needs a high-reach sorter" : "nothing left it can reach";
         }
 
         // ---------------------------------------------------------------- bought intelligence (design v1.0 §6–7)
@@ -1513,7 +1514,7 @@ namespace WorkshopWreckage
             int inZone = (_stagedNow?.GetValueOrDefault("stage:" + def.storageBox) ?? 0) + (Fleet ? PendingStage(def.storageBox) : 0);
             if (inZone >= StagingCapacity) return false;   // that zone is full (the hard cap holds for every robot)
             // Courier Hand-off: stop feeding a zone at the soft limit, and never stage what no robot can put away
-            if (_handoffRank > 0 && (inZone >= StagingSoftLimit || !HasDownstream(def.storageBox))) { _handoffSkips++; return false; }
+            if (_handoffRank > 0 && (inZone >= StagingSoftLimit || !HasDownstream(def.storageBox))) { _handoffSkips++; _handoffBox = def.storageBox; return false; }
             var spot = StagingSpot(def.storageBox);
             return spot == null || Flat(i.Position - spot.Value).magnitude > 0.45f;
         }

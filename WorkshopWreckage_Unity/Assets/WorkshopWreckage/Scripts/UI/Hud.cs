@@ -400,6 +400,9 @@ namespace WorkshopWreckage
             Title(inv, "WORKSHOP LOG", 32);
             var body = Para(inv, "", 17, Cream, 600);
             body.alignment = TextAnchor.UpperLeft;
+            body.resizeTextForBestFit = true;   // the endgame audit can be long: shrink rather than spill
+            body.resizeTextMinSize = 11;
+            body.resizeTextMaxSize = 17;
             _logText = body;
             Para(inv, "[Tab] close", 16, Muted, 24);
 
@@ -556,6 +559,7 @@ namespace WorkshopWreckage
             t += $"\nRobot components found: {p.robotPartsFound} / {db.RobotPartIds().Count}\n";
             foreach (var pj in _g.workbench.projects.Where(x => !x.crafted))
                 t += $"   {pj.name}: {_g.workbench.InstalledCount(pj)} / {_g.workbench.Required(pj)} installed, {_g.workbench.DeliveredIds(pj).Count} in the holding tray  ·  {RobotWorkbench.StatusText(_g.workbench.StatusOf(pj))}\n";
+            t += InventoryAudit.Report(_g);
             _logText.text = t;
         }
 

@@ -259,7 +259,7 @@ namespace WorkshopWreckage
 
         /// <summary>HUD line: "Level 8  ·  31 / 41 completed destinations to level 9" (cumulative).</summary>
         public string LevelText => level >= maxLevel
-            ? $"Level {level} (max)  ·  {DestinationsCompleted} completed destinations"
+            ? $"Level {level} (max)  ·  {DestinationsCompleted} / {destinationTotal} destinations: full restoration at {destinationTotal}"
             : $"Level {level}  ·  {DestinationsCompleted} / {DestinationsForLevel(level + 1)} completed destinations to level {level + 1}";
 
         /// <summary>XP needed to advance from `lvl` to `lvl + 1`.</summary>
