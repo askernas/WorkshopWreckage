@@ -147,7 +147,7 @@ namespace WorkshopWreckage
                 // ride up onto the parts underfoot; too tall a pile blocks like a wall
                 var p = transform.position;
                 float ground = debris.Under(p, 0.16f);
-                if (p.y < ground - 0.003f)
+                if (p.y < ground - 0.0005f)   // standing on parts: back on top at once (a 3 mm sink band showed as a saw-tooth)
                 {
                     float rise = ground - p.y;
                     float horiz = new Vector2(delta.x, delta.z).magnitude;
