@@ -939,7 +939,7 @@ namespace WorkshopWreckage
             if (!active || def == null) return;
             var p = _g.progress;
             var t = $"<size=24><b><color=#d4a352>{def.displayName}</color></b></size>\n<color=#b8a890>{def.CategoryName}  ·  {def.shape}</color>\n\n";
-            if (def.IsRadarBattery) t += "A worn battery for the Part Radar. Its charge shows once it is in your inventory; it never recharges.\n\n";
+            if (def.IsRadarBattery) t += "A worn battery for the Part Radar. It goes in your battery pockets (no room in your hands); its charge shows on the radar. It never recharges: a spent one is thrown away.\n\n";
             else if (def.IsToolItem) t += "A component of the <b>Part Radar</b>.\nCarry it to the Robot Workbench: one of each of the eight parts builds the radar.\n\n";
             else if (def.IsRobotPart) t += $"A component of <b>{def.subcategory}</b>.\nCarry it to the Robot Workbench yourself.\n\n";
             else

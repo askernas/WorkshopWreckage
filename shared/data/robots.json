@@ -28,7 +28,7 @@
 			"pick_time": 0.8, "deposit_time": 0.7, "follow_distance": 1.2, "radius": 0.11,
 			"limits": {"capacity": 3, "item_types": 3, "walk_speed": 2.3, "max_item_size": 0.28, "reach_height": 0.71},
 			"strengths": ["Twice as fast as Retrobot", "Clears flat floor quickly"],
-			"limitations": ["Stores nothing itself until it has Arm Reach: until then it leaves parts in the staging zone", "One part at a time (upgradable to three small ones)", "Flat floor only, cannot cross heaps", "Cannot climb or fly"],
+			"limitations": ["Stores only into the low shelves and bottom drawers until it has Arm Reach; higher parts go to the staging zone", "One part at a time (upgradable to three small ones)", "Flat floor only, cannot cross heaps", "Cannot climb or fly"],
 			"assembly": {"requires": {"chest lamp": ["torso"], "signal mast": ["torso"], "head shell": ["torso"], "left arm": ["torso"], "right arm": ["torso"], "tire": ["wheel hub"]}},
 			"personality": "Energetic, slightly nervous, constantly balancing. A fast courier."
 		},

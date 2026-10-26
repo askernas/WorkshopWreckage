@@ -133,6 +133,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "lowshelf")
+            {
+                yield return LowShelfChecks();   // QA: Unibot and Hoverbot store into the low shelves without Arm Reach (playtest 2026-10-26)
+                Finish();
+                yield break;
+            }
             if (section == "radarplans")
             {
                 yield return RadarPlanChecks();   // QA: the robot parts pool and the Part Radar plans (playtest 2026-10-26)
@@ -1133,7 +1139,7 @@ namespace WorkshopWreckage
             var hover = g.robots.First(r => r.id == "hoverbot");
             Check("no part is ever held by two robots", !doubleHeld && g.world.instances.Where(i => i.state == ItemState.Carried && i.owner.StartsWith("robot:")).All(i => g.robots.Count(r => r.carried.Contains(i.id)) == 1), "");
             Check("Hoverbot stores into destinations the small robots can't reach", hover.delivered > before["hoverbot"].delivered, $"{hover.delivered - before["hoverbot"].delivered} stored by Hoverbot");
-            Check("Unibot never stores directly: everything goes to staging zones (still unsorted)", uni.delivered == uniStored0 && uni.staged > before["unibot"].staged
+            Check("Unibot without Arm Reach stores only into the low destinations; the rest goes to staging zones (still unsorted)", uni.staged > before["unibot"].staged
                   && g.world.instances.Where(i => i.owner.StartsWith("stage:")).All(i => i.state == ItemState.InWorld), $"{uni.staged - before["unibot"].staged} staged, {uni.delivered - uniStored0} stored");
             Check("Caterpillarbot collects several parts before a delivery run", catMax >= 2, $"up to {catMax} on board");
             int catPicked = catBot.pickCount - catPick0.pickCount, catPut = catBot.delivered + catBot.staged - catPick0.Item4;
@@ -1408,6 +1414,15 @@ namespace WorkshopWreckage
             Check("Retrobot's telescopic arms reach the drawers the Arm Reach upgrade brings within range", midDrawer != null && retro.ReachableDest(midDrawer), midDrawer == null ? "no such drawer" : $"{midDrawer} at {Json.Num(g.db.boxes[midDrawer], "elevation_m"):0.00} m");
             foreach (var grp in g.db.boxes.Where(kv => Json.Num(kv.Value, "elevation_m") <= retro.ReachHeight).GroupBy(kv => Json.Str(kv.Value, "kind")))
                 Debug.Log($"[reachstat] {grp.Key}: {grp.Count()} within the upgraded reach rule, {grp.Count(kv => retro.ReachableDest(kv.Key))} physically reachable by the telescopic arms");
+            // playtest 2026-10-26: without Arm Reach, Unibot and Hoverbot put parts into the low shelves (tossed in
+            // under a deck when the claws can't place them) and the bottom drawers, not the second level
+            var lows = g.db.boxes.Where(kv => Json.Str(kv.Value, "kind") != "floor_pallet" && Json.Num(kv.Value, "elevation_m") <= 0.2).Select(kv => kv.Key).ToList();
+            string shelfLow = lows.FirstOrDefault(b => Json.Str(g.db.boxes[b], "kind") != "drawer"), shelfMid = g.db.boxes.Keys.FirstOrDefault(b => Json.Str(g.db.boxes[b], "kind") != "drawer" && Json.Str(g.db.boxes[b], "kind") != "floor_pallet" && Mathf.Abs((float)Json.Num(g.db.boxes[b], "elevation_m") - 0.62f) < 0.01f);
+            var hov = g.robots.First(r => r.type == "hoverbot");
+            int uniLow = lows.Count(uni.ReachableDest), hovLow = lows.Count(hov.ReachableDest);
+            Check("without Arm Reach Unibot and Hoverbot store into every low shelf box and bottom drawer (not Unibot the second level)",
+                  lows.Count > 0 && shelfLow != null && uniLow == lows.Count && hovLow == lows.Count && !uni.ReachableDest(shelfMid),
+                  $"{lows.Count} low destinations: Unibot {uniLow}, Hoverbot {hovLow}; Unibot at {shelfMid} {uni.ReachableDest(shelfMid)}");
             float uniReach0 = uni.ReachHeight;
             for (int k = 0; k < 3; k++) g.BuyRobotUpgrade("uni_reach");
             g.BuyRobotUpgrade("cat_reach"); g.BuyRobotUpgrade("cat_reach");
@@ -1672,7 +1687,7 @@ namespace WorkshopWreckage
         {
             var i = g.world.instances[id];
             if (i.state == ItemState.InWorld) { g.index.Remove(id); g.world.SetState(id, ItemState.Carried, "player"); }
-            if (i.state == ItemState.Carried && i.owner == "player" && !g.inventory.items.Contains(id)) g.inventory.Add(id);
+            if (i.state == ItemState.Carried && i.owner == "player" && !g.inventory.Has(id)) g.inventory.Add(id);
         }
 
         /// <summary>Stores every copy of a definition that the player could pick up (loose, in hand or in the
@@ -1721,6 +1736,38 @@ namespace WorkshopWreckage
 
         /// <summary>Radar parts collect in the robot parts pool; the radar is built only once its plans
         /// (2 skill points) are bought, at once if all eight parts are already there.</summary>
+        /// <summary>Without Arm Reach, Unibot and Hoverbot put parts into the low shelf boxes and the bottom
+        /// drawers (a walker tosses them in under a deck); higher ones still go to staging for Unibot.</summary>
+        IEnumerator LowShelfChecks()
+        {
+            var wb = g.workbench;
+            var uni = g.robots.First(r => r.id == "unibot");
+            var hov = g.robots.First(r => r.id == "hoverbot");
+            var lows = g.db.boxes.Where(kv => Json.Str(kv.Value, "kind") != "floor_pallet" && Json.Num(kv.Value, "elevation_m") <= 0.2).Select(kv => kv.Key).ToList();
+            string mid = g.db.boxes.Keys.First(b => Json.Str(g.db.boxes[b], "kind") != "drawer" && Json.Str(g.db.boxes[b], "kind") != "floor_pallet" && Mathf.Abs((float)Json.Num(g.db.boxes[b], "elevation_m") - 0.62f) < 0.01f);
+            int uniLow = lows.Count(uni.ReachableDest), hovLow = lows.Count(hov.ReachableDest), retLow = lows.Count(g.retrobot.ReachableDest);
+            Check("without Arm Reach Unibot, Hoverbot and Retrobot can store into every low shelf box and bottom drawer (Unibot not the second level)",
+                  lows.Count > 0 && uniLow == lows.Count && hovLow == lows.Count && retLow == lows.Count && !uni.ReachableDest(mid) && uni.ReachHeight <= uni.BaseStat("reach_height") + 1e-3f,
+                  $"{lows.Count} low destinations: Unibot {uniLow}, Hoverbot {hovLow}, Retrobot {retLow}; Unibot at {mid} {uni.ReachableDest(mid)}, reach {uni.ReachHeight:0.00} m");
+
+            // a working run: both built and activated, every part sent to a low destination
+            LevelTo(g.progression.maxLevel);
+            foreach (var r in new[] { uni, hov }) { wb.ForceInstall(wb.P(r.id)); wb.Activate(wb.P(r.id)); }
+            float t0 = Time.realtimeSinceStartup;
+            while (!(uni.Active && hov.Active) && Time.realtimeSinceStartup - t0 < 15) yield return null;
+            int u0 = uni.delivered, h0 = hov.delivered, tz0 = uni.tosses;
+            var lowSet = lows.ToHashSet();
+            var stored0 = lows.Sum(b => g.storage.Stored(b).Count);
+            Time.timeScale = 4;
+            t0 = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - t0 < 75 && (uni.delivered - u0 < 2 || hov.delivered - h0 < 2)) yield return null;
+            Time.timeScale = 1;
+            int lowStored = lows.Sum(b => g.storage.Stored(b).Count) - stored0;
+            Check("Unibot (no Arm Reach) and Hoverbot really put parts away into low destinations",
+                  uni.delivered > u0 && hov.delivered > h0 && lowStored > 0,
+                  $"Unibot stored {uni.delivered - u0} ({uni.tosses - tz0} tossed in), Hoverbot stored {hov.delivered - h0}; {lowStored} new parts in low destinations; {uni.Describe()} / {hov.Describe()}");
+        }
+
         IEnumerator RadarPlanChecks()
         {
             var wb = g.workbench;
@@ -1759,11 +1806,11 @@ namespace WorkshopWreckage
             var filler = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart).Take(inv.capacity - inv.Parts).Select(i => i.id).ToList();
             foreach (var id in filler) Take(id);
             var bats = g.world.instances.Where(i => g.world.DefOf(i.id).IsRadarBattery && i.state == ItemState.InWorld).Take(7).Select(i => i.id).ToList();
-            int took = bats.Count(id => { var before = inv.Count; Take(id); return inv.Count > before; });
+            int took = bats.Count(id => { var before = inv.Batteries; Take(id); return inv.Batteries > before; });
             bool three = inv.IsFull && took == 3 && inv.Batteries == 3 && inv.Parts == inv.capacity;
             pr.level = pr.maxLevel; pr.skillPoints = 99;
             g.UnlockSkill("pockets_1"); g.UnlockSkill("pockets_2");
-            int took2 = bats.Skip(3).Count(id => { var before = inv.Count; Take(id); return inv.Count > before; });
+            int took2 = bats.Skip(3).Count(id => { var before = inv.Batteries; Take(id); return inv.Batteries > before; });
             Check("batteries ride in their own 3 pockets beside full hands; the Tool Belt adds 3 more",
                   three && took2 == 3 && inv.batteryPockets == 6 && inv.Batteries == 6,
                   $"first {took} taken with hands {inv.Parts}/{inv.capacity}; after the Tool Belt {took2} more, {inv.Batteries}/{inv.batteryPockets} pockets");
@@ -1791,6 +1838,19 @@ namespace WorkshopWreckage
             }
             Check("the radar LED flashes bright as a pulse goes out and glows bright amber while on target (screenshots radar_flash, radar_lit)",
                   flash > 20 && lit > 4, $"flash light {flash:0.0}, on-target light {lit:0.0}, locked {radar.Locked}");
+
+            // batteries stay off the hotbar; one spent by a pulse leaves the game
+            tw = Time.time;
+            while (radar.Pulsing && Time.time - tw < 6) yield return null;
+            int spent = radar.battery;
+            if (spent >= 0) radar.charges[spent] = 1;
+            radar.TryPulse();
+            yield return Frames(2);
+            var si = spent >= 0 ? g.world.instances[spent] : null;
+            bool offBar = !inv.Stacks().Any(s => s.ids.Any(inv.isBattery));
+            Check("batteries ride in the pockets (not the hotbar); a battery spent by a pulse is out of the game",
+                  offBar && si != null && radar.battery < 0 && si.owner == PartRadar.Spent && !inv.Has(spent) && !g.renderer.Shows(si),
+                  $"hotbar clear {offBar}, spent {spent} → {si?.state} {si?.owner}, loaded {radar.battery}, pockets {inv.Batteries}");
             radar.Put(false);
         }
 

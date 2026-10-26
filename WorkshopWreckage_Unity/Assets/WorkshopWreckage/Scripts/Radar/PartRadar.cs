@@ -16,6 +16,8 @@ namespace WorkshopWreckage
     public class PartRadar : MonoBehaviour
     {
         public const string Owner = "tool:part_radar";
+        /// <summary>A spent battery is out of the game (playtest 2026-10-26): never shown, carried or handed in.</summary>
+        public const string Spent = "tool:part_radar:spent";
         public const string Station = "RS-part_radar";
 
         /// <summary>shared/data/tools/part_radar.json (spec §7), validated; derived totals, never stored.</summary>
@@ -131,6 +133,8 @@ namespace WorkshopWreckage
             SeedCharges();
             if (battery >= 0 && (battery >= g.world.Count || !g.world.DefOf(battery).IsRadarBattery || g.world.instances[battery].owner != Owner)) battery = -1;
             if (assembled && Built().Count < PartRadarModel.Parts.Length) assembled = false;   // the save lost its parts (catalogue change)
+            foreach (var id in g.inventory.batteries.ToList()) if (Charges(id) <= 0) Dispose(id);   // older saves carried spent ones
+            if (battery >= 0 && Charges(battery) <= 0) { Dispose(battery); battery = -1; }
         }
 
         public Dictionary<string, object> ToDict() => new()
@@ -393,6 +397,20 @@ namespace WorkshopWreckage
             _flash = 1.5f;   // the pulse goes out: a big amber flash
             Sfx.Play("inspect", null, -8, 0);
             Debug.Log($"[radar] pulse: target {target}, locked {_locked} ({g.world.DefOf(_locked).displayName}), battery {battery} now {Charges(battery)}");
+            if (Charges(battery) <= 0)
+            {
+                Dispose(battery);
+                battery = -1;
+                g.hud.OnFeedback($"Radar battery spent and thrown away  ·  " + (g.inventory.Batteries > 0 ? $"[L] load the next ({g.inventory.Batteries} in your pockets)" : "no batteries left in your pockets"), g.inventory.Batteries > 0);
+            }
+        }
+
+        /// <summary>A spent battery leaves the game.</summary>
+        void Dispose(int id)
+        {
+            g.inventory.Remove(id);
+            g.world.SetState(id, ItemState.Installed, Spent);
+            Debug.Log($"[radar] battery {id} spent: out of the game");
         }
 
         void EndPulse()
@@ -407,7 +425,7 @@ namespace WorkshopWreckage
         public void TrySwap()
         {
             if (!assembled || !isOut || Pulsing || Swapping) return;
-            int best = g.inventory.items.Where(id => g.world.DefOf(id).IsRadarBattery && Charges(id) > 0)
+            int best = g.inventory.batteries.Where(id => Charges(id) > 0)
                 .OrderByDescending(Charges).ThenBy(id => id).DefaultIfEmpty(-1).First();
             if (best < 0) { g.hud.OnFeedback(battery >= 0 && Charges(battery) > 0 ? "No other charged battery in your inventory" : "NO RADAR BATTERY", false); Sfx.Play("reject", null, -8); return; }
             _swapIn = best;
@@ -426,13 +444,14 @@ namespace WorkshopWreckage
             g.world.SetState(id, ItemState.Installed, Owner);
             int old = battery;
             battery = id;
-            if (old >= 0)
+            if (old >= 0 && Charges(old) > 0)
             {
                 g.world.SetState(old, ItemState.Carried, "player");
                 g.inventory.Add(old);
             }
+            else if (old >= 0) Dispose(old);
             Sfx.Play("drawer_close", null, -8);
-            g.hud.OnFeedback($"Battery loaded: {Charges(id)} of {cfg.maxCharges} charges" + (old >= 0 ? $"  ·  the old one ({Charges(old)} left) is in your inventory" : ""), true);
+            g.hud.OnFeedback($"Battery loaded: {Charges(id)} of {cfg.maxCharges} charges" + (old >= 0 && Charges(old) > 0 ? $"  ·  the old one ({Charges(old)} left) is back in your pockets" : ""), true);
             if (isOut) g.held.ShowHeld(null);
         }
 
@@ -504,7 +523,9 @@ namespace WorkshopWreckage
         {
             string bat = battery < 0 ? "no battery" : new string('●', Charges(battery)) + new string('○', Mathf.Max(0, cfg.maxCharges - Charges(battery)));
             string state = Swapping ? "  ·  <color=#d4a352>swapping battery…</color>" : Pulsing ? $"  ·  <color=#ffaa22>PULSE {_pulseT:0.0}s</color>" : "";
-            return $"<color=#b8a890>Part Radar:</color>  {TargetLabel()}   battery {bat}{state}\n<color=#9a8c74>[LMB] pulse   [Wheel] target   [L] battery   [Y] put away</color>";
+            var inv = g.inventory;
+            string spares = $"   ·   pockets {inv.Batteries}/{inv.batteryPockets}" + (inv.Batteries > 0 ? $" <color=#9a8c74>({string.Join(" ", inv.batteries.Select(Charges).OrderByDescending(n => n))} charges)</color>" : "");
+            return $"<color=#b8a890>Part Radar:</color>  {TargetLabel()}   battery {bat}{spares}{state}\n<color=#9a8c74>[LMB] pulse   [Wheel] target   [L] battery   [Y] put away</color>";
         }
     }
 }

@@ -301,8 +301,9 @@ namespace WorkshopWreckage
             _walk = S("walk_speed", 0.7);
             _turn = S("turn_speed", Json.Num(c, "turn_speed_deg", 260));
             _maxPickH = S("reach_height", 0.35);
-            // Unibot (store_with_reach): a courier until it has Arm Reach, then it stores what it can reach (playtest 2026-10-26)
-            _canStore = Json.Bool(c, "can_direct_store", true) || Json.Bool(c, "store_with_reach") && _maxPickH > BaseReach + 1e-3f;
+            // Unibot (store_with_reach): stores what it can reach, from the start the low drawers and the bottom
+            // shelf level; Arm Reach takes it higher (playtest 2026-10-26)
+            _canStore = Json.Bool(c, "can_direct_store", true) || Json.Bool(c, "store_with_reach");
             _climbH = S("climb_height", 0);
             _climbSpeed = S("climb_speed", 0.35);
             _maxItem = S("max_item_size", 0.33);
@@ -1628,10 +1629,10 @@ namespace WorkshopWreckage
         /// (Unibot); otherwise if the destination is within reach (climbing for a climber).</summary>
         public bool ReachableDest(string box) => _canStore && g.db.boxes.TryGetValue(box, out var d) && Json.Num(d, "elevation_m") <= ReachHeight && (PhysicallyStorable(box) || Tosses(box));
 
-        /// <summary>Telescopic arms (Arm Reach bought) on a walker: a drawer or shelf container within the reach
-        /// rule but above where the claws can place it is still stored: the drawer is pulled out and the part
-        /// tossed in the last bit (playtest 2026-10-26: the D row and the second shelf level).</summary>
-        bool Tosses(string box) => !Flies && !_canClimb && _maxPickH > BaseReach + 1e-3f && Json.Str(g.db.boxes[box], "kind") != "floor_pallet";
+        /// <summary>A walker: a drawer or shelf container within the reach rule but where the claws can't place
+        /// it is still stored: the drawer is pulled out and the part tossed in the last bit (playtest 2026-10-26:
+        /// with Arm Reach the D row and the second shelf level; without it the low shelves under a deck).</summary>
+        bool Tosses(string box) => !Flies && !_canClimb && Json.Str(g.db.boxes[box], "kind") != "floor_pallet";
 
         readonly Dictionary<string, bool> _physical = new();
         /// <summary>Models with an aim pose (Retrobot): can the claws actually put a part there from the

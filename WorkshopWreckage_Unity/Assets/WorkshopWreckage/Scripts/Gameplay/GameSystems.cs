@@ -78,21 +78,24 @@ namespace WorkshopWreckage
         public event Action Changed;
 
         /// <summary>Battery pockets (playtest 2026-10-26): Part Radar batteries ride in their own pockets
-        /// (3, the Tool Belt adds more) and never take a part slot.</summary>
+        /// (3, the Tool Belt adds more), apart from the parts: no part slot, not on the hotbar.</summary>
         public int batteryPockets = 3;
+        public readonly List<int> batteries = new();
         public Func<int, bool> isBattery = _ => false;
 
         public Inventory(ItemWorld w) { world = w; }
         public int Count => items.Count;
-        public int Batteries => items.Count(isBattery);
-        /// <summary>What counts against the capacity: everything but the batteries.</summary>
-        public int Parts => items.Count - Batteries;
+        public int Batteries => batteries.Count;
+        /// <summary>What counts against the capacity: the parts (batteries are in their pockets).</summary>
+        public int Parts => items.Count;
+        public bool Has(int id) => items.Contains(id) || batteries.Contains(id);
         public bool IsFull => Parts >= capacity;
         public bool HasRoomFor(int id) => isBattery(id) ? Batteries < batteryPockets : !IsFull;
 
         public bool Add(int id)
         {
-            if (!HasRoomFor(id) || items.Contains(id)) return false;
+            if (!HasRoomFor(id) || Has(id)) return false;
+            if (isBattery(id)) { batteries.Add(id); Changed?.Invoke(); return true; }
             items.Add(id);
             if (heldDef < 0) { heldDef = world.instances[id].defId; _heldSlot = id; }
             Changed?.Invoke();
@@ -101,6 +104,7 @@ namespace WorkshopWreckage
 
         public void Remove(int id)
         {
+            if (batteries.Remove(id)) { Changed?.Invoke(); return; }
             items.Remove(id);
             if (_heldSlot == id) _heldSlot = -1;
             if (heldDef >= 0 && (stacking ? IdsOf(heldDef).Count == 0 : _heldSlot < 0))
@@ -533,7 +537,7 @@ namespace WorkshopWreckage
                 ["modules"] = g.modules.ToDict(),
                 ["radar"] = g.radar.ToDict(),
                 ["items"] = items, ["item_defs"] = itemDefs, ["storage"] = storage,
-                ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
+                ["inventory"] = new Dictionary<string, object> { ["items"] = g.inventory.items.Select(x => (object)(double)x).ToList(), ["batteries"] = g.inventory.batteries.Select(x => (object)(double)x).ToList(), ["held_def"] = (double)g.inventory.heldDef },
                 ["progress"] = g.progress.ToDict(),
                 ["game_stats"] = g.stats?.ToDict(),
                 ["player"] = new Dictionary<string, object> { ["pos"] = new List<object> { (double)p.position.x, (double)p.position.y, (double)p.position.z }, ["yaw"] = (double)g.player.Yaw, ["pitch"] = (double)g.player.Pitch },

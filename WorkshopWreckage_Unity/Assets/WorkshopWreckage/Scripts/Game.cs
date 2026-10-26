@@ -292,7 +292,13 @@ namespace WorkshopWreckage
                     for (int k = 0; k < ids.Count; k++) world.instances[ids[k]].transform = StoragePlacement(kv.Key, ids[k], k);
                 }
                 var inv = Json.Obj(save["inventory"]);
-                foreach (var x in Json.Arr(inv["items"])) inventory.items.Add((int)(double)x);
+                // batteries in "items" (saves before the battery pockets) move into the pockets
+                foreach (var x in Json.Arr(inv["items"]).Concat(Json.Arr(inv.GetValueOrDefault("batteries"))))
+                {
+                    int id = (int)(double)x;
+                    if (inventory.Has(id)) continue;
+                    (world.DefOf(id).IsRadarBattery ? inventory.batteries : inventory.items).Add(id);
+                }
                 int hd = Json.Int(inv, "held_def", -1);
                 if (hd >= 0) inventory.Select(hd);
                 progress.Load(Json.Obj(save["progress"]));
