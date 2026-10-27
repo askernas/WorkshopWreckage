@@ -1,0 +1,71 @@
+{
+  "_comment": "WorkshopArtDirectionProfile (docs/ART_DIRECTION_PASS.md). The look of the workshop: lighting, grading, environment colours and the item shading. Every value is a TARGET; 'stylization' blends from the look before the art pass (0) to these targets (1). Colours are linear-ish [r, g, b] as in the C# code. Gameplay colours (category drawers, labels, item colours) are never set here. QA: --artlook=0..1 overrides 'stylization'.",
+  "stylization": 1.0,
+  "lighting": {
+    "ambient_sky": [0.45, 0.45, 0.46],
+    "ambient_equator": [0.35, 0.33, 0.3],
+    "ambient_ground": [0.34, 0.31, 0.27],
+    "fog_color": [0.55, 0.5, 0.44],
+    "fog_density": 0.016,
+    "fixture_color": [1.0, 0.88, 0.74],
+    "fixture_intensity": 12.5,
+    "fixture_shadow_strength": 0.75,
+    "lamp_color": [1.0, 0.8, 0.56],
+    "lamp_intensity": 8.0,
+    "sun_color": [1.0, 0.8, 0.56],
+    "sun_intensity": 3.6
+  },
+  "post": {
+    "exposure": 2.0,
+    "saturation": 8,
+    "contrast": 16,
+    "temperature": 2,
+    "split_shadows": [0.46, 0.49, 0.53],
+    "split_highlights": [0.64, 0.56, 0.48],
+    "split_balance": -10,
+    "highlights_tint": [1.0, 1.0, 1.0],
+    "bloom_intensity": 0.22,
+    "bloom_threshold": 1.6,
+    "bloom_scatter": 0.45,
+    "bloom_tint": [1.0, 0.96, 0.9],
+    "vignette": 0.14,
+    "film_grain": 0.06
+  },
+  "environment": {
+    "floor_tint": [0.62, 0.62, 0.63],
+    "floor_variation": 0.45,
+    "floor_bump": 0.65,
+    "brick_tint": [1.2, 1.08, 0.98],
+    "shelving_upright": [0.95, 0.72, 0.08],
+    "shelving_beam": [0.93, 0.66, 0.07],
+    "shelving_deck": [0.36, 0.38, 0.42],
+    "shelving_hazard_stripes": true,
+    "floor_smoothness": 2.0
+  },
+  "items": {
+    "saturation": -0.06,
+    "rim": 0.15,
+    "rim_color": [1.0, 0.92, 0.8],
+    "ambient": 0.0,
+    "wear_reduction": 0.3,
+    "gloss": 0.2,
+    "cavity_wash": 1.0,
+    "wash_color": [0.34, 0.28, 0.24],
+    "grime": 0.75,
+    "grime_color": [0.62, 0.55, 0.45],
+    "edge_wear": 1.0,
+    "edge_highlight": 0.75,
+    "paint_roughness": 0.12,
+    "metallic_response": 0.0,
+    "wash_definition": 1.0,
+    "chip_size": 1.0
+  },
+  "dressing": {
+    "enabled": true,
+    "ceiling": true,
+    "ceiling_extras": true,
+    "wall_sheets": true,
+    "signs": true,
+    "floor_lines": true
+  }
+}

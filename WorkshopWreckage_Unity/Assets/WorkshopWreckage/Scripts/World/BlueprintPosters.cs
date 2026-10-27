@@ -186,7 +186,7 @@ namespace WorkshopWreckage
             _ => L.roomMax.x - p.x,
         };
 
-        static void Sheet(Transform parent, Texture tex, Vector3 localPos, Quaternion localRot, float w, float h, float curl, string name)
+        internal static void Sheet(Transform parent, Texture tex, Vector3 localPos, Quaternion localRot, float w, float h, float curl, string name)
         {
             var go = new GameObject(name);
             go.transform.SetParent(parent, false);
@@ -242,7 +242,7 @@ namespace WorkshopWreckage
         };
 
         /// <summary>General arrangement of one machine (cached per type and paper colour).</summary>
-        static Texture RobotDrawing(Game g, string type, string code, bool blue)
+        internal static Texture RobotDrawing(Game g, string type, string code, bool blue)
         {
             string key = $"robot:{type}:{blue}";
             if (_drawings.TryGetValue(key, out var t)) return t;
@@ -257,7 +257,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>A salvage part drawing from its item mesh (key or key prefix in the catalog).</summary>
-        static Texture PartDrawing(Game g, string keyOrPrefix, string title, string code, bool blue)
+        internal static Texture PartDrawing(Game g, string keyOrPrefix, string title, string code, bool blue)
         {
             string key = $"part:{keyOrPrefix}";
             if (_drawings.TryGetValue(key, out var t)) return t;

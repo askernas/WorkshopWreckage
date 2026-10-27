@@ -71,8 +71,13 @@ namespace WorkshopWreckage
             return m;
         }
 
-        /// <summary>Old workshop concrete slab (after resources/concrete floor.jpg), 4 m tile with anti-tiling.</summary>
-        public static Material Concrete() => Baked("concrete", "concrete", 4f, 1.0f, new Color(0.84f, 0.84f, 0.85f), 0.8f) ?? Planks();
+        /// <summary>Old workshop concrete slab (after resources/concrete floor.jpg), 4 m tile with anti-tiling.
+        /// Art pass (WorkshopArtDirectionProfile): grey, calmer macro variation and relief, a light sheen.</summary>
+        public static Material Concrete() => Baked("concrete", "concrete", 4f,
+            WorkshopArtDirectionProfile.F("environment", "floor_bump", 1.0f),
+            WorkshopArtDirectionProfile.C("environment", "floor_tint", new Color(0.84f, 0.84f, 0.85f)),
+            WorkshopArtDirectionProfile.F("environment", "floor_variation", 0.8f), 0,
+            WorkshopArtDirectionProfile.F("environment", "floor_smoothness", 1f)) ?? Planks();
 
         /// <summary>Kraft cardboard, tinted per box.</summary>
         public static Material Cardboard(Color tint)
@@ -85,9 +90,11 @@ namespace WorkshopWreckage
         public static Material CrateWood(Color tint) => Baked("crate" + ColorUtility.ToHtmlStringRGB(tint), "cratewood", 1f, 1.0f, tint) ?? Wood(tint);
 
         // --- brick: 2 m tile (texture u,v in [0,1) -> metres * 2) -----------------
-        public static Material Brick()
+        public static Material Brick() => Brick(Color.white);
+
+        public static Material Brick(Color tint)
         {
-            var baked = Baked("brick_baked", "brick", 2.025f, 1.4f, Color.white, 0.35f, 1f);
+            var baked = Baked("brick_baked" + ColorUtility.ToHtmlStringRGB(tint), "brick", 2.025f, 1.4f, tint, 0.35f, 1f);
             if (baked != null) return baked;
             if (_cache.TryGetValue("brick", out var m)) return m;
             var brick = new Color(0.50f, 0.25f, 0.16f);
@@ -197,9 +204,10 @@ namespace WorkshopWreckage
             return m;
         }
 
-        public static Material Metal(Color paint, float chip = 0.35f)
+        /// <param name="size">paint texture size; smaller for paint only seen from afar (each new colour bakes its own texture)</param>
+        public static Material Metal(Color paint, float chip = 0.35f, int size = 512)
         {
-            var key = "metal" + ColorUtility.ToHtmlStringRGB(paint) + chip.ToString("0.00");
+            var key = "metal" + ColorUtility.ToHtmlStringRGB(paint) + chip.ToString("0.00") + (size != 512 ? "@" + size : "");
             if (_cache.TryGetValue(key, out var m)) return m;
             float Chips(float u, float v)
             {
@@ -209,7 +217,7 @@ namespace WorkshopWreckage
             }
             if (!_paint.TryGetValue(key, out var tex))
             {
-                tex = Tex(512, key, (u, v) =>
+                tex = Tex(size, key, (u, v) =>
                 {
                     float mm = Noise(u * 18f + 0.37f, v * 18f, 2);
                     float rust = SS(0.6f, 0.9f, Noise(u * 1.2f + 1.3f, v * 1.2f, 3)) * 0.5f;
@@ -227,6 +235,28 @@ namespace WorkshopWreckage
                 return new Color(Mathf.Lerp(0.04f, 0.5f, ch), Mathf.Lerp(0.45f, 0.55f, ch), 0, 1);   // paint is not metal; only bare chips are
             }, true);
             return Make(key, tex, _paintMask, 2f, 1, 1, Color.white);
+        }
+
+        /// <summary>Safety paint: diagonal yellow / black stripes (10 cm), worn at random, sampled
+        /// triplanar in world space like the other painted metal (shelving uprights, art pass).</summary>
+        public static Material Hazard(Color yellow)
+        {
+            var key = "hazard" + ColorUtility.ToHtmlStringRGB(yellow);
+            if (_cache.TryGetValue(key, out var m)) return m;
+            var tex = Tex(256, key, (u, v) =>
+            {
+                float d = (u + v) * 4f;
+                float f = d - Mathf.Floor(d);
+                float stripe = SS(0.47f, 0.53f, f) * (1 - SS(0.97f, 1f, f));
+                float grain = Noise(u * 12f, v * 12f, 2);
+                float chip = SS(0.78f, 0.82f, Noise(u * 6f + 2.1f, v * 6f, 3) * 0.8f + grain * 0.3f);
+                var c = Color.Lerp(yellow, new Color(0.035f, 0.033f, 0.03f), stripe) * (0.9f + 0.18f * grain);
+                c = Color.Lerp(c, new Color(0.4f, 0.38f, 0.35f), chip * 0.7f);
+                c.a = 1;
+                return c;
+            });
+            m = Make(key, tex, null, 2.5f, 0, 0.42f, Color.white);   // 0.4 m tile: four stripe pairs
+            return m;
         }
 
         public static Material Plain(Color c, float metallic = 0, float smooth = 0.4f, float emission = 0)

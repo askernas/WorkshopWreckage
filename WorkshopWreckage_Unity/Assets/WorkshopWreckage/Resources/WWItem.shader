@@ -43,7 +43,13 @@ Shader "WorkshopWreckage/Item"
     // salvage look: the share of the PBR reflection kept (0.12: far below a clean part's);
     // a global so QA can compare (0 or unset = the 0.25 default)
     float _WWItemGloss;
-    float _WWItemDebug;   // QA (--itemdebug): 1 normals, 2 ambient only, 3 main light only, 4 additional lights only
+    float _WWItemDebug;   // QA (--itemdebug): 1 normals, 2 ambient only, 3 main light only, 4 additional lights only, 5 cavity mask (skins), 6 art layer masks (skins: chip, worn edge, wash)
+    // art direction (WorkshopArtDirectionProfile, docs/ART_DIRECTION_PASS.md); every one 0 = the look before the pass:
+    // saturation lift, warm rim on silhouettes (scaled by the ambient there), ambient lift, less salvage mottling, more gloss;
+    // skins: cavity wash, grime, chipped edge wear, edge highlight, paint roughness and metallic response
+    float _WWArtSat, _WWArtRim, _WWArtAmbient, _WWArtWear, _WWArtGloss;
+    float _WWArtWash, _WWArtGrime, _WWArtEdgeWear, _WWArtEdge, _WWArtRough, _WWArtMetal, _WWArtWashEdge, _WWArtChipSize;
+    float4 _WWArtRimColor, _WWArtWashColor, _WWArtGrimeColor;
 
     struct Attributes
     {
@@ -52,6 +58,7 @@ Shader "WorkshopWreckage/Item"
         float2 uv : TEXCOORD0;
         float2 uv1 : TEXCOORD1;   // skin: (u, v) on the surface
         float4 uv2 : TEXCOORD2;   // skin: (size u, size v, kind, label slot)
+        float2 uv3 : TEXCOORD3;   // skin: cavity mask (concave, convex), CavityMask.cs
         float4 color : COLOR;
         UNITY_VERTEX_INPUT_INSTANCE_ID
     };
@@ -129,6 +136,7 @@ Shader "WorkshopWreckage/Item"
                 nointerpolation float4 skinA : TEXCOORD11;
                 nointerpolation float4 skinB : TEXCOORD12;
                 nointerpolation float scale : TEXCOORD13;   // mesh units -> metres
+                float2 cav : TEXCOORD14;                     // (concave, convex)
                 #endif
             };
 
@@ -151,6 +159,7 @@ Shader "WorkshopWreckage/Item"
                 #if defined(_WW_SKIN)
                 o.suv = v.uv1;
                 o.sinfo = v.uv2;
+                o.cav = v.uv3;
                 o.skinA = skinA;
                 o.skinB = skinB;
                 o.scale = length(float3(UNITY_MATRIX_M[0].x, UNITY_MATRIX_M[1].x, UNITY_MATRIX_M[2].x));
@@ -171,6 +180,7 @@ Shader "WorkshopWreckage/Item"
             //            gear flanks, bearing races and pins (from the profile and the part's axis)
             //   recess   thread valleys and gear roots: darker, oil, the first rust
             //   scratch  sparse directional scratches on worn parts
+            static float4 gArtDbg = 0;   // QA (--itemdebug=6): the art layers' masks (chip, worn edge, wash)
             void Skin(Varyings i, out float3 col, out float metal, out float rough, out float3 emit, inout float3 nWS)
             {
                 float packed = round(i.skinA.x);
@@ -450,6 +460,66 @@ Shader "WorkshopWreckage/Item"
                 float up = saturate(nWS.y), down = saturate(-nWS.y);
                 col = lerp(col, float3(0.15, 0.13, 0.11), up * up * saturate(cond - 0.25) * (0.15 + 0.3 * big));
                 col *= 1 - down * 0.2 * cond;
+
+                // art pass (WorkshopArtDirectionProfile): miniature-style layers over the skin, from the mesh's cavity
+                // mask (concave, convex) and the face edge distance: wash -> grime -> edge wear -> highlight -> paint
+                // response. Every amount 0 = the skin as it was.
+                {
+                    float cc = i.cav.x, cx = i.cav.y;
+                    float gl = dot(col, float3(0.2126, 0.7152, 0.0722));
+                    // each layer group sits behind a uniform branch: an amount of 0 in the profile skips its work
+                    float wash = 0, chip = 0;
+                    [branch] if (_WWArtWash + _WWArtGrime > 0)
+                    {
+                        // wash: the vertex mask says which edges of a face are inside creases; the face's own edge
+                        // distance turns that into a sharp line along the crease (seams, panel joints, the foot of a
+                        // boss, tooth roots) instead of a gradient smeared over the whole low-poly face
+                        float washW = clamp(faceSize * 0.14, 0.002, 0.018);
+                        float crease = (1 - smoothstep(0.0, washW, ed + (nFine - 0.5) * washW * 0.5)) * smoothstep(0.1, 0.55, cc);
+                        wash = saturate(max(max(crease * _WWArtWashEdge, cc * cc * 0.4), recess * 0.8)) * step(0.0001, _WWArtWash);
+                        col = lerp(col, col * _WWArtWashColor.rgb, wash * _WWArtWash);
+                        // grime: oily dirt spreading out of the creases and on undersides, in patches, more on old parts
+                        float patchy = smoothstep(0.3, 0.7, big * 0.65 + nFine * 0.35);
+                        float grime = saturate((crease * 0.8 + cc * 0.9) * (0.4 + 0.6 * patchy) + down * 0.4 * patchy) * (0.35 + 0.65 * cond);
+                        col = lerp(col, lerp(col, gl.xxx, 0.35) * _WWArtGrimeColor.rgb, grime * _WWArtGrime);
+                    }
+                    [branch] if (_WWArtEdgeWear > 0)
+                    {
+                    // edge wear: chips sized to the part (wider on big housings), heaviest at corners, on raised edges
+                    // only, in stressed patches (low-frequency noise picks them), never in a crease or on bare metal
+                    float wearW = clamp(faceSize * 0.1, 0.0015, 0.03) * _WWArtChipSize;
+                    float ew = 1 - smoothstep(0.0, wearW, ed - (nEdge - 0.5) * wearW * 1.4);
+                    float corner = 0;
+                    if (kind < 0.5)
+                    {
+                        float ex = min(uv.x, 1 - uv.x) * i.sinfo.x * i.scale, ey = min(uv.y, 1 - uv.y) * i.sinfo.y * i.scale;
+                        corner = (1 - smoothstep(0.0, wearW * 2.2, ex)) * (1 - smoothstep(0.0, wearW * 2.2, ey));
+                    }
+                    float stress = smoothstep(0.38, 0.62, big * 0.7 + nEdge * 0.3);
+                    float raised = saturate(cx * 1.6 + 0.25) * (1 - smoothstep(0.2, 0.6, cc));
+                    float worn = saturate(max(ew * (0.4 + 0.6 * stress), corner)) * raised;
+                    float knock = smoothstep(0.78, 0.81, nFine * 0.7 + nEdge * 0.45) * smoothstep(0.06, 0.15, faceSize) * stress * 0.8;   // the odd knock on a broad panel
+                    float wearAmt = (0.75 + 0.5 * cond) * (1 - metal);
+                    float brkC = 0.3 + 0.9 * smoothstep(0.35, 0.65, nEdge * 0.6 + nFine * 0.4);   // breaks a worn edge into separate chips
+                    chip = smoothstep(0.27, 0.39, max(worn, knock) * brkC * wearAmt);
+                    float rub = smoothstep(0.14, 0.3, worn * brkC * wearAmt) * (1 - chip);   // paint rubbed thin around a chip
+                    float3 steel = lerp(float3(0.16, 0.15, 0.14), gl.xxx * 0.55, 0.3) * (0.85 + 0.3 * nFine);   // dark steel, a hint of the paint's value
+                    steel = lerp(steel, float3(0.22, 0.1, 0.045), smoothstep(0.62, 0.8, nEdge) * 0.5 * cond);   // the oldest chips show a trace of rust
+                    col = lerp(col, col * 1.18 + gl * 0.04, rub * 0.6 * _WWArtEdgeWear);
+                    col = lerp(col, steel, chip * _WWArtEdgeWear);
+                    gArtDbg.g = worn;
+                    metal = lerp(metal, 0.65, chip * _WWArtEdgeWear);
+                    rough = lerp(rough, 0.45, chip * _WWArtEdgeWear);
+                    }
+                    gArtDbg.rb = float2(chip, wash);
+                    // highlight: raised edges and tooth tips a step lighter than the paint, never white
+                    float band = 1 - smoothstep(0.0, edgeW * 2.5, ed);
+                    float hi = cx * band * (1 - wash) * (1 - chip);
+                    col = lerp(col, saturate(col * 1.35 + gl * 0.06), hi * _WWArtEdge);
+                    // paint response: rougher = broader, softer highlights; metallic scaled
+                    rough = saturate(rough + _WWArtRough);
+                    metal = saturate(metal * (1 + _WWArtMetal));
+                }
             }
 
             // skin surface: material, wear and labels; lit by the shared lighting in frag
@@ -475,7 +545,7 @@ Shader "WorkshopWreckage/Item"
                 float4 c = i.custom;
                 float n = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.xy * 0.45 + i.objPos.zz * 0.21 + c.w * 7.0).r;
                 float grime = SAMPLE_TEXTURE2D(_WearNoise, sampler_WearNoise, i.objPos.zx * 0.13 + c.w * 3.0).r;
-                float wear = c.z;
+                float wear = c.z * (1.0 - _WWArtWear);
                 float thread = i.color.a;
                 float ridge = sin(i.uv.y * 6.2831853);
                 baseCol = i.color.rgb;
@@ -537,8 +607,18 @@ Shader "WorkshopWreckage/Item"
                 d.bakedGI = SampleSH(d.normalWS);
                 d.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(i.positionCS);
                 d.shadowMask = half4(1, 1, 1, 1);
+                if (_WWItemDebug < 0.5)
+                {
+                    albedo = max(0, lerp(dot(albedo, float3(0.2126, 0.7152, 0.0722)).xxx, albedo, 1.0 + _WWArtSat));
+                    smoothness = saturate(smoothness * (1.0 + _WWArtGloss));
+                    d.bakedGI *= 1.0 + _WWArtAmbient;
+                }
                 if (_WWItemDebug > 0.5)
                 {
+                    #if defined(_WW_SKIN)
+                    if (_WWItemDebug > 5.5) return half4(gArtDbg.rgb, 1);
+                    if (_WWItemDebug > 4.5) return half4(i.cav.x, i.cav.y, 0, 1);
+                    #endif
                     if (_WWItemDebug < 1.5) return half4(d.normalWS * 0.5 + 0.5, 1);
                     if (_WWItemDebug < 2.5) return half4(d.bakedGI, 1);
                     if (_WWItemDebug < 3.5)
@@ -566,6 +646,8 @@ Shader "WorkshopWreckage/Item"
                 s.emission = emit;
                 s.alpha = 1.0;
                 half4 col = UniversalFragmentPBR(d, s);
+                float rim = pow(1.0 - saturate(dot(nWS, d.viewDirectionWS)), 3.0);
+                col.rgb += rim * _WWArtRim * _WWArtRimColor.rgb * (0.3 + 0.7 * albedo) * dot(d.bakedGI, float3(0.2126, 0.7152, 0.0722));
                 col.rgb = MixFog(col.rgb, i.fog);
                 return col;
             }

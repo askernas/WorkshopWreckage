@@ -170,9 +170,9 @@ namespace WorkshopWreckage
             var color = cats.Count > 0 && CategoryColors.TryGetValue(cats[0].ToString(), out var cc) ? cc : new Color(0.4f, 0.4f, 0.4f);
             var carcass = EnvMaterials.Metal(new Color(0.2f, 0.23f, 0.2f), 0.3f);
             float w = size.x, d = size.z, top = Plinth + rows * RowH;
-            b.Box(new Vector3(-w / 2 + 0.02f, top / 2, 0), new Vector3(0.04f, top, d), carcass);
-            b.Box(new Vector3(w / 2 - 0.02f, top / 2, 0), new Vector3(0.04f, top, d), carcass);
-            b.Box(new Vector3(0, top + 0.02f, 0), new Vector3(w, 0.04f, d + 0.02f), carcass);
+            b.Bevel(new Vector3(-w / 2 + 0.02f, top / 2, 0), new Vector3(0.04f, top, d), 0.01f, carcass);
+            b.Bevel(new Vector3(w / 2 - 0.02f, top / 2, 0), new Vector3(0.04f, top, d), 0.01f, carcass);
+            b.Bevel(new Vector3(0, top + 0.02f, 0), new Vector3(w, 0.04f, d + 0.02f), 0.012f, carcass);
             b.Box(new Vector3(0, top / 2, -d / 2 + 0.01f), new Vector3(w, top, 0.02f), carcass);
             b.Box(new Vector3(0, Plinth / 2, 0), new Vector3(w - 0.02f, Plinth, d - 0.04f), EnvMaterials.Metal(new Color(0.12f, 0.12f, 0.12f), 0.2f));
             var shelf = EnvMaterials.Metal(new Color(0.16f, 0.18f, 0.16f), 0.3f);
@@ -201,7 +201,7 @@ namespace WorkshopWreckage
         void AddFront(Batch b, int slot)
         {
             var c = FrontCenterG(slot);
-            b.Box(c, new Vector3(front.x, front.y, 0.025f), _frontMat[slot]);
+            b.Bevel(c, new Vector3(front.x, front.y, 0.025f), 0.007f, _frontMat[slot]);   // art pass: soft edges catch the light, fronts read apart
             b.Box(c + new Vector3(0, -0.06f, 0.02f), new Vector3(0.08f, 0.018f, 0.02f), Handle);
             if (_atlas != null && slot < dests.Count) b.Quad(LabelPosG(dests[slot], slot), new Vector2(0.17f, 0.068f), _atlasMat, _atlas.CellUV(slot));
         }
@@ -223,13 +223,17 @@ namespace WorkshopWreckage
         {
             float w = size.x, depth = size.z, h = size.y;
             var levels = Json.Arr(unit["levels"]);
-            var upright = EnvMaterials.Metal(Upright, 0.25f);
-            var beam = EnvMaterials.Metal(Beam, 0.3f);
-            var deck = EnvMaterials.Metal(new Color(0.87f, 0.85f, 0.79f), 0.15f);
+            // art pass (WorkshopArtDirectionProfile): pallet-rack safety yellow and orange, galvanised decks that
+            // keep small parts readable; the aisle-side uprights wear hazard stripes
+            var uprightCol = WorkshopArtDirectionProfile.C("environment", "shelving_upright", Upright);
+            var upright = EnvMaterials.Metal(uprightCol, 0.25f);
+            var front = WorkshopArtDirectionProfile.B("environment", "shelving_hazard_stripes") ? EnvMaterials.Hazard(uprightCol) : upright;
+            var beam = EnvMaterials.Metal(WorkshopArtDirectionProfile.C("environment", "shelving_beam", Beam), 0.3f);
+            var deck = EnvMaterials.Metal(WorkshopArtDirectionProfile.C("environment", "shelving_deck", new Color(0.87f, 0.85f, 0.79f)), 0.15f);
             foreach (var sx in new[] { -1f, 1f })
             {
                 foreach (var sz in new[] { -1f, 1f })
-                    b.Box(new Vector3(sx * (w / 2 - 0.04f), h / 2, sz * (depth / 2 - 0.04f)), new Vector3(0.07f, h, 0.07f), upright);
+                    b.Bevel(new Vector3(sx * (w / 2 - 0.04f), h / 2, sz * (depth / 2 - 0.04f)), new Vector3(0.07f, h, 0.07f), 0.012f, sz > 0 ? front : upright);
                 for (int k = 0; k < 4; k++)
                 {
                     float y = 0.3f + k * (h - 0.4f) / 4f;
@@ -239,7 +243,7 @@ namespace WorkshopWreckage
             foreach (var lo in levels)
             {
                 float lv = Json.F(lo);
-                foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(0, lv - 0.05f, sz * (depth / 2 - 0.04f)), new Vector3(w - 0.08f, 0.1f, 0.05f), beam);
+                foreach (var sz in new[] { -1f, 1f }) b.Bevel(new Vector3(0, lv - 0.05f, sz * (depth / 2 - 0.04f)), new Vector3(w - 0.08f, 0.1f, 0.05f), 0.012f, beam);
                 b.Box(new Vector3(0, lv - 0.012f, 0), new Vector3(w - 0.12f, 0.025f, depth - 0.06f), deck);
             }
             blocker.colliders.Add((G(0, h / 2, 0), new Vector3(w, h, depth), Quaternion.identity));

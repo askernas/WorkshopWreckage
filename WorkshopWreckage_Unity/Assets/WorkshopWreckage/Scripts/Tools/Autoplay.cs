@@ -15,7 +15,34 @@ namespace WorkshopWreckage
         readonly List<object> checks = new();
         int passed, failed;
 
-        public IEnumerator Run(Game game, string dir)
+        /// <summary>Runs every check; a check group that throws is reported as a failure and the run goes on
+        /// with the next group, so the summary and report are always written.</summary>
+        public IEnumerator Run(Game game, string dir) => Guarded(RunAll(game, dir));
+
+        /// <summary>Steps a coroutine (and every coroutine it yields, recursively) inside a try/catch: an
+        /// exception ends only the group that threw, as a FAIL naming the group and the exception.</summary>
+        IEnumerator Guarded(IEnumerator e)
+        {
+            while (true)
+            {
+                object cur;
+                try
+                {
+                    if (!e.MoveNext()) yield break;
+                    cur = e.Current;
+                }
+                catch (System.Exception ex)
+                {
+                    string n = e.GetType().Name, group = n.StartsWith("<") && n.IndexOf('>') > 1 ? n.Substring(1, n.IndexOf('>') - 1) : n;
+                    Debug.LogException(ex);
+                    Check($"{group} ran to the end (the rest of this group was skipped)", false, $"{ex.GetType().Name}: {ex.Message} | {ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim()}");
+                    yield break;
+                }
+                yield return cur is IEnumerator sub && !(cur is CustomYieldInstruction) ? Guarded(sub) : cur;
+            }
+        }
+
+        IEnumerator RunAll(Game game, string dir)
         {
             g = game;
             outDir = dir;
@@ -1861,16 +1888,24 @@ namespace WorkshopWreckage
             var urp = (UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset)UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
             var b = g.builder;
             GameSettings.SetPreset(g, 0);
-            bool low = urp.renderScale == 0.75f && urp.msaaSampleCount == 1 && urp.mainLightShadowmapResolution == 1024 && !b.grain.active && b.bloom.active
+            bool low = urp.renderScale == 0.75f && urp.msaaSampleCount == 1 && urp.mainLightShadowmapResolution == 1024 && b.bloom.active
                        && b.shafts.Count > 0 && b.shafts.All(s => !s.activeSelf) && b.shadowLights.Count > 0 && b.shadowLights.All(l => l.shadows == LightShadows.Hard) && ItemRenderer.ShadowMode == 2;
-            Check("settings: Low sets scale, AA, shadows, part shadows, grain and shafts", low,
+            Check("settings: Low sets scale, AA, shadows, part shadows and shafts", low,
                   $"scale {urp.renderScale}, MSAA {urp.msaaSampleCount}, shadow map {urp.mainLightShadowmapResolution}, grain {b.grain.active}, shafts {b.shafts.Count(s => s.activeSelf)}/{b.shafts.Count} on, {b.shadowLights.Count} shadow lights, part shadows {ItemRenderer.ShadowMode}");
+            GameSettings.Grain = 2; GameSettings.Changed(g);
+            bool grainOn = b.grain.active && Mathf.Approximately(b.grain.intensity.value, 0.06f) && GameSettings.Preset == 0;
+            GameSettings.SetPreset(g, 3);
+            bool grainKept = GameSettings.Grain == 2 && b.grain.active;
+            GameSettings.Grain = 0; GameSettings.Changed(g);
+            Check("settings: film grain is its own setting (a preset never changes it, Off removes it)", grainOn && grainKept && !b.grain.active && GameSettings.Preset == 3,
+                  $"medium on {grainOn}, kept by Ultra {grainKept}, off {!b.grain.active}, preset {GameSettings.PresetNames[GameSettings.Preset]}");
+            GameSettings.SetPreset(g, 0);
             GameSettings.Shadows = 0; GameSettings.Changed(g);
             Check("settings: one changed value makes it Custom; shadows off", GameSettings.Preset == GameSettings.Custom && b.shadowLights.All(l => l.shadows == LightShadows.None), GameSettings.PresetNames[GameSettings.Preset]);
             GameSettings.Brightness = 0.5f; GameSettings.Changed(g);
             bool bright = Mathf.Approximately(b.colorAdjust.postExposure.value, WorkshopBuilder.Exposure + 0.5f);
             GameSettings.ResetDefaults(g);
-            bool high = GameSettings.Preset == 2 && urp.renderScale == 1 && urp.msaaSampleCount == 2 && urp.mainLightShadowmapResolution == 4096 && b.grain.active && b.shafts.All(s => s.activeSelf)
+            bool high = GameSettings.Preset == 2 && urp.renderScale == 1 && urp.msaaSampleCount == 2 && urp.mainLightShadowmapResolution == 4096 && !b.grain.active && b.shafts.All(s => s.activeSelf)
                         && b.shadowLights.All(l => l.shadows == LightShadows.Soft) && Mathf.Approximately(b.colorAdjust.postExposure.value, WorkshopBuilder.Exposure) && Mathf.Approximately(g.player.cam.fieldOfView, 72);
             Check("settings: brightness moves the exposure; defaults put the designed look back", bright && high, $"bright {bright}, high {high}");
             float w0 = Sfx.masterVolume, r0 = Sfx.robotVolume, u0 = Sfx.uiVolume;
@@ -2443,10 +2478,14 @@ namespace WorkshopWreckage
             bool intact = PartsIntact(out var d2);
             Check("an installed part can't be delivered again (no duplicates)", !again && intact, d2);
 
-            // the last two parts, found in the workshop: installed as they are delivered (unlocked)
+            // the last two parts, found in the workshop: they wait in the parts pool (the player picks what goes
+            // on which robot); once every part is there the autoplay builds it, as the player would
             foreach (var id in missing) { Take(id); g.interaction.DepositStation(id); }
+            bool waitedInPool = !wb.Complete(retro) && missing.All(id => wb.PoolContents().Contains(id));
+            int built = AutoAssemble();
             yield return Frames(2);
-            Check("with the blueprint unlocked, a delivered part is installed at once", wb.Complete(retro) && wb.StatusOf(retro) == RobotWorkbench.Status.ReadyForActivation, wb.Summary(retro));
+            Check("delivered parts wait in the parts pool; with all of them found the robot is built from the pool, ready for activation",
+                  waitedInPool && built >= 1 && wb.Complete(retro) && wb.StatusOf(retro) == RobotWorkbench.Status.ReadyForActivation, $"waited in the pool {waitedInPool}; {wb.Summary(retro)}");
             g.OpenWorkbench("retrobot");
             yield return g.Capture(Path.Combine(outDir, "05d_workbench_screen.png"), 8);
             {
@@ -3157,6 +3196,23 @@ namespace WorkshopWreckage
         }
 
         static Vector3 Flat(Vector3 v) => new Vector3(v.x, 0, v.z);
+
+        /// <summary>Autoplay only: every robot whose parts are all in the parts pool is built from it ("Build from
+        /// the parts pool" on the bench screen). In the game the player chooses which parts go on which robot.
+        /// Returns how many robots were completed.</summary>
+        int AutoAssemble()
+        {
+            var wb = g.workbench;
+            int built = 0;
+            foreach (var p in wb.projects)
+            {
+                if (p.crafted || wb.Complete(p) || wb.Operational(p)) continue;
+                if (wb.InstalledCount(p) + wb.InstallableCount(p) < wb.Required(p)) continue;
+                wb.InstallAll(p);
+                if (wb.Complete(p)) { built++; Debug.Log($"[autoplay] auto-assembled {p.name} from the parts pool"); }
+            }
+            return built;
+        }
 
         void Check(string name, bool ok, string detail)
         {

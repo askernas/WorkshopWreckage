@@ -13,6 +13,7 @@ namespace WorkshopWreckage
     ///         cylinder side, (radial 0 inner .. 1 rim, has-inner-edge) on a disc or ring
     ///   UV2 = (size u, size v in mesh units, kind 0 flat / 1 cylinder / 2 disc, label slot)
     /// The shader turns that into edge distance (wear at edges and seams) and label placement.
+    ///   UV3 = (concave, convex) from CavityMask (art pass: wash, grime, edge wear, highlights)
     /// Label slots: 1 / 2 = the two largest visible flat faces of the part body (slot 0),
     /// 3 = the face of an existing type-plate accent (the warning-yellow plates).</summary>
     public static class SkinUV
@@ -198,8 +199,9 @@ namespace WorkshopWreckage
             }
 
             // the skin channels go in a second vertex stream at half precision: the depth and shadow
-            // passes never fetch them, and the forward pass reads 12 extra bytes per vertex, not 24
+            // passes never fetch them, and the forward pass reads 16 extra bytes per vertex, not 32
             var nrmArr = nrm;
+            var cav = CavityMask.Compute(pos, nrm, tri, weld, mesh.bounds);   // art pass: wash / wear mask (UV3)
             var uv0 = new List<Vector2>();
             mesh.GetUVs(0, uv0);
             var layout = new List<VertexAttributeDescriptor>
@@ -211,6 +213,7 @@ namespace WorkshopWreckage
             if (uv0.Count == nv) layout.Add(new(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, 0));
             layout.Add(new(VertexAttribute.TexCoord1, VertexAttributeFormat.Float16, 2, 1));
             layout.Add(new(VertexAttribute.TexCoord2, VertexAttributeFormat.Float16, 4, 1));
+            layout.Add(new(VertexAttribute.TexCoord3, VertexAttributeFormat.Float16, 2, 1));
             mesh.SetVertexBufferParams(nv, layout.ToArray());
             mesh.SetVertices(pos);
             mesh.SetNormals(nrmArr);
@@ -218,6 +221,7 @@ namespace WorkshopWreckage
             if (uv0.Count == nv) mesh.SetUVs(0, uv0);
             mesh.SetUVs(1, uv1);
             mesh.SetUVs(2, uv2);
+            mesh.SetUVs(3, cav);
         }
 
         static bool IsPlate(Color[] col, List<int> tri, Surface g)

@@ -567,7 +567,11 @@ namespace WorkshopWreckage
             Reg(SliderRow(gr, "Brightness", -1f, 1f, GameSettings.Brightness, v => { GameSettings.Brightness = v; GameSettings.Changed(_g); },
                 v => Mathf.Abs(v) < 0.005f ? "0" : $"{v:+0.00;-0.00}"), () => GameSettings.Brightness);
             Reg(ToggleRow(gr, "Bloom (glowing eyes and lamps)", GameSettings.Bloom, on => { GameSettings.Bloom = on; GameSettings.Changed(_g); }), () => GameSettings.Bloom);
-            Reg(ToggleRow(gr, "Film grain", GameSettings.Grain, on => { GameSettings.Grain = on; GameSettings.Changed(_g); RefreshPreset(); }), () => GameSettings.Grain);
+            ChoiceRow(gr, "Film grain", () => GameSettings.GrainNames[GameSettings.Grain], d =>
+            {
+                GameSettings.Grain = (GameSettings.Grain + d + GameSettings.GrainNames.Length) % GameSettings.GrainNames.Length;
+                GameSettings.Changed(_g);
+            });
             Reg(ToggleRow(gr, "Vignette", GameSettings.Vignette, on => { GameSettings.Vignette = on; GameSettings.Changed(_g); }), () => GameSettings.Vignette);
             Reg(ToggleRow(gr, "Light shafts and dust", GameSettings.Shafts, on => { GameSettings.Shafts = on; GameSettings.Changed(_g); RefreshPreset(); }), () => GameSettings.Shafts);
 

@@ -54,6 +54,15 @@ namespace WorkshopWreckage
             if (collide) colliders.Add((c, size, rot));
         }
 
+        /// <summary>Art pass: a Box whose edges shade like a tight rounding (soft ChamferBox), same size and
+        /// collider: heavy furniture reads chunky instead of CAD-sharp for ~4x a box's triangles.</summary>
+        public void Bevel(Vector3 centerG, Vector3 size, float ch, Material m, bool collide = false)
+        {
+            if (m == null) return;
+            ChamferBox(centerG, size, ch, m, null, true);
+            if (collide) colliders.Add((G(centerG), size, Quaternion.identity));
+        }
+
         /// <summary>A lofted prism from a to b (Godot-local) whose chamfered-rectangle cross-section
         /// (size.x across X, size.y across the other side) changes linearly from sizeA to sizeB:
         /// tapered limbs and plinths. Flat-shaded sides, capped ends. `sideG` (Godot space) sets

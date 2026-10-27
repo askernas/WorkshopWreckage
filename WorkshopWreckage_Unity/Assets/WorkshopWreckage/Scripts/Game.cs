@@ -94,6 +94,8 @@ namespace WorkshopWreckage
             // sound is on in a normal run at the saved volumes; tests, screenshots and benchmarks
             // run silently (--mute does it for normal runs too) without touching the saved volumes
             Sfx.LoadVolumes(args.ContainsKey("mute") || Automated);
+            if (args.TryGetValue("gfx", out var gfx))   // QA: diagnostic graphics overrides, never saved
+                foreach (var kv in gfx.Split(',')) { var p = kv.Split(':'); GameSettings.Qa[p[0]] = p.Length > 1 ? p[1] : "1"; }
             GameSettings.Load(Automated);   // graphics and controls; automated runs keep the defaults
 
             RetrobotModel.LegacyLook = args.TryGetValue("retrolook", out var rlook) && rlook == "legacy";
@@ -135,9 +137,11 @@ namespace WorkshopWreckage
 
             if (args.TryGetValue("skins", out var sk)) ItemSkins.Enabled = sk != "0";   // QA: --skins=0 is the original salvage look (before / after)
             if (args.TryGetValue("items", out var n)) itemCount = int.Parse(n);
+            WorkshopArtDirectionProfile.Load(args);   // before the workshop is built: its lights, grading and colours read it
             int seed = args.TryGetValue("seed", out var sd) ? int.Parse(sd) : Json.Int(db.config, "default_seed", 1912);
             if (!StartWorld(seed, null)) return;
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
+            Debug.Log($"[boot] interactive at {startupMs:0} ms; cavity bake {CavityMask.BakeMs:0} ms over {CavityMask.Meshes} meshes");
             StartCoroutine(ProbeLater());
             if (args.TryGetValue("partshadows", out var psm)) ItemRenderer.ShadowMode = Mathf.Clamp(int.Parse(psm), 0, 2);   // QA / benchmark
             // QA: item lighting terms (1 normals, 2 ambient, 3 main light, 4 additional lights)
@@ -221,6 +225,8 @@ namespace WorkshopWreckage
 
         Transform _posters;
         WorkshopLayout _postersFor;
+        Transform _dressing;
+        WorkshopLayout _dressingFor;
 
         /// <summary>What the last load had to convert (empty if the catalog was unchanged).</summary>
         public string migrationReport = "";
@@ -322,6 +328,14 @@ namespace WorkshopWreckage
                 if (_posters != null) Destroy(_posters.gameObject);
                 _posters = BlueprintPosters.Build(this);
                 _postersFor = layout;
+            }
+            if (_dressingFor != layout && !args.ContainsKey("nodressing"))   // art pass stage B; --nodressing: QA (comparison)
+            {
+                if (_dressing != null) Destroy(_dressing.gameObject);
+                var dsw = System.Diagnostics.Stopwatch.StartNew();
+                _dressing = WorkshopDressing.Build(this);
+                _dressingFor = layout;
+                Debug.Log($"[boot] art: dressing {dsw.ElapsedMilliseconds} ms, cavity bake {CavityMask.BakeMs:0} ms over {CavityMask.Meshes} meshes so far");
             }
             workbench.ResetState();
             modules = new RobotModules();

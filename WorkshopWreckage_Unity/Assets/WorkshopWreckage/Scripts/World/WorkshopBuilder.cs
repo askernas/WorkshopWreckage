@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using static WorkshopWreckage.Batch;
+using Art = WorkshopWreckage.WorkshopArtDirectionProfile;
 
 namespace WorkshopWreckage
 {
@@ -22,7 +23,7 @@ namespace WorkshopWreckage
         public ColorAdjustments colorAdjust;
         public readonly List<GameObject> shafts = new();
         public List<Light> shadowLights;
-        public const float Exposure = 2.0f;
+        public static float Exposure => Art.F("post", "exposure", 2.0f);
 
         public void Build(WorkshopLayout l)
         {
@@ -58,7 +59,7 @@ namespace WorkshopWreckage
             var room = Group("Room", Vector3.zero);
             var b = new Batch();
             b.Box(new Vector3(c.x, -0.05f, c.z), new Vector3(size.x + 1, 0.1f, size.z + 1), EnvMaterials.Concrete(), true);
-            var brick = EnvMaterials.Brick();
+            var brick = EnvMaterials.Brick(Art.C("environment", "brick_tint", Color.white));
             float t = 0.3f;
             b.Box(new Vector3(c.x, size.y / 2, lo.z - t / 2), new Vector3(size.x + 2 * t, size.y, t), brick, true);
             b.Box(new Vector3(c.x, size.y / 2, hi.z + t / 2), new Vector3(size.x + 2 * t, size.y, t), brick, true);
@@ -202,11 +203,11 @@ namespace WorkshopWreckage
             var top = EnvMaterials.Wood(new Color(0.47f, 0.31f, 0.18f));
             var frame = EnvMaterials.Wood(new Color(0.32f, 0.2f, 0.12f));
             float th = 0.07f;
-            b.Box(new Vector3(0, size.y - th / 2, 0), new Vector3(size.x, th, size.z), top, true);
+            b.Bevel(new Vector3(0, size.y - th / 2, 0), new Vector3(size.x, th, size.z), 0.018f, top, true);
             b.Box(new Vector3(0, size.y - th - 0.06f, size.z / 2 - 0.05f), new Vector3(size.x - 0.1f, 0.12f, 0.04f), frame);
             foreach (var sx in new[] { -1f, 1f })
                 foreach (var sz in new[] { -1f, 1f })
-                    b.Box(new Vector3(sx * (size.x / 2 - 0.07f), (size.y - th) / 2, sz * (size.z / 2 - 0.07f)), new Vector3(0.09f, size.y - th, 0.09f), frame, true);
+                    b.Bevel(new Vector3(sx * (size.x / 2 - 0.07f), (size.y - th) / 2, sz * (size.z / 2 - 0.07f)), new Vector3(0.09f, size.y - th, 0.09f), 0.014f, frame, true);
             if (shelf) b.Box(new Vector3(0, 0.22f, 0), new Vector3(size.x - 0.12f, 0.04f, size.z - 0.12f), frame);
             var steel = EnvMaterials.Metal(new Color(0.2f, 0.3f, 0.42f), 0.5f);
             b.Box(new Vector3(size.x / 2 - 0.35f, size.y + 0.07f, size.z / 2 - 0.15f), new Vector3(0.24f, 0.14f, 0.18f), steel);
@@ -297,22 +298,7 @@ namespace WorkshopWreckage
 
         void Sign(Transform g, Batch b, Vector3 size)
         {
-            b.Box(Vector3.zero, size, EnvMaterials.Wood(new Color(0.22f, 0.14f, 0.09f)));
-            var trim = EnvMaterials.Plain(new Color(0.7f, 0.52f, 0.25f), 1, 0.65f);
-            b.Box(new Vector3(0, size.y / 2, 0.06f), new Vector3(size.x, 0.05f, 0.03f), trim);
-            b.Box(new Vector3(0, -size.y / 2, 0.06f), new Vector3(size.x, 0.05f, 0.03f), trim);
-            var tex = TextAtlas.RenderSingle("WORKSHOP\nWRECKAGE", 1024, 300, new Color(0.22f, 0.14f, 0.09f), new Color(0.93f, 0.68f, 0.3f), 120, true);
-            b.Quad(new Vector3(0, 0, 0.056f), new Vector2(size.x * 0.95f, size.y * 0.85f), EnvMaterials.Atlas(tex), new Rect(0, 0, 1, 1));
-            // a warm sign light from above: the workshop's name always reads, even in the dim upper wall
-            var lgo = new GameObject("SignLight");
-            lgo.transform.SetParent(g, false);
-            lgo.transform.localPosition = G(0, size.y * 0.5f + 0.55f, 0.9f);
-            lgo.transform.localRotation = Quaternion.LookRotation(G(0, -0.3f, 0) - lgo.transform.localPosition);
-            var l = lgo.AddComponent<Light>();
-            l.type = LightType.Spot;
-            l.spotAngle = 95; l.innerSpotAngle = 60; l.range = 3.5f; l.intensity = 2.6f;
-            l.color = new Color(1f, 0.8f, 0.55f);
-            l.shadows = LightShadows.None;
+            WorkshopSign.Build(g, b, size);   // the official sign artwork on a slab cut to its outline, lamps, spot (shared/data/workshop_sign.json)
         }
 
         void Clock(Batch b, Vector3 size)
@@ -374,8 +360,8 @@ namespace WorkshopWreckage
             light.type = LightType.Spot;
             light.spotAngle = 112;
             light.innerSpotAngle = 58;
-            light.color = new Color(1f, 0.76f, 0.5f);
-            light.intensity = 7f;
+            light.color = Art.C("lighting", "lamp_color", new Color(1f, 0.76f, 0.5f));
+            light.intensity = Art.F("lighting", "lamp_intensity", 7f);
             light.range = 7f;
             light.shadows = lamps.Count < 3 ? LightShadows.Soft : LightShadows.None;
             lamps.Add(light);
@@ -426,6 +412,7 @@ namespace WorkshopWreckage
         /// white reflector wings, and a wide downward spot light.</summary>
         void BuildFixture(Vector3 pG, int k)
         {
+            pG = WorkshopSign.KeepFixtureClear(pG);   // the one hiding the name sign moves back into the room (workshop_sign.json)
             var g = Group("Fixture", pG);
             var b = new Batch();
             var housing = EnvMaterials.Metal(new Color(0.3f, 0.34f, 0.31f), 0.2f);
@@ -453,11 +440,11 @@ namespace WorkshopWreckage
             light.spotAngle = 140;
             light.innerSpotAngle = 56;
             light.range = 10f;
-            light.intensity = 10f;
-            light.color = new Color(1f, 0.84f, 0.64f);
+            light.intensity = Art.F("lighting", "fixture_intensity", 10f);
+            light.color = Art.C("lighting", "fixture_color", new Color(1f, 0.84f, 0.64f));
             // only a few fixtures cast shadows (performance: shadowed spot lights are the expensive part)
             light.shadows = k < 3 ? LightShadows.Soft : LightShadows.None;
-            light.shadowStrength = 0.7f;
+            light.shadowStrength = Art.F("lighting", "fixture_shadow_strength", 0.7f);
             lamps.Add(light);
         }
 
@@ -567,8 +554,8 @@ namespace WorkshopWreckage
             var go = new GameObject("Sun");
             sun = go.AddComponent<Light>();
             sun.type = LightType.Directional;
-            sun.color = new Color(1f, 0.74f, 0.46f);   // late-afternoon gold through the windows
-            sun.intensity = 3.8f;
+            sun.color = Art.C("lighting", "sun_color", new Color(1f, 0.74f, 0.46f));   // late-afternoon gold through the windows
+            sun.intensity = Art.F("lighting", "sun_intensity", 3.8f);
             sun.shadows = LightShadows.Soft;
             // Godot: Basis.from_euler(-32°, -75°) (YXZ); the light shines along -Z.
             var gdir = Quaternion.AngleAxis(-75f, Vector3.up) * Quaternion.AngleAxis(-32f, Vector3.right) * Vector3.back;
@@ -578,14 +565,15 @@ namespace WorkshopWreckage
             // light comes from above (fixtures, windows): up-facing surfaces get the most ambient
             RenderSettings.ambientMode = AmbientMode.Trilight;
             // cool bounce light from the windows against the warm lamps: the look's warm / cool contrast
-            RenderSettings.ambientSkyColor = new Color(0.5f, 0.56f, 0.62f) * 0.9f;
-            RenderSettings.ambientEquatorColor = new Color(0.42f, 0.4f, 0.38f) * 0.42f;
-            RenderSettings.ambientGroundColor = new Color(0.28f, 0.25f, 0.22f) * 0.18f;
+            // (art pass: warmer and brighter, the ground term lifts the ceiling and the undersides out of black)
+            RenderSettings.ambientSkyColor = Art.C("lighting", "ambient_sky", new Color(0.5f, 0.56f, 0.62f) * 0.9f);
+            RenderSettings.ambientEquatorColor = Art.C("lighting", "ambient_equator", new Color(0.42f, 0.4f, 0.38f) * 0.42f);
+            RenderSettings.ambientGroundColor = Art.C("lighting", "ambient_ground", new Color(0.28f, 0.25f, 0.22f) * 0.18f);
             // dusty air: a warm haze gives the long room depth
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
-            RenderSettings.fogColor = new Color(0.46f, 0.39f, 0.31f);
-            RenderSettings.fogDensity = 0.018f;
+            RenderSettings.fogColor = Art.C("lighting", "fog_color", new Color(0.46f, 0.39f, 0.31f));
+            RenderSettings.fogDensity = Art.F("lighting", "fog_density", 0.018f);
             // Godot adds screen-space indirect light (SSIL); URP has none, so ambient is a bit stronger.
             // (trilight ambient set above; the fixtures carry the room)
             RenderSettings.reflectionIntensity = 0.3f;
@@ -618,32 +606,34 @@ namespace WorkshopWreckage
             var tm = profile.Add<Tonemapping>(true);
             tm.mode.Override(TonemappingMode.ACES);
             bloom = profile.Add<Bloom>(true);
-            bloom.intensity.Override(0.7f);
-            bloom.threshold.Override(1.0f);
-            bloom.scatter.Override(0.75f);
-            bloom.tint.Override(new Color(1f, 0.86f, 0.7f));
+            bloom.intensity.Override(Art.F("post", "bloom_intensity", 0.7f));
+            bloom.threshold.Override(Art.F("post", "bloom_threshold", 1.0f));
+            bloom.scatter.Override(Art.F("post", "bloom_scatter", 0.75f));
+            bloom.tint.Override(Art.C("post", "bloom_tint", new Color(1f, 0.86f, 0.7f)));
             // the look: worn industrial film. Slightly desaturated, firm contrast, teal shadows and
             // amber highlights (rust against blueprint), fine grain, a soft vignette
             var ca = colorAdjust = profile.Add<ColorAdjustments>(true);
-            ca.saturation.Override(-6f);
-            ca.contrast.Override(10f);
+            // (art pass: warmer and richer, the teal shadows pulled back to a faint cool)
+            ca.saturation.Override(Art.F("post", "saturation", -6f));
+            ca.contrast.Override(Art.F("post", "contrast", 10f));
             ca.postExposure.Override(Exposure);
             var wb = profile.Add<WhiteBalance>(true);
-            wb.temperature.Override(2f);
+            wb.temperature.Override(Art.F("post", "temperature", 2f));
             var split = profile.Add<SplitToning>(true);
-            split.shadows.Override(new Color(0.32f, 0.5f, 0.56f));
-            split.highlights.Override(new Color(0.96f, 0.74f, 0.48f));
-            split.balance.Override(-12f);
+            split.shadows.Override(Art.C("post", "split_shadows", new Color(0.32f, 0.5f, 0.56f)));
+            split.highlights.Override(Art.C("post", "split_highlights", new Color(0.96f, 0.74f, 0.48f)));
+            split.balance.Override(Art.F("post", "split_balance", -12f));
             grain = profile.Add<FilmGrain>(true);
             grain.type.Override(FilmGrainLookup.Thin1);
-            grain.intensity.Override(0.16f);
+            grain.intensity.Override(Art.F("post", "film_grain", 0.16f));
             grain.response.Override(0.85f);
             var vig = vignette = profile.Add<Vignette>(true);
-            vig.intensity.Override(0.3f);
+            vig.intensity.Override(Art.F("post", "vignette", 0.3f));
             vig.smoothness.Override(0.5f);
             var smh = profile.Add<ShadowsMidtonesHighlights>(true);
             smh.shadows.Override(new Vector4(0.96f, 0.98f, 1.04f, -0.04f));   // slightly cool, deep shadows
-            smh.highlights.Override(new Vector4(1.04f, 1.0f, 0.95f, 0f));   // warm highlights
+            var hl = Art.C("post", "highlights_tint", new Color(1.04f, 1.0f, 0.95f));
+            smh.highlights.Override(new Vector4(hl.r, hl.g, hl.b, 0f));   // warm highlights
             vol.profile = profile;
 
             // no environment reflections: no realtime probe (cheaper), and metals only pick up a
