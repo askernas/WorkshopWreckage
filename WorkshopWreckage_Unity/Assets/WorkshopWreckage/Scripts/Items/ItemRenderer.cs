@@ -35,6 +35,10 @@ namespace WorkshopWreckage
         /// extent of its instances, m). Null, as in the game, draws every part at MeshLibrary.LodWorld.</summary>
         public static System.Func<string, float, int> WorldLod;
 
+        /// <summary>The visual sandbox's wear levels: an instance's skin condition (world, instance id, definition,
+        /// condition) -> condition. Null, as in the game, keeps the catalogue's condition.</summary>
+        public static System.Func<ItemWorld, int, ItemDefinition, float, float> SkinCondition;
+
         public ItemWorld world;
         readonly Dictionary<(string, bool), Group> _groups = new();
         int[] _group;      // instance -> group index into _groupList
@@ -119,6 +123,7 @@ namespace WorkshopWreckage
                     custom.z = fresh ? custom.z * 0.15f : Mathf.Clamp01(0.45f + custom.z * 0.8f + 0.25f * Rand01(id * 7 + 3));
                     custom.w = Rand01(id * 13 + 1);
                     float cond = ItemSkins.Applies(def) ? Mathf.Clamp01(ItemSkins.Condition(def) + 0.08f * (Rand01(id * 7 + 3) - 0.5f)) : custom.z;   // skins: the catalogue's condition, a little per instance
+                    if (SkinCondition != null && ItemSkins.Applies(def)) cond = SkinCondition(w, id, def, cond);
                     var (sa, sb) = ItemSkins.For(def, cond);
                     data[(offset + k) * 4] = new Vector4(lin.r, lin.g, lin.b, ItemAppearance.SurfaceClass(def));
                     data[(offset + k) * 4 + 1] = custom;

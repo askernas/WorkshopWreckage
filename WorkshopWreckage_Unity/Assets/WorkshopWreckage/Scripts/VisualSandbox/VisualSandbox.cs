@@ -33,10 +33,12 @@ namespace WorkshopWreckage.Sandbox
         Bounds _roomBox;
         SandboxItems.Entry _selected;
         string _status = "";
-        int _shotW = 1920, _shotH = 1080, _abOther = 1;
+        int _shotW = 1920, _shotH = 1080, _abOther = VisualStyleController.VariantB;
         bool _panel = true, _labels = true, _secView = true, _secGallery = true, _secPile = true, _secStyle = true, _secShot = true;
         bool _pileLocked, _allSliders;
         int _geomQ;   // the geometry quality the items are drawn at
+        int _geomV = 1;   // and the shape-mesh version (1 = BP1, 2 = iteration 3)
+        bool _wearLv, _allSpoked;   // iteration 3 wear levels on the instances; QA: every 24+ tooth gear spoked
         Vector2 _scroll;
         Rect _panelRect;
         string _seedText = "1";
@@ -72,7 +74,8 @@ namespace WorkshopWreckage.Sandbox
             _gallery = new ObjectGallery(_g.db, _galleryItems, GalleryOrigin);
             _pile = new PileGenerator(_g.db, _pileItems, PileCentre);
             _style = new VisualStyleController();
-            ItemRenderer.WorldLod = (key, size) => VisualStyleController.LodFor(key, size, _geomQ);
+            ItemRenderer.WorldLod = (key, size) => VisualStyleController.LodFor(key, size, _geomQ, _geomV, _allSpoked);
+            ItemRenderer.SkinCondition = SkinCondition;
             MeshLibrary.Extra = ShapeMeshes.Build;
             var cfg = File.Exists(SettingsPath) ? Shared.ReadObject(SettingsPath) : new Dictionary<string, object>();
             LoadSettings(cfg);
@@ -105,6 +108,7 @@ namespace WorkshopWreckage.Sandbox
         void OnDestroy()
         {
             ItemRenderer.WorldLod = null;
+            ItemRenderer.SkinCondition = null;
             MeshLibrary.Extra = null;
             _draws.Dispose(); _batches.Dispose(); _setPass.Dispose(); _tris.Dispose(); _gcAlloc.Dispose();
         }
@@ -167,7 +171,7 @@ namespace WorkshopWreckage.Sandbox
 
         // ---------------------------------------------------------------- camera
 
-        static readonly string[] CamNames = { "", "gallery overview", "gallery close-up", "pile overview", "pile close-up", "low-angle pile", "geometry test set", "test gear close-up" };
+        static readonly string[] CamNames = { "", "gallery overview", "gallery close-up", "pile overview", "pile close-up", "low-angle pile", "geometry test set", "test gear close-up", "wear levels" };
 
         /// <summary>The nearest eye along `dir` from the box's centre that still sees all of the box (8% margin).</summary>
         Vector3 FitEye(Bounds b, Vector3 dir)
@@ -201,6 +205,7 @@ namespace WorkshopWreckage.Sandbox
                 case 5: _cam.Place(pc + new Vector3(-0.55f, 0.1f, -1.05f), pc + Vector3.up * 0.16f, CamNames[5]); break;
                 case 6: { var tb = _testSet.bounds; _cam.Place(FitEye(tb, new Vector3(0, 0.5f, 0.85f)), tb.center, CamNames[6]); break; }
                 case 7: { var fb = _testSet.first; _cam.Place(fb.center + new Vector3(-0.35f, 0.75f, 0.9f) * Mathf.Max(0.15f, fb.extents.magnitude * 2.2f), fb.center, CamNames[7]); break; }
+                case 8: { var wb = _testSet.wearBounds; _cam.Place(FitEye(wb, new Vector3(0, 0.75f, 0.66f)), wb.center, CamNames[8]); break; }
                 default:
                     _cam.Place(FitEye(gb, new Vector3(0, 0.62f, -0.78f)), gb.center, CamNames[1]); break;
             }
@@ -218,10 +223,11 @@ namespace WorkshopWreckage.Sandbox
             {
                 if (kb.tabKey.wasPressedThisFrame) _panel = !_panel;
                 if (kb.digit1Key.wasPressedThisFrame) SelectStyle(0);   // BASELINE
-                if (kb.digit2Key.wasPressedThisFrame) SelectStyle(VisualStyleController.VariantB);
-                if (kb.digit3Key.wasPressedThisFrame) SelectStyle(2);
+                if (kb.digit2Key.wasPressedThisFrame) SelectStyle(VisualStyleController.Bp1);
+                if (kb.digit3Key.wasPressedThisFrame) SelectStyle(VisualStyleController.VariantB);
                 if (kb.digit4Key.wasPressedThisFrame) SelectStyle(3);
                 if (kb.digit5Key.wasPressedThisFrame) SelectStyle(4);
+                if (kb.digit6Key.wasPressedThisFrame) SelectStyle(5);
                 if (kb.f1Key.wasPressedThisFrame) CameraPreset(1);
                 if (kb.f2Key.wasPressedThisFrame) CameraPreset(2);
                 if (kb.f3Key.wasPressedThisFrame) CameraPreset(3);
@@ -229,6 +235,7 @@ namespace WorkshopWreckage.Sandbox
                 if (kb.f5Key.wasPressedThisFrame) CameraPreset(5);
                 if (kb.f6Key.wasPressedThisFrame) CameraPreset(6);
                 if (kb.f7Key.wasPressedThisFrame) CameraPreset(7);
+                if (kb.f8Key.wasPressedThisFrame) CameraPreset(8);
                 if (kb.fKey.wasPressedThisFrame && _selected != null) _cam.Focus(_selected.centre, Mathf.Max(0.12f, _selected.radius * 3.2f), "focus " + _selected.def.displayName);
                 if (kb.gKey.wasPressedThisFrame) FocusGallery();
                 if (kb.pKey.wasPressedThisFrame) FocusPile();
@@ -247,11 +254,55 @@ namespace WorkshopWreckage.Sandbox
         void ApplyStyle()
         {
             _style.Apply(_light);
-            if (_style.GeometryQuality == _geomQ) return;
+            if (_style.GeometryQuality == _geomQ && _style.GeometryVersion == _geomV && _style.WearLevels == _wearLv) return;
             _geomQ = _style.GeometryQuality;
+            _geomV = _style.GeometryVersion;
+            _wearLv = _style.WearLevels;
+            Redraw();
+        }
+
+        /// <summary>The same items in the same places with the current meshes and per-instance data.</summary>
+        void Redraw()
+        {
             _galleryItems.Redraw();
             _pileItems.Redraw();
             _testItems.Redraw();
+        }
+
+        /// <summary>ItemRenderer.SkinCondition: the test set's wear grid at its levels (in every style, so the grid
+        /// compares like with like); with iteration 3's wear levels on, every other part at <see cref="WearLevelCondition"/>.</summary>
+        float SkinCondition(ItemWorld w, int id, ItemDefinition def, float cond)
+        {
+            if (_testSet != null && w == _testSet.World && _testSet.wear.TryGetValue(id, out var c)) return c;
+            return _wearLv ? WearLevelCondition(def, cond) : cond;
+        }
+
+        /// <summary>Iteration 3's wear mix: per definition (deterministic, as ItemSkins.Condition) about 6 % new
+        /// (level 0), 46 % light (1), 42 % well used (2) and 6 % heavy (3), the instance's small jitter kept.
+        /// The catalogue's own conditions still win: oxidized parts stay rusty (their identity), worn parts stay
+        /// used (compressed into well used), polished and electronic parts clean, the five drive motors keep their
+        /// art-directed wear.</summary>
+        public static float WearLevelCondition(ItemDefinition def, float cond)
+        {
+            if (def.material is "oxidized" or "electronic" || def.finish == "polished" || def.geometryKey == "mach:drive_motor") return cond;
+            // worn parts stay used but mostly well used rather than heavy: 0.4-0.85 -> 0.32-0.62
+            if (def.material == "worn") return Mathf.Clamp01(0.32f + (cond - 0.4f) * (0.3f / 0.45f));
+            float r = Hash01(def.id * 7 + 11), r2 = Hash01(def.id * 13 + 5);
+            float c = r < 0.06f ? 0.02f + 0.05f * r2 : r < 0.52f ? 0.12f + 0.14f * r2 : r < 0.94f ? 0.3f + 0.2f * r2 : 0.55f + 0.2f * r2;
+            return Mathf.Clamp01(c + cond - ItemSkins.Condition(def));
+        }
+
+        /// <summary>Wear level of a skin condition: 0 new (under 0.1), 1 light, 2 well used (0.28-0.52), 3 heavy.</summary>
+        public static int WearLevel(float c) => c < 0.1f ? 0 : c < 0.28f ? 1 : c < 0.52f ? 2 : 3;
+
+        static float Hash01(int x)   // as ItemSkins.Hash01
+        {
+            unchecked
+            {
+                uint h = (uint)x * 2654435761u;
+                h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+                return (h & 0xffff) / 65535f;
+            }
         }
 
         void SelectStyle(int k)
@@ -325,10 +376,12 @@ namespace WorkshopWreckage.Sandbox
         /// <summary>A/B: the current style and the other one, same frame, side by side in one image. Each style gets
         /// two frames before its capture: the items are drawn from Update, so a geometry-quality switch only reaches
         /// the screen (and an off-screen render) on the next frame.</summary>
-        public IEnumerator ShotAB(string stem = null, Action<string> done = null)
+        public IEnumerator ShotAB(string stem = null, Action<string> done = null, int left = -1, int right = -1)
         {
             Directory.CreateDirectory(OutDir);
-            int a = _style.current, b = a == 0 ? _abOther : 0;
+            int s0 = _style.current;
+            if (left >= 0 && left != s0) { _style.current = left; ApplyStyle(); }
+            int a = _style.current, b = right >= 0 ? right : a == 0 ? _abOther : 0;
             stem ??= $"{DateTime.Now:yyyyMMdd_HHmmss}_AB_{_style.presets[a].id}_vs_{_style.presets[b].id}_{SandboxLighting.Presets[_light.current].id}";
             yield return null; yield return null;
             var ta = Render(_shotW, _shotH);
@@ -337,7 +390,7 @@ namespace WorkshopWreckage.Sandbox
             yield return null; yield return null;
             var tb = Render(_shotW, _shotH);
             meta["style_right"] = _style.Style.ToDict();
-            _style.current = a; ApplyStyle();
+            _style.current = s0; ApplyStyle();
             var both = new Texture2D(_shotW * 2 + 8, _shotH, TextureFormat.RGB24, false);
             var fill = new Color32[both.width * both.height];
             Array.Fill(fill, new Color32(20, 20, 20, 255));
@@ -405,23 +458,27 @@ namespace WorkshopWreckage.Sandbox
             }
             if (_g.args.ContainsKey("sbab"))
             {
-                _abOther = VisualStyleController.VariantB;
+                // BASELINE | iteration 3 and BP1 | iteration 3, same camera, items, lighting and seed
+                const int B = VisualStyleController.VariantB, P = VisualStyleController.Bp1;
                 foreach (var k in shots)
                 {
                     CameraPreset(k);
                     for (int i = 0; i < 4; i++) yield return null;
-                    yield return ShotAB($"ab_{k}_{CamNames[k].Replace(' ', '-')}", p => log.Add("ab " + p));
+                    yield return ShotAB($"ab_{k}_{CamNames[k].Replace(' ', '-')}", p => log.Add("ab baseline|it3 " + p), 0, B);
+                    yield return ShotAB($"bp1_{k}_{CamNames[k].Replace(' ', '-')}", p => log.Add("ab bp1|it3 " + p), P, B);
                 }
-                // switching styles (and geometry quality) must leave every item where it was
-                var before = _pileItems.world.instances.Select(x => x.transform).Concat(_galleryItems.world.instances.Select(x => x.transform)).ToList();
+                // switching styles (geometry quality, version, wear levels) must leave every item where it was
+                var before = _pileItems.world.instances.Concat(_galleryItems.world.instances).Concat(_testItems.world.instances).Select(x => x.transform).ToList();
                 int s0 = _style.current;
-                SelectStyle(VisualStyleController.VariantB); yield return null;
-                long trisB = _galleryItems.Triangles() + _pileItems.Triangles();
-                SelectStyle(0); yield return null;
-                long trisA = _galleryItems.Triangles() + _pileItems.Triangles();
+                var tris = new List<string>();
+                foreach (var st in new[] { P, B, 0 })
+                {
+                    SelectStyle(st); yield return null;
+                    tris.Add($"{_style.Style.name} {_galleryItems.Triangles() + _pileItems.Triangles():N0}");
+                }
                 SelectStyle(s0);
-                var after = _pileItems.world.instances.Select(x => x.transform).Concat(_galleryItems.world.instances.Select(x => x.transform)).ToList();
-                log.Add($"style switch BASELINE <-> VARIANT B: {before.Count} item transforms unchanged: {before.SequenceEqual(after)}; item triangles baseline {trisA:N0}, variant B {trisB:N0}");
+                var after = _pileItems.world.instances.Concat(_galleryItems.world.instances).Concat(_testItems.world.instances).Select(x => x.transform).ToList();
+                log.Add($"style switch BASELINE / BP1 / IT.3: {before.Count} item transforms unchanged: {before.SequenceEqual(after)}; item triangles (gallery + pile): {string.Join(", ", tris)}");
             }
             var t0 = Time.realtimeSinceStartup;
             _pile.Regenerate();
@@ -438,12 +495,13 @@ namespace WorkshopWreckage.Sandbox
             log.Add("stats " + _stats.Replace("\n", " | "));
             log.Add("room " + _roomBox.min.ToString("0.00") + " .. " + _roomBox.max.ToString("0.00") + "; test set at " + _testSet.bounds.center.ToString("0.00"));
             log.AddRange(_testSet.log.Select(l => "test set " + l));
-            foreach (var st in new[] { 0, VisualStyleController.VariantB })
+            foreach (var st in new[] { 0, VisualStyleController.Bp1, VisualStyleController.VariantB })
             {
                 SelectStyle(st);
-                log.Add($"test set meshes ({_style.Style.name}, quality {_geomQ}): " + string.Join(", ", _testItems.entries.Select(e => { var m = _testItems.itemRenderer.WorldMeshFor(e.id); return $"{m.name} {m.vertexCount}v"; })));
+                log.Add($"test set meshes ({_style.Style.name}, quality {_geomQ}, version {_geomV}): " + string.Join(", ", _testItems.entries.Select(e => { var m = _testItems.itemRenderer.WorldMeshFor(e.id); return $"{m.name} {m.vertexCount}v"; })));
             }
             SelectStyle(0);
+            log.AddRange(WearMix());
             log.AddRange(GeometryTestSet.Audit(_g.db));
             if (_g.args.TryGetValue("sbdense", out var dn)) yield return Dense(int.Parse(dn), log);
             File.WriteAllLines(Path.Combine(dir, "sandbox_auto.txt"), log);
@@ -452,8 +510,31 @@ namespace WorkshopWreckage.Sandbox
             Application.Quit();
         }
 
+        /// <summary>The catalogue's wear levels (skinned definitions, no instance jitter): as the game has them and
+        /// with iteration 3's wear mix; and the gear designs, solid against spoked, in BP1 and iteration 3.</summary>
+        List<string> WearMix()
+        {
+            var defs = _g.db.order.Select(_g.db.Get).Where(d => d != null && !string.IsNullOrEmpty(d.geometryKey) && ItemSkins.Applies(d)).ToList();
+            int[] a = new int[4], b = new int[4];
+            foreach (var d in defs) { float c = ItemSkins.Condition(d); a[WearLevel(c)]++; b[WearLevel(WearLevelCondition(d, c))]++; }
+            string P(int[] n) => string.Join(", ", n.Select((x, i) => $"L{i} {x} ({100f * x / defs.Count:0}%)"));
+            var o = new List<string> { $"wear levels of {defs.Count} skinned definitions: catalogue {P(a)}; iteration 3 {P(b)}" };
+            // the same split by material: the identities iteration 3 keeps (rusty, worn, electronic, polished) apart
+            foreach (var g in defs.GroupBy(d => d.material is "oxidized" or "worn" or "electronic" ? d.material : d.finish == "polished" ? "polished" : "other").OrderBy(g => g.Key))
+            {
+                int[] n = new int[4];
+                foreach (var d in g) n[WearLevel(WearLevelCondition(d, ItemSkins.Condition(d)))]++;
+                o.Add($"  iteration 3 wear levels, {g.Key} ({g.Count()}): " + string.Join(", ", n.Select((x, i) => $"L{i} {x} ({100f * x / g.Count():0}%)")));
+            }
+            var gears = defs.Where(d => d.geometryKey.StartsWith("gear:")).ToList();
+            int Spk(int v) => gears.Count(d => { var p = d.geometryKey.Split(':'); int t = p.Length > 2 && p[2].StartsWith("t") && int.TryParse(p[2].Substring(1), out var x) ? x : 0; return ShapeMeshes.Spoked(d.geometryKey, p[1], t, v); });
+            o.Add($"gear definitions: {gears.Count}; spoked in BP1 {Spk(1)} ({100f * Spk(1) / gears.Count:0}%), in iteration 3 {Spk(2)} ({100f * Spk(2) / gears.Count:0}%)");
+            return o;
+        }
+
         /// <summary>--sbdense=N: a pile of N parts, then the mean frame time over 180 frames (no captures, vsync off)
-        /// in BASELINE and in VARIANT B from the pile overview.</summary>
+        /// in BASELINE, BP1, iteration 3, iteration 3 with every 24+ tooth gear spoked, and iteration 3's materials on
+        /// BP1's meshes (isolates the shader's cost from the geometry's), from the pile overview.</summary>
         IEnumerator Dense(int n, List<string> log)
         {
             int vs = QualitySettings.vSyncCount, fr = Application.targetFrameRate;
@@ -462,20 +543,27 @@ namespace WorkshopWreckage.Sandbox
             _pile.cfg.count = n; _pile.cfg.radius = Mathf.Max(radius, 0.35f + 0.05f * Mathf.Sqrt(n));
             _pile.Regenerate();
             CameraPreset(3);
-            foreach (var k in new[] { 0, VisualStyleController.VariantB, 0, VisualStyleController.VariantB })
+            const int B = VisualStyleController.VariantB, P = VisualStyleController.Bp1;
+            foreach (var (k, spokes, v1) in new[] { (0, false, false), (P, false, false), (B, false, false), (B, true, false), (B, false, true),
+                                                     (0, false, false), (P, false, false), (B, false, false), (B, true, false), (B, false, true) })
             {
                 SelectStyle(k);
+                if (spokes != _allSpoked) { _allSpoked = spokes; Redraw(); }
+                if (v1) { _geomV = 1; Redraw(); }
                 for (int i = 0; i < 30; i++) yield return null;
                 float t0 = Time.realtimeSinceStartup;
                 for (int i = 0; i < 180; i++) yield return null;
                 float ms = (Time.realtimeSinceStartup - t0) / 180 * 1000;
                 Stats();
-                log.Add($"dense pile {_pile.settled.Count} parts, {_style.Style.name}: {ms:0.00} ms/frame; {_stats.Replace("\n", " | ")}");
+                log.Add($"dense pile {_pile.settled.Count} parts, {_style.Style.name}{(spokes ? " (every 24+ tooth gear spoked)" : "")}{(v1 ? " (on BP1 meshes)" : "")}: {ms:0.00} ms/frame; {_stats.Replace("\n", " | ")}");
             }
-            Shot($"dense_{n}_variant_b");
-            SelectStyle(0);
-            yield return null; yield return null;
-            Shot($"dense_{n}_baseline");
+            _allSpoked = false; _geomV = _style.GeometryVersion; Redraw();
+            foreach (var (k, name) in new[] { (B, "it3"), (P, "bp1"), (0, "baseline") })
+            {
+                SelectStyle(k);
+                yield return null; yield return null;
+                Shot($"dense_{n}_{name}");
+            }
             _pile.cfg.count = count; _pile.cfg.radius = radius;
             QualitySettings.vSyncCount = vs; Application.targetFrameRate = fr;
         }
@@ -509,7 +597,7 @@ namespace WorkshopWreckage.Sandbox
             GUILayout.BeginArea(_panelRect, GUI.skin.box);
             _scroll = GUILayout.BeginScrollView(_scroll);
             GUILayout.Label("<b>VISUAL SANDBOX</b>   " + _g.presetId, _head);
-            GUILayout.Label("1 BASELINE · 2 VARIANT B · 3-5 EXP A-C · F1-F5 cameras · F6/F7 geometry test set · RMB look/orbit · WASD QE move · wheel speed/zoom · click select · F focus · G gallery · P pile · R regenerate · T A/B · L labels · F12 shot · Tab hide", _label);
+            GUILayout.Label("1 BASELINE · 2 BP1 · 3 VARIANT B IT.3 · 4-6 EXP A-C · F1-F5 cameras · F6/F7 geometry test set · F8 wear levels · RMB look/orbit · WASD QE move · wheel speed/zoom · click select · F focus · G gallery · P pile · R regenerate · T A/B · L labels · F12 shot · Tab hide", _label);
 
             if (Section(ref _secView, "View"))
             {
@@ -578,7 +666,9 @@ namespace WorkshopWreckage.Sandbox
                 for (int k = 0; k < _style.presets.Count; k++)
                     if (GUILayout.Toggle(_style.current == k, ShortName(k), GUI.skin.button) && _style.current != k) SelectStyle(k);
                 GUILayout.EndHorizontal();
-                if (!_style.CanEdit) GUILayout.Label("<size=11>BASELINE is the game as it is: pick VARIANT B or an experiment to edit</size>", _label);
+                if (!_style.CanEdit) GUILayout.Label(_style.current == VisualStyleController.Bp1
+                    ? "<size=11>BP1 is the frozen iteration 2 reference (docs/VISUAL_BP1.md): pick VARIANT B IT.3 or an experiment to edit</size>"
+                    : "<size=11>BASELINE is the game as it is: pick VARIANT B or an experiment to edit</size>", _label);
                 bool compact = _style.current == VisualStyleController.VariantB && !_allSliders;
                 GUI.enabled = _style.CanEdit;
                 bool changed = false;
@@ -624,7 +714,7 @@ namespace WorkshopWreckage.Sandbox
             GUILayout.EndArea();
         }
 
-        string ShortName(int k) => _style.presets[k].name.Replace("EXPERIMENT ", "EXP ").Replace("VARIANT ", "VAR ");
+        string ShortName(int k) => _style.presets[k].name.Replace(" (VARIANT B IT.2)", "").Replace("EXPERIMENT ", "EXP ").Replace("VARIANT ", "VAR ");
 
         static long Tris(Mesh m)
         {

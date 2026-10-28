@@ -47,17 +47,37 @@ namespace WorkshopWreckage.Sandbox
             new() { key = "edge_polish", label = "Metal edge polish", min = 0, max = 1 },
             new() { key = "light_shaping", label = "Light shaping", min = 0, max = 1, note = "shadow detail and highlight control on the preset's lighting" },
             new() { key = "geometry_quality", label = "Geometry quality", min = 0, max = 2, note = "0 world meshes; 1 Variant B shape meshes from 2.5 cm (hero from 15 cm); 2 from 1.5 cm (hero from 10 cm); rebuilds meshes" },
+            // iteration 3 "material character" terms: 0 = off, as in BP1 and the game
+            new() { key = "geometry_version", label = "Geometry version", min = 0, max = 2, note = "0-1 BP1 shapes; 2 iteration 3 (solid gears keep their identity, compact tier for small parts)" },
+            new() { key = "wear_levels", label = "Wear levels", min = 0, max = 1, note = "1: parts at wear 0-3 (few new, most light / well used, few heavy); chips scale with the level" },
+            new() { key = "paint_variation", label = "Paint imperfections", min = 0, max = 1, note = "tone and gloss variation, orange peel, faded tops" },
+            new() { key = "scratches", label = "Scratches", min = 0, max = 1, note = "fine scratches through paint and on bare metal, by wear level" },
+            new() { key = "rust_selective", label = "Rust (exposed steel only)", min = 0, max = 1, note = "chips, scratches, thread roots, joints; never on paint, brass, rubber" },
+            new() { key = "metal_character", label = "Metal character", min = 0, max = 1, note = "machined, cast, brushed, brass and rubber read apart" },
+            new() { key = "chrome_limit", label = "Chrome limit", min = 0, max = 1, note = "the highest smoothness bright metal reaches (0 = no limit)" },
         };
 
         /// <summary>The controls Variant B's compact panel shows (the rest stay under "all sliders").</summary>
-        public static readonly string[] VariantBKeys = { "paint_smoothness", "roughness_variation", "metal_response", "paint_wear", "rust", "edge_highlight", "edge_polish", "ambient_occlusion", "env_reflection", "light_shaping", "contrast", "geometry_quality" };
+        public static readonly string[] VariantBKeys = { "paint_smoothness", "roughness_variation", "metal_response", "paint_wear", "rust", "edge_highlight", "edge_polish", "ambient_occlusion", "env_reflection", "light_shaping", "contrast", "geometry_quality",
+            "geometry_version", "wear_levels", "paint_variation", "scratches", "rust_selective", "metal_character", "chrome_limit" };
 
-        /// <summary>Variant B's defaults (Reset), the starting point of styles/variant_b.json.</summary>
-        public static readonly Dictionary<string, float> VariantBDefaults = new()
+        /// <summary>BP1 (Variant B iteration 2, tag visual-bp1): the values of styles/bp1.json, frozen. Every later
+        /// term stays 0.</summary>
+        public static readonly Dictionary<string, float> Bp1Defaults = new()
         {
             ["saturation"] = 0.05f, ["contrast"] = 4, ["edge_highlight"] = 0.3f, ["paint_wear"] = 0.4f, ["ambient_occlusion"] = 0.15f,
             ["paint_smoothness"] = 0.5f, ["roughness_variation"] = 0.1f, ["metal_response"] = 0.85f, ["rust"] = 0.45f,
-            ["env_reflection"] = 0.6f, ["edge_polish"] = 0.6f, ["light_shaping"] = 0.6f, ["geometry_quality"] = 1,
+            ["env_reflection"] = 0.6f, ["edge_polish"] = 0.6f, ["light_shaping"] = 0.6f, ["geometry_quality"] = 1, ["geometry_version"] = 1,
+        };
+
+        /// <summary>Variant B's defaults (Reset), the starting point of styles/variant_b.json: iteration 3 on top of
+        /// BP1 (its broad rust replaced by the selective one).</summary>
+        public static readonly Dictionary<string, float> VariantBDefaults = new()
+        {
+            ["saturation"] = 0.05f, ["contrast"] = 4, ["edge_highlight"] = 0.3f, ["paint_wear"] = 0.4f, ["ambient_occlusion"] = 0.15f,
+            ["paint_smoothness"] = 0.5f, ["roughness_variation"] = 0.1f, ["metal_response"] = 0.85f, ["rust"] = 0,
+            ["env_reflection"] = 0.6f, ["edge_polish"] = 0.6f, ["light_shaping"] = 0.6f, ["geometry_quality"] = 1, ["geometry_version"] = 2,
+            ["wear_levels"] = 1, ["paint_variation"] = 0.6f, ["scratches"] = 0.6f, ["rust_selective"] = 0.6f, ["metal_character"] = 0.8f, ["chrome_limit"] = 0.72f,
         };
 
         public string id = "baseline", name = "BASELINE";
@@ -102,11 +122,12 @@ namespace WorkshopWreckage.Sandbox
     }
 
     /// <summary>Applies a VisualStyle: the item shader's globals as the game's baseline plus the style's offsets,
-    /// the sandbox lighting's contrast and shadows. Holds the four presets (BASELINE, EXPERIMENT A-C).</summary>
+    /// the sandbox lighting's contrast and shadows. Holds the presets (BASELINE, BP1, VARIANT B, EXPERIMENT A-C);
+    /// BASELINE and BP1 are read-only.</summary>
     public class VisualStyleController
     {
-        public static readonly (string id, string name)[] Slots = { ("baseline", "BASELINE"), ("variant_b", "VARIANT B"), ("experiment_a", "EXPERIMENT A"), ("experiment_b", "EXPERIMENT B"), ("experiment_c", "EXPERIMENT C") };
-        public const int VariantB = 1;
+        public static readonly (string id, string name)[] Slots = { ("baseline", "BASELINE"), ("bp1", "BP1 (VARIANT B IT.2)"), ("variant_b", "VARIANT B IT.3"), ("experiment_a", "EXPERIMENT A"), ("experiment_b", "EXPERIMENT B"), ("experiment_c", "EXPERIMENT C") };
+        public const int Bp1 = 1, VariantB = 2;
 
         static readonly string[] ArtGlobals = { "_WWArtSat", "_WWArtRough", "_WWArtMetal", "_WWArtGloss", "_WWArtEdge", "_WWArtWash", "_WWArtEdgeWear", "_WWArtRim", "_WWArtAmbient" };
         readonly Dictionary<string, float> _baseline = new();
@@ -134,13 +155,14 @@ namespace WorkshopWreckage.Sandbox
                 if (!File.Exists(path))
                 {
                     if (k == VariantB) foreach (var kv in VisualStyle.VariantBDefaults) s[kv.Key] = kv.Value;
+                    if (k == Bp1) foreach (var kv in VisualStyle.Bp1Defaults) s[kv.Key] = kv.Value;
                     s.Save(path);
                 }
                 presets.Add(s);
             }
         }
 
-        public bool CanEdit => current > 0;
+        public bool CanEdit => current > 0 && current != Bp1;   // BP1 is a reference: never edited
 
         public void Save() { if (CanEdit) Style.Save(Path.Combine(Dir, Style.id + ".json")); }
 
@@ -165,18 +187,29 @@ namespace WorkshopWreckage.Sandbox
         /// <summary>The style's geometry quality, 0-2 (whole steps).</summary>
         public int GeometryQuality => Mathf.Clamp(Mathf.RoundToInt(Style["geometry_quality"]), 0, 2);
 
+        /// <summary>The style's shape-mesh version: 1 = BP1 (also for 0, files older than the parameter), 2 = iteration 3.</summary>
+        public int GeometryVersion => Mathf.Clamp(Mathf.RoundToInt(Style["geometry_version"]), 1, 2);
+
+        public bool WearLevels => Style["wear_levels"] > 0.5f;
+
         /// <summary>For ItemRenderer.WorldLod. Quality 1-2: the procedural part families get the Variant B shape meshes
         /// (ShapeMeshes: 32-72 segments, crease normals, bevels, rebuilt gears) from 2.5 cm (1.5 cm at 2), the hero
         /// build from 15 cm (10 cm at 2); smaller parts keep the world mesh (nothing tiny is subdivided). Robot parts
         /// and the pegboard's tools never change. Anything else that is round gets the 14-16 segment inspect mesh as
-        /// in iteration 1.</summary>
-        public static int LodFor(string key, float size, int quality)
+        /// in iteration 1.
+        /// Version 2 (iteration 3) adds a compact tier for small parts (under 10 cm, 7 cm at quality 2) and keeps the hero tier for big parts
+        /// (25 cm and up, 16 cm at quality 2): HERO / STANDARD /
+        /// DISTANT by the part's size, per geometry group, so a mesh never changes with the camera (no popping).</summary>
+        public static int LodFor(string key, float size, int quality, int version = 1, bool allSpoked = false)
         {
             if (quality <= 0 || key.StartsWith("robot:") || Pegboard.ToolFactory.Has(key)) return MeshLibrary.LodWorld;
             if (ShapeMeshes.Has(key))
             {
                 if (size < (quality == 1 ? 0.025f : 0.015f)) return MeshLibrary.LodWorld;
-                return size >= (quality == 1 ? 0.15f : 0.10f) ? ShapeMeshes.LodHero : ShapeMeshes.Lod;
+                float hero = version >= 2 ? (quality == 1 ? 0.25f : 0.16f) : (quality == 1 ? 0.15f : 0.10f);
+                int tier = size >= hero ? ShapeMeshes.TierHero
+                    : version >= 2 && size < (quality == 1 ? 0.10f : 0.07f) ? ShapeMeshes.TierCompact : ShapeMeshes.TierStandard;
+                return ShapeMeshes.LodOf(version, tier, allSpoked);
             }
             if (size < (quality == 1 ? 0.06f : 0.03f) || SalvageMeshes.Has(key)) return MeshLibrary.LodWorld;
             if (!_round.TryGetValue(key, out var round))
@@ -219,6 +252,15 @@ namespace WorkshopWreckage.Sandbox
             Shader.SetGlobalFloat("_WWLabRust", ru);
             Shader.SetGlobalFloat("_WWLabEnvRefl", er);
             Shader.SetGlobalFloat("_WWLabEdgePolish", ep);
+            // iteration 3 terms (inside the Variant B gate): 0 in BP1 and the game
+            float wl = s["wear_levels"] > 0.5f ? 1 : 0, pv = s["paint_variation"], sc = s["scratches"], rsel = s["rust_selective"], mc = s["metal_character"], cl = s["chrome_limit"];
+            Shader.SetGlobalFloat("_WWLabI3", wl + pv + sc + rsel + mc + cl > 0 ? 1 : 0);
+            Shader.SetGlobalFloat("_WWLabWearLv", wl);
+            Shader.SetGlobalFloat("_WWLabPaintVar", pv);
+            Shader.SetGlobalFloat("_WWLabScratch", sc);
+            Shader.SetGlobalFloat("_WWLabRustSel", rsel);
+            Shader.SetGlobalFloat("_WWLabMetalChar", mc);
+            Shader.SetGlobalFloat("_WWLabChromeCap", cl);
             lighting?.ApplyStyle(s["contrast"], s["shadow_softness"], s["light_shaping"]);
         }
     }

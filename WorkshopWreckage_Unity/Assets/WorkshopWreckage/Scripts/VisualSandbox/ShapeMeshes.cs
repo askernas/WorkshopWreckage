@@ -19,10 +19,28 @@ namespace WorkshopWreckage.Sandbox
     /// - gears: curved flanks, filleted roots and rounded tips (10-24 outline points per tooth instead of 4),
     ///   round chamfered bores, cast rims with a recessed web (20-31 teeth) or five spokes (32+) and a hub.
     /// Built in Godot space (the coordinates the shared meshes were authored in), mirrored on Z like
-    /// MeshLibrary.Load, cached per key and LOD by MeshLibrary.</summary>
+    /// MeshLibrary.Load, cached per key and LOD by MeshLibrary.
+    ///
+    /// Versions (the LOD number carries it, so both stay cached side by side and BP1 never changes):
+    /// - version 1 = BP1 (iteration 2, tag visual-bp1): LOD 2 standard, 3 hero; every spur / ratchet gear of 32+
+    ///   teeth spoked, 20-31 webbed;
+    /// - version 2 = iteration 3: LOD 4 compact (small parts: about 60 % of the segments), 5 standard, 6 hero;
+    ///   gears keep their solid identity (webbed from 20 teeth) and only the designs in <see cref="SpokedV2"/> are
+    ///   spoked (about 1 gear in 6 in the catalogue); LOD 7-9 = the same with every gear of 24+ teeth spoked
+    ///   (QA: what spokes cost).</summary>
     public static class ShapeMeshes
     {
         public const int Lod = 2, LodHero = 3;
+        public const int TierCompact = 0, TierStandard = 1, TierHero = 2;
+
+        /// <summary>The MeshLibrary LOD for a geometry version (1 = BP1, 2 = iteration 3), tier and the QA all-spoked
+        /// gear rule (version 2 only). Version 1 has no compact tier (it draws those parts standard, as BP1 did).</summary>
+        public static int LodOf(int version, int tier, bool allSpoked = false) =>
+            version <= 1 ? (tier == TierHero ? LodHero : Lod) : 4 + tier + (allSpoked ? 3 : 0);
+
+        /// <summary>Iteration 3: the gear designs that are cast with spokes (a sprocket's lightening windows); every
+        /// other gear stays a solid disc as in the game. 8 of the 50 gear definitions in the standard catalogue.</summary>
+        public static readonly HashSet<string> SpokedV2 = new() { "gear:spur:t32", "gear:sprocket:t32", "gear:sprocket:t40" };
 
         static readonly HashSet<string> Families = new() { "screw", "nut", "washer", "gear", "spring", "bearing", "shaft", "elec", "spec", "mach" };
         static readonly float[] BearingWidths = { 0.28f, 0.35f, 0.45f };
@@ -39,8 +57,11 @@ namespace WorkshopWreckage.Sandbox
 
         public static MeshLibrary.Entry Build(string key, int lod)
         {
-            if (SalvageMeshes.Has(key)) return SalvageMeshes.Build(key, lod);
-            var g = new G(lod >= LodHero);
+            int version = lod >= 4 ? 2 : 1, tier = version == 1 ? (lod >= LodHero ? TierHero : TierStandard) : (lod - 4) % 3;
+            bool allSpoked = lod >= 7;
+            // salvage parts: more segments only (24 compact, 32 standard, 48 hero, as BP1's 2 / 3)
+            if (SalvageMeshes.Has(key)) return SalvageMeshes.Build(key, tier == TierCompact ? MeshLibrary.LodInspect : tier + 1);
+            var g = new G(tier);
             var parts = key.Split(':');
             string sub = parts.Length > 1 ? parts[1] : "";
             switch (parts[0])
@@ -48,7 +69,7 @@ namespace WorkshopWreckage.Sandbox
                 case "screw": Screw(g, sub, Param(parts, "a", 3)); break;
                 case "nut": Nut(g, sub); break;
                 case "washer": Washer(g, sub); break;
-                case "gear": Gear(g, sub, (int)Param(parts, "t", 16)); break;
+                case "gear": { int t = (int)Param(parts, "t", 16); Gear(g, sub, t, Spoked(key, sub, t, version, allSpoked)); break; }
                 case "spring": Spring(g, sub, Param(parts, "c", 8), Param(parts, "l", 2)); break;
                 case "bearing": Bearing(g, sub, BearingWidths[Mathf.Clamp((int)Param(parts, "w", 1), 0, 2)]); break;
                 case "shaft": Shaft(g, sub, Param(parts, "a", 5)); break;
@@ -262,7 +283,17 @@ namespace WorkshopWreckage.Sandbox
             return o.ToArray();
         }
 
-        static void Gear(G g, string sub, int teeth)
+        /// <summary>Whether a gear is cast with spokes: BP1 (version 1) spokes every spur / ratchet of 32+ teeth;
+        /// iteration 3 only <see cref="SpokedV2"/> (or, for the QA comparison, every spur, ratchet and sprocket of
+        /// 24+ teeth).</summary>
+        public static bool Spoked(string key, string sub, int teeth, int version, bool allSpoked = false)
+        {
+            if (sub == "pinion" || sub == "bevel") return false;
+            if (version <= 1) return sub != "sprocket" && teeth >= 32;
+            return allSpoked ? teeth >= 24 : SpokedV2.Contains(key);
+        }
+
+        static void Gear(G g, string sub, int teeth, bool spoked)
         {
             float module = 1f / (teeth + 2), tip = 0.5f, root = 0.5f - 2.25f * module;
             float thick = Mathf.Clamp(6 * module, 0.08f, 0.32f);
@@ -273,7 +304,20 @@ namespace WorkshopWreckage.Sandbox
             switch (sub)
             {
                 case "sprocket":
-                    g.Prism(outer, 0, thick * 0.5f, Mathf.Min(bev, thick * 0.12f), st, boreR, boreCh * 0.6f, bs);
+                    if (!spoked)
+                    {
+                        g.Prism(outer, 0, thick * 0.5f, Mathf.Min(bev, thick * 0.12f), st, boreR, boreCh * 0.6f, bs);
+                        return;
+                    }
+                    {
+                        // a lightened sprocket plate: the toothed rim, five windows between spokes a shade thinner than
+                        // the plate (no coplanar faces where they run into the rim), the hub at full thickness
+                        float ts = thick * 0.5f, rin = root - Mathf.Max(2.6f * module, 0.055f), hb = Mathf.Max(boreR + 0.08f, 0.2f);
+                        g.Prism(outer, 0, ts, Mathf.Min(bev, ts * 0.12f), st, rin, Mathf.Min(ts * 0.15f, 0.02f), g.S(64, 96));
+                        Spokes(g, hb, rin, ts * 0.1f, ts * 0.9f, 0.085f);
+                        g.Lathe(g.RP(false, C(boreR + boreCh * 0.6f, 0), C(hb, 0, ts * 0.15f), C(hb, ts, ts * 0.15f), C(boreR + boreCh * 0.6f, ts)), bs);
+                        g.Bore(boreR, boreCh * 0.6f, 0, ts, true, true, bs);
+                    }
                     return;
                 case "pinion":
                     g.Prism(outer, 0, thick * 1.8f, bev, st, boreR, boreCh, bs, top: true);
@@ -294,18 +338,10 @@ namespace WorkshopWreckage.Sandbox
             float rimIn = root - Mathf.Max(2.2f * module, 0.05f), hub = Mathf.Max(boreR + 0.09f, 0.21f);
             float rb = Mathf.Min(thick * 0.18f, 0.03f);
             g.Prism(outer, 0, thick, bev, st, rimIn, rb, g.S(64, 96));
-            if (teeth >= 32)
+            if (spoked)
             {
                 // five spokes (an odd count reads as cast), each a rounded bar half the thickness
-                float len = rimIn - hub + 0.04f, w = 0.075f, sy0 = thick * 0.26f, sy1 = thick * 0.74f;
-                var bar = g.RoundRect(0, 0, len * 0.5f, w * 0.5f, w * 0.45f, w * 0.45f, w * 0.45f, w * 0.45f);
-                for (int k = 0; k < 5; k++)
-                {
-                    float ang = Tau * k / 5 + 0.3f, mid = (hub + rimIn) * 0.5f;
-                    g.xf = Matrix4x4.TRS(new Vector3(Mathf.Cos(ang) * mid, 0, Mathf.Sin(ang) * mid), Quaternion.AngleAxis(-ang * Mathf.Rad2Deg, Vector3.up), Vector3.one);
-                    g.Prism(bar, sy0, sy1, (sy1 - sy0) * 0.3f, g.S(2, 3));
-                }
-                g.xf = Matrix4x4.identity;
+                Spokes(g, hub, rimIn, thick * 0.26f, thick * 0.74f, 0.075f);
                 g.Lathe(g.RP(false, C(boreR + boreCh, 0), C(hub, 0, thick * 0.12f), C(hub, thick, thick * 0.12f), C(boreR + boreCh, thick)), bs);
                 g.Bore(boreR, boreCh, 0, thick, true, true, bs);
             }
@@ -318,6 +354,20 @@ namespace WorkshopWreckage.Sandbox
                     C(rimIn + 0.002f, wy1), C(hub, wy1, f), C(hub, thick, ro), C(boreR + boreCh, thick)), bs);
                 g.Bore(boreR, boreCh, 0, thick, true, true, bs);
             }
+        }
+
+        /// <summary>Five rounded bars from the hub to the rim (overlapping both a little), between heights y0 and y1.</summary>
+        static void Spokes(G g, float hub, float rimIn, float y0, float y1, float w)
+        {
+            float len = rimIn - hub + 0.04f;
+            var bar = g.RoundRect(0, 0, len * 0.5f, w * 0.5f, w * 0.45f, w * 0.45f, w * 0.45f, w * 0.45f);
+            for (int k = 0; k < 5; k++)
+            {
+                float ang = Tau * k / 5 + 0.3f, mid = (hub + rimIn) * 0.5f;
+                g.xf = Matrix4x4.TRS(new Vector3(Mathf.Cos(ang) * mid, 0, Mathf.Sin(ang) * mid), Quaternion.AngleAxis(-ang * Mathf.Rad2Deg, Vector3.up), Vector3.one);
+                g.Prism(bar, y0, y1, (y1 - y0) * 0.3f, g.S(2, 3));
+            }
+            g.xf = Matrix4x4.identity;
         }
 
         // ================================================================== springs (coil outer diameter 1, along +Y)
@@ -894,7 +944,7 @@ namespace WorkshopWreckage.Sandbox
         /// <summary>Geometry in Godot space, per material slot; Finish mirrors Z into Unity space.</summary>
         sealed class G
         {
-            public readonly bool hero;
+            public readonly bool hero, compact;
             public Matrix4x4 xf = Matrix4x4.identity;
             public Color color = White;
             public int slot;
@@ -905,8 +955,11 @@ namespace WorkshopWreckage.Sandbox
             readonly SortedDictionary<int, List<int>> _t = new();
             const float Crease = 40f;
 
-            public G(bool hero) { this.hero = hero; }
-            public int S(int normal, int big) => hero ? big : normal;
+            public G(int tier) { hero = tier == TierHero; compact = tier == TierCompact; }
+            /// <summary>Segments: the standard or hero count; compact (small parts) about 60 % of the standard,
+            /// never under 12 around, and one step less on small counts (profile rounds, flank points).</summary>
+            public int S(int normal, int big) => hero ? big : !compact ? normal
+                : normal >= 16 ? Mathf.Max(12, Mathf.RoundToInt(normal * 0.6f)) : normal >= 6 ? Mathf.Max(6, normal - 2) : Mathf.Max(1, normal - 1);
 
             int V(Vector3 p, Vector3 n, Vector2 uv)
             {
@@ -953,7 +1006,7 @@ namespace WorkshopWreckage.Sandbox
                     float cross = d1.x * d2.y - d1.y * d2.x;
                     var nrm = cross > 0 ? new Vector2(-d1.y, d1.x) : new Vector2(d1.y, -d1.x);
                     var ctr = t1 + nrm * r;
-                    int steps = c[i].w > 0 ? (int)c[i].w : (hero ? 4 : 3);
+                    int steps = c[i].w > 0 ? (int)c[i].w : (hero ? 4 : compact ? 2 : 3);
                     float a1 = Mathf.Atan2(t1.y - ctr.y, t1.x - ctr.x), a2 = Mathf.Atan2(t2.y - ctr.y, t2.x - ctr.x);
                     float da = Mathf.DeltaAngle(a1 * Mathf.Rad2Deg, a2 * Mathf.Rad2Deg) * Mathf.Deg2Rad;
                     for (int k = 0; k <= steps; k++)

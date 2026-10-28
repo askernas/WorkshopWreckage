@@ -1,5 +1,5 @@
 {
-  "name": "VARIANT B",
+  "name": "VARIANT B IT.3",
   "_note": "offsets on the game's current look: 0 everywhere = BASELINE (docs/VISUAL_SANDBOX.md)",
   "saturation": 0.05,
   "contrast": 4,
@@ -19,9 +19,16 @@
   "paint_smoothness": 0.5,
   "roughness_variation": 0.1,
   "metal_response": 0.85,
-  "rust": 0.45,
+  "rust": 0,
   "env_reflection": 0.6,
   "edge_polish": 0.6,
   "light_shaping": 0.6,
-  "geometry_quality": 1
+  "geometry_quality": 1,
+  "geometry_version": 2,
+  "wear_levels": 1,
+  "paint_variation": 0.6,
+  "scratches": 0.6,
+  "rust_selective": 0.6,
+  "metal_character": 0.8,
+  "chrome_limit": 0.72
 }

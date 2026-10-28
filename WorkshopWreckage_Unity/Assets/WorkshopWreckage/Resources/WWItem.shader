@@ -56,6 +56,10 @@ Shader "WorkshopWreckage/Item"
     // Paint smoothness (absolute, 0 = as authored), roughness variation, metal response (0 = the item gloss damping,
     // 1 = full PBR like the robots), rust in old chips and recesses, the room's ambient in reflections, edge polish
     float _WWLabB, _WWLabPaintSmooth, _WWLabRoughVar, _WWLabMetalResp, _WWLabRust, _WWLabEnvRefl, _WWLabEdgePolish;
+    // Variant B iteration 3 "material character" (inside the _WWLabB gate; _WWLabI3 0, as in BP1 and the game, skips
+    // it): wear levels (chips scale with the condition), paint imperfections, scratches, rust on exposed steel only,
+    // metal character (machined / cast / brushed / brass / rubber), the highest smoothness bright metal reaches
+    float _WWLabI3, _WWLabWearLv, _WWLabPaintVar, _WWLabScratch, _WWLabRustSel, _WWLabMetalChar, _WWLabChromeCap;
 
     struct Attributes
     {
@@ -188,6 +192,7 @@ Shader "WorkshopWreckage/Item"
             //   scratch  sparse directional scratches on worn parts
             static float4 gArtDbg = 0;   // QA (--itemdebug=6): the art layers' masks (chip, worn edge, wash)
             static float3 gLabB = float3(0, 0, 1);   // sandbox Variant B: paint coverage, roughness variation, reflection occlusion
+            static float gI3Smooth = 0;              // sandbox iteration 3: smoothness offset (paint smoothness is set after Skin)
 
             // pegboard tools: wood with its grain along the handle. On a turned handle the grain runs along the axis
             // (uv.y) and the normal picks the streak round the handle; on a flat face it follows the longer side.
@@ -571,6 +576,9 @@ Shader "WorkshopWreckage/Item"
                     float worn = saturate(max(ew * (0.4 + 0.6 * stress), corner)) * raised;
                     float knock = smoothstep(0.78, 0.81, nFine * 0.7 + nEdge * 0.45) * smoothstep(0.06, 0.15, faceSize) * stress * 0.8;   // the odd knock on a broad panel
                     float wearAmt = (0.75 + 0.5 * cond) * (1 - metal) * (tool && (_Slot > 0.5 || fam > 1.5) ? 0.0 : 1.0);   // tools: only paint chips
+                    // sandbox iteration 3 wear levels: almost no chips on a new part (level 0), a few on light wear, the
+                    // full set on well used parts and more on heavy wear
+                    if (_WWLabWearLv > 0) { float wl = saturate((cond - 0.06) * 2.2); wearAmt *= 0.1 + wl + 0.6 * wl * wl; }
                     float brkC = 0.3 + 0.9 * smoothstep(0.35, 0.65, nEdge * 0.6 + nFine * 0.4);   // breaks a worn edge into separate chips
                     chip = smoothstep(0.27, 0.39, max(worn, knock) * brkC * wearAmt);
                     float rub = smoothstep(0.14, 0.3, worn * brkC * wearAmt) * (1 - chip);   // paint rubbed thin around a chip
@@ -606,6 +614,97 @@ Shader "WorkshopWreckage/Item"
                         rustM = saturate(rustM * age * _WWLabRust * 1.4) * (steelish ? 1.0 : 0.0);
                         col = lerp(col, lerp(rustDark * 1.4, rustLight, smoothstep(0.3, 0.8, nFine)), rustM);
                         metal = lerp(metal, 0, rustM); rough = lerp(rough, 0.85, rustM);
+
+                        // iteration 3: material character. The wear level comes from the condition (0 new, 0.18 light,
+                        // 0.4 well used, 0.68 heavy -> lv 0, 0.26, 0.75, 1); every term scales with it
+                        [branch] if (_WWLabI3 > 0)
+                        {
+                            float lv = saturate((cond - 0.06) * 2.2);
+                            bool rustProof = (fin > 0.5 && fin < 2.5) || (fin > 3.5 && fin < 4.5);   // stainless, zinc, aluminium
+                            bool steelBody = _Slot < 0.5 && ((fam > 1.5 && fam < 2.5 && !rustProof) || (fam > 4.5 && fam < 5.5));
+                            bool warm = _Slot < 0.5 && fam > 2.5 && fam < 3.5;
+                            bool rubber = _Slot > 0.5 && !tool && max(vc.r, max(vc.g, vc.b)) < 0.09;
+                            float paintM = painted && !tool ? saturate(1 - metal / 0.6) : 0;
+                            float mc = _WWLabMetalChar;
+                            gI3Smooth = 0;
+
+                            // paint: a sprayed coat, never a flat colour: broad tone drift, orange peel in the gloss,
+                            // tops faded and chalky with age
+                            float pv = _WWLabPaintVar * paintM;
+                            col *= 1 + ((big - 0.5) * 0.12 + (nEdge - 0.5) * 0.05) * pv;
+                            float fade = up * (0.25 + 0.75 * lv) * smoothstep(0.35, 0.75, big) * 0.2;
+                            col = lerp(col, lerp(col, gl.xxx, 0.5) * 1.12 + 0.01, fade * pv);
+                            gI3Smooth += ((nFine - 0.5) * 0.1 - fade * 0.5) * pv;
+
+                            // scratches: fine and straight in two directions, more with each level, never in creases;
+                            // through paint they show bright steel, on bare metal a brighter, smoother line
+                            float2 sp = float2(dot(wp, float3(0.82, 0.31, 0.48)), dot(wp, float3(-0.36, 0.88, 0.3)));
+                            float s1 = WN(float2(sp.x * 4.0 + seed * 5.0, sp.y * 650.0));
+                            float s2 = WN(float2(sp.y * 3.0 + seed * 7.0, sp.x * 520.0));
+                            float thr = lerp(0.93, 0.86, lv);
+                            float scr = max(smoothstep(thr, thr + 0.02, s1), smoothstep(thr + 0.01, thr + 0.03, s2) * 0.8);
+                            scr *= _WWLabScratch * smoothstep(0.05, 0.25, lv) * (1 - wash) * (1 - cc) * smoothstep(0.006, 0.03, faceSize)
+                                * (rubber || tool || fam > 5.5 || (fam > 3.5 && fam < 4.5) ? 0.0 : 1.0);
+                            float onPaint = scr * paintM;
+                            col = lerp(col, bare * (0.85 + 0.3 * nFine), onPaint * 0.85);
+                            metal = lerp(metal, 0.7, onPaint * 0.85); rough = lerp(rough, 0.4, onPaint);
+                            float onMetal = scr * (1 - paintM) * saturate(metal * 1.5 - 0.2);
+                            col = lerp(col, col * 1.3 + 0.02, onMetal * 0.6); rough = lerp(rough, rough * 0.7, onMetal);
+
+                            // rust only where steel is exposed: the heart of chips, scratches through paint, and on bare
+                            // steel the thread roots, gear roots, joints and creases, in patches. Never on the paint
+                            // itself (the gameplay colour), brass, rubber, stainless, zinc or aluminium
+                            float rAge = saturate(lv * 1.25 - 0.15) * _WWLabRustSel;
+                            float patchy = smoothstep(0.5, 0.72, big * 0.55 + nFine * 0.45);
+                            float rI3 = 0;
+                            if (painted && !tool) rI3 = chip * _WWArtEdgeWear * smoothstep(0.45, 0.7, nEdge) + onPaint * 0.6 * patchy;
+                            else if (steelBody) rI3 = max(max(recess * 0.9, cc * 0.6), max(scr * 0.5, chip * _WWArtEdgeWear)) * patchy;
+                            rI3 = saturate(rI3 * rAge * 1.3);
+                            col = lerp(col, lerp(rustDark * 1.4, rustLight, smoothstep(0.3, 0.8, nFine)) * (1 - 0.3 * smoothstep(0.75, 0.85, nEdge)), rI3);
+                            metal = lerp(metal, 0, rI3); rough = lerp(rough, 0.85, rI3);
+
+                            // metals read as themselves
+                            [branch] if (mc > 0)
+                            {
+                                if (_Slot < 0.5 && fam > 1.5 && fam < 2.5 && !tool)
+                                {
+                                    bool body = !hardware && kind < 1.5;
+                                    if (body && (fin < 0.5 || (fin > 2.5 && fin < 3.5)))       // cast iron: darker, grainy, dull
+                                    {
+                                        col = lerp(col, col * 0.78 * (1 - smoothstep(0.72, 0.8, nFine) * 0.2), mc);
+                                        rough = lerp(rough, rough + 0.15, mc); metal = lerp(metal, metal * 0.75, mc);
+                                    }
+                                    else if (body && fin > 3.5 && fin < 4.5)                    // bead-blasted aluminium: light, soft
+                                    {
+                                        col = lerp(col, col * 1.08, mc); rough = lerp(rough, max(rough, 0.5), mc);
+                                    }
+                                    else if (fin > 0.5 && fin < 1.5)                            // stainless: brushed streaks
+                                    {
+                                        col *= 1 + (mach - 0.5) * 0.3 * mc;
+                                        rough = lerp(rough, 0.3 + 0.18 * mach, mc);
+                                    }
+                                    else if (fin < 0.5 || (fin > 3.5 && fin < 5.5))             // machined steel, turned aluminium, polished
+                                    {
+                                        // plain steel: a darker albedo and fuller metalness, so it reads as steel
+                                        // reflecting the room rather than as white, matte paint
+                                        if (fin < 0.5) { col = lerp(col, col * 0.72, mc); metal = lerp(metal, max(metal, 0.92), mc); rough = lerp(rough, rough * 0.8, mc); }
+                                        col *= 1 + (mach - 0.5) * 0.22 * mc;
+                                        rough = lerp(rough, rough + (mach - 0.5) * 0.12, mc);
+                                    }
+                                }
+                                else if (warm && !tool)                                          // brass and copper: richer, dark tarnish in recesses
+                                {
+                                    col = lerp(col, col * float3(1.05, 0.98, 0.86), mc * 0.5);
+                                    col = lerp(col, col * float3(0.45, 0.38, 0.28), saturate(max(cc, recess) * (0.3 + lv)) * 0.6 * mc);
+                                    rough = lerp(rough, clamp(rough, 0.28, 0.6), mc);
+                                }
+                                else if (rubber)                                                 // rubber: soft black, a little sheen, dusty with age
+                                {
+                                    col = lerp(col, float3(0.045, 0.044, 0.046) * (0.9 + 0.2 * big) + up * 0.02 * lv, mc);
+                                    rough = lerp(rough, 0.68 + 0.15 * nFine, mc); metal = 0;
+                                }
+                            }
+                        }
                         // bare metal: raised edges and rubbed spots polished brighter and sharper
                         float hiB = saturate(cx * (1 - smoothstep(0.0, edgeW * 3.0, ed)) + polish * 0.5) * (1 - wash) * saturate(metal * 1.5 - 0.3);
                         col = lerp(col, col * 1.25 + 0.015, hiB * _WWLabEdgePolish * 0.6);
@@ -652,6 +751,12 @@ Shader "WorkshopWreckage/Item"
                     smoothness = (1.0 - rough) * lerp(gloss, 1.0, mr + (1 - mr) * 0.35 * _WWLabMetalResp);
                     if (_WWLabPaintSmooth > 0) smoothness = lerp(smoothness, _WWLabPaintSmooth, gLabB.x);
                     smoothness = saturate(smoothness - gLabB.y * 2.0 * _WWLabRoughVar);
+                    // iteration 3: the paint's gloss variation, and bright metal kept short of chrome
+                    [branch] if (_WWLabI3 > 0)
+                    {
+                        smoothness = saturate(smoothness + gI3Smooth);
+                        if (_WWLabChromeCap > 0) smoothness = min(smoothness, lerp(1.0, _WWLabChromeCap, saturate(metallic * 1.6)));
+                    }
                 }
             }
 
