@@ -1,0 +1,806 @@
+{
+ "schemaVersion": 1,
+ "note": "One entry per tool (each tool exists once). model = a mesh in Scripts/Pegboard/Tools (ToolFactory); size_m = the item scale of the model (models are built at length 1); material/finish/color as item_catalog (electronic = exact colour plastic, painted = enamel); item_id stays stable for saves.",
+ "tools": [
+  {
+   "id": "wr01",
+   "item_id": 70300,
+   "name": "32 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.711,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "wr02",
+   "item_id": 70301,
+   "name": "30 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.642,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "wr03",
+   "item_id": 70302,
+   "name": "27 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.578,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "wr04",
+   "item_id": 70303,
+   "name": "24 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.534,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "wr05",
+   "item_id": 70304,
+   "name": "22 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.495,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "wr06",
+   "item_id": 70305,
+   "name": "19 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.451,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "wr07",
+   "item_id": 70306,
+   "name": "17 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.412,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "wr08",
+   "item_id": 70307,
+   "name": "14 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.372,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "wr09",
+   "item_id": 70308,
+   "name": "13 mm Combination Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.343,
+   "material": "steel",
+   "finish": "plain",
+   "color": "#9aa4b0"
+  },
+  {
+   "id": "wr10",
+   "item_id": 70309,
+   "name": "Pipe Wrench",
+   "model": "pipe_wrench",
+   "size_m": 0.625,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "pl01",
+   "item_id": 70310,
+   "name": "Water Pump Pliers",
+   "model": "pliers_slip_joint",
+   "size_m": 0.429,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "pl02",
+   "item_id": 70311,
+   "name": "Blue Adjustable Wrench",
+   "model": "adjustable_wrench",
+   "size_m": 0.539,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "pl03",
+   "item_id": 70312,
+   "name": "Combination Pliers",
+   "model": "pliers_combination",
+   "size_m": 0.514,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "pl04",
+   "item_id": 70313,
+   "name": "Large Adjustable Wrench",
+   "model": "adjustable_wrench",
+   "size_m": 0.698,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "pl05",
+   "item_id": 70314,
+   "name": "Needle-Nose Pliers",
+   "model": "pliers_needle",
+   "size_m": 0.343,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "sw01",
+   "item_id": 70315,
+   "name": "6 mm Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.314,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sw02",
+   "item_id": 70316,
+   "name": "7 mm Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.326,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sw03",
+   "item_id": 70317,
+   "name": "8 mm Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.338,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sw04",
+   "item_id": 70318,
+   "name": "9 mm Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.35,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sw05",
+   "item_id": 70319,
+   "name": "10 mm Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.363,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sw06",
+   "item_id": 70320,
+   "name": "11 mm Spanner",
+   "model": "combo_wrench",
+   "size_m": 0.375,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "hx01",
+   "item_id": 70321,
+   "name": "Hex Key Set",
+   "model": "hex_key_set",
+   "size_m": 0.367,
+   "material": "steel",
+   "finish": "plain",
+   "color": "#9aa4b0"
+  },
+  {
+   "id": "sd01",
+   "item_id": 70322,
+   "name": "Flat Screwdriver",
+   "model": "screwdriver_flat",
+   "size_m": 0.453,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sd02",
+   "item_id": 70323,
+   "name": "Phillips Screwdriver",
+   "model": "screwdriver_phillips",
+   "size_m": 0.453,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sd03",
+   "item_id": 70324,
+   "name": "Flat Screwdriver",
+   "model": "screwdriver_flat",
+   "size_m": 0.453,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#202022"
+  },
+  {
+   "id": "sd04",
+   "item_id": 70325,
+   "name": "Phillips Screwdriver",
+   "model": "screwdriver_phillips",
+   "size_m": 0.453,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#e0a81c"
+  },
+  {
+   "id": "sd05",
+   "item_id": 70326,
+   "name": "Flat Screwdriver",
+   "model": "screwdriver_flat",
+   "size_m": 0.453,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "sd06",
+   "item_id": 70327,
+   "name": "Phillips Screwdriver",
+   "model": "screwdriver_phillips",
+   "size_m": 0.453,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "sd07",
+   "item_id": 70328,
+   "name": "Phillips Screwdriver",
+   "model": "screwdriver_phillips",
+   "size_m": 0.355,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "sd08",
+   "item_id": 70329,
+   "name": "Flat Screwdriver",
+   "model": "screwdriver_flat",
+   "size_m": 0.355,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#202022"
+  },
+  {
+   "id": "sd09",
+   "item_id": 70330,
+   "name": "Phillips Screwdriver",
+   "model": "screwdriver_phillips",
+   "size_m": 0.355,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sd10",
+   "item_id": 70331,
+   "name": "Flat Screwdriver",
+   "model": "screwdriver_flat",
+   "size_m": 0.355,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sd11",
+   "item_id": 70332,
+   "name": "Phillips Screwdriver",
+   "model": "screwdriver_phillips",
+   "size_m": 0.355,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#e0a81c"
+  },
+  {
+   "id": "sd12",
+   "item_id": 70333,
+   "name": "Flat Screwdriver",
+   "model": "screwdriver_flat",
+   "size_m": 0.355,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "st01",
+   "item_id": 70334,
+   "name": "Stubby Screwdriver",
+   "model": "screwdriver_stubby",
+   "size_m": 0.176,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#202022"
+  },
+  {
+   "id": "st02",
+   "item_id": 70335,
+   "name": "Stubby Screwdriver",
+   "model": "screwdriver_stubby",
+   "size_m": 0.176,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "st03",
+   "item_id": 70336,
+   "name": "Stubby Screwdriver",
+   "model": "screwdriver_stubby",
+   "size_m": 0.176,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#202022"
+  },
+  {
+   "id": "hm01",
+   "item_id": 70337,
+   "name": "Nail Punch",
+   "model": "nail_punch",
+   "size_m": 0.294,
+   "material": "steel",
+   "finish": "plain",
+   "color": "#9aa4b0"
+  },
+  {
+   "id": "hm02",
+   "item_id": 70338,
+   "name": "Claw Hammer",
+   "model": "hammer_claw",
+   "size_m": 0.698,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#9a6a38"
+  },
+  {
+   "id": "hm03",
+   "item_id": 70339,
+   "name": "Ball-Peen Hammer",
+   "model": "hammer_ball_peen",
+   "size_m": 0.478,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#3a3a3c"
+  },
+  {
+   "id": "hm04",
+   "item_id": 70340,
+   "name": "Mallet",
+   "model": "mallet",
+   "size_m": 0.711,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#9a6a38"
+  },
+  {
+   "id": "hm05",
+   "item_id": 70341,
+   "name": "Scraper",
+   "model": "scraper",
+   "size_m": 0.245,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#c02050"
+  },
+  {
+   "id": "hm06",
+   "item_id": 70342,
+   "name": "Cold Chisel",
+   "model": "cold_chisel",
+   "size_m": 0.441,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "hm07",
+   "item_id": 70343,
+   "name": "Spark Plug Wrench",
+   "model": "spark_plug_wrench",
+   "size_m": 0.527,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sk01",
+   "item_id": 70344,
+   "name": "Socket Rail (metric)",
+   "model": "socket_rail",
+   "size_m": 0.49,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#202022"
+  },
+  {
+   "id": "sk02",
+   "item_id": 70345,
+   "name": "Ratchet",
+   "model": "ratchet",
+   "size_m": 0.429,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sk03",
+   "item_id": 70346,
+   "name": "Socket Rail (deep)",
+   "model": "socket_rail",
+   "size_m": 0.686,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#202022"
+  },
+  {
+   "id": "sk04",
+   "item_id": 70347,
+   "name": "Nut Driver",
+   "model": "nut_driver",
+   "size_m": 0.27,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sk05",
+   "item_id": 70348,
+   "name": "Extension Bar",
+   "model": "extension_bar",
+   "size_m": 0.367,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sk06",
+   "item_id": 70349,
+   "name": "Short Extension",
+   "model": "extension_bar",
+   "size_m": 0.245,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "sk07",
+   "item_id": 70350,
+   "name": "T-Handle Driver",
+   "model": "t_handle",
+   "size_m": 0.514,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "sk08",
+   "item_id": 70351,
+   "name": "Bit Set",
+   "model": "bit_set",
+   "size_m": 0.367,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sk09",
+   "item_id": 70352,
+   "name": "Monkey Wrench",
+   "model": "monkey_wrench",
+   "size_m": 0.453,
+   "material": "steel",
+   "finish": "plain",
+   "color": "#9aa4b0"
+  },
+  {
+   "id": "sk10",
+   "item_id": 70353,
+   "name": "T-Bar",
+   "model": "t_bar",
+   "size_m": 0.245,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "mc01",
+   "item_id": 70354,
+   "name": "Hand Saw",
+   "model": "hand_saw",
+   "size_m": 0.6,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "mc02",
+   "item_id": 70355,
+   "name": "Spirit Level",
+   "model": "spirit_level",
+   "size_m": 0.588,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#e0a81c"
+  },
+  {
+   "id": "mc03",
+   "item_id": 70356,
+   "name": "Try Square",
+   "model": "try_square",
+   "size_m": 0.404,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "mc04",
+   "item_id": 70357,
+   "name": "Caliper",
+   "model": "caliper",
+   "size_m": 0.441,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "mc05",
+   "item_id": 70358,
+   "name": "Tape Measure",
+   "model": "tape_measure",
+   "size_m": 0.176,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#e0a81c"
+  },
+  {
+   "id": "mc06",
+   "item_id": 70359,
+   "name": "Steel Rule",
+   "model": "steel_rule",
+   "size_m": 0.588,
+   "material": "stainless",
+   "finish": "polished",
+   "color": "#b0bccc"
+  },
+  {
+   "id": "mc07",
+   "item_id": 70360,
+   "name": "Hacksaw",
+   "model": "hacksaw",
+   "size_m": 0.625,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sp01",
+   "item_id": 70361,
+   "name": "F-Clamp",
+   "model": "f_clamp",
+   "size_m": 0.588,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sp02",
+   "item_id": 70362,
+   "name": "File",
+   "model": "file",
+   "size_m": 0.576,
+   "material": "steel",
+   "finish": "plain",
+   "color": "#9aa4b0"
+  },
+  {
+   "id": "ch01",
+   "item_id": 70363,
+   "name": "Wood Chisel",
+   "model": "wood_chisel",
+   "size_m": 0.514,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#202022"
+  },
+  {
+   "id": "ch02",
+   "item_id": 70364,
+   "name": "Wood Chisel",
+   "model": "wood_chisel",
+   "size_m": 0.514,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#9a6a38"
+  },
+  {
+   "id": "ch03",
+   "item_id": 70365,
+   "name": "Wood Chisel",
+   "model": "wood_chisel",
+   "size_m": 0.514,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#9a6a38"
+  },
+  {
+   "id": "ch04",
+   "item_id": 70366,
+   "name": "Wood Chisel",
+   "model": "wood_chisel",
+   "size_m": 0.514,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#9a6a38"
+  },
+  {
+   "id": "ch05",
+   "item_id": 70367,
+   "name": "Wood Chisel",
+   "model": "wood_chisel",
+   "size_m": 0.514,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "ch06",
+   "item_id": 70368,
+   "name": "Wood Chisel",
+   "model": "wood_chisel",
+   "size_m": 0.514,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#9a6a38"
+  },
+  {
+   "id": "sp03",
+   "item_id": 70369,
+   "name": "Long Screwdriver",
+   "model": "screwdriver_flat",
+   "size_m": 0.49,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sp04",
+   "item_id": 70370,
+   "name": "Linesman Pliers",
+   "model": "pliers_combination",
+   "size_m": 0.551,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sp05",
+   "item_id": 70371,
+   "name": "Locking Pliers",
+   "model": "pliers_locking",
+   "size_m": 0.576,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "ps01",
+   "item_id": 70372,
+   "name": "Precision Screwdriver",
+   "model": "screwdriver_precision",
+   "size_m": 0.257,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "ps02",
+   "item_id": 70373,
+   "name": "Precision Screwdriver",
+   "model": "screwdriver_precision",
+   "size_m": 0.257,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#e0a81c"
+  },
+  {
+   "id": "ps03",
+   "item_id": 70374,
+   "name": "Precision Screwdriver",
+   "model": "screwdriver_precision",
+   "size_m": 0.257,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#2850a0"
+  },
+  {
+   "id": "ps04",
+   "item_id": 70375,
+   "name": "Precision Screwdriver",
+   "model": "screwdriver_precision",
+   "size_m": 0.257,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#e0a81c"
+  },
+  {
+   "id": "ps05",
+   "item_id": 70376,
+   "name": "Precision Screwdriver",
+   "model": "screwdriver_precision",
+   "size_m": 0.257,
+   "material": "electronic",
+   "finish": "plain",
+   "color": "#202022"
+  },
+  {
+   "id": "sp06",
+   "item_id": 70377,
+   "name": "C-Clamp",
+   "model": "c_clamp",
+   "size_m": 0.331,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#b8261a"
+  },
+  {
+   "id": "sp07",
+   "item_id": 70378,
+   "name": "Bar Clamp",
+   "model": "bar_clamp",
+   "size_m": 0.306,
+   "material": "steel",
+   "finish": "plain",
+   "color": "#9aa4b0"
+  },
+  {
+   "id": "sp08",
+   "item_id": 70379,
+   "name": "Quick Clamp",
+   "model": "quick_clamp",
+   "size_m": 0.539,
+   "material": "painted",
+   "finish": "plain",
+   "color": "#b8261a"
+  }
+ ]
+}

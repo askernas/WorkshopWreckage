@@ -15,7 +15,7 @@ namespace WorkshopWreckage
     ///
     /// Command line: --preset=standard|large|massive  --seed=N  --shot=a.png;b.png
     /// --cam=x,y,z,yaw,pitch;...  --items=N (benchmark subset)  --presort=0.35  --play  --hud
-    /// --bench=out.json  --autoplay=out_dir</summary>
+    /// --bench=out.json  --autoplay=out_dir  --pegview[=fill] (the pegboard preview)</summary>
     public class Game : MonoBehaviour
     {
         public ItemDatabase db;
@@ -154,6 +154,8 @@ namespace WorkshopWreckage
             if (args.TryGetValue("catalogue", out var catDir)) { SetState("play"); StartCoroutine(CatalogueExport.Run(this, catDir)); return; }   // QA: component catalogue (read-only)
             if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
+            if (args.TryGetValue("pegfill", out var pf) && builder.pegboard != null) builder.pegboard.PreviewFill(float.Parse(pf, System.Globalization.CultureInfo.InvariantCulture));   // QA: hang a share of the pegboard tools
+            if (args.TryGetValue("pegview", out var pv)) { SetState("play"); hud.SetHudVisible(false); Pegboard.PegboardPreview.Open(this, float.TryParse(pv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pvf) ? pvf : 1f); return; }   // the pegboard on its own (docs/PEGBOARD.md)
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
             else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.TryGetValue("splash", out var sp)) { Splash.Show(() => hud.SplashBackdrop(true)); if (sp == "backdrop") Splash.Dismiss(); if (sp == "instructions") Splash.Press(); } if (args.TryGetValue("menusub", out var sub)) { var sp2 = sub.Split(':'); hud.OpenSub(sp2[0]); if (sp2.Length > 1) hud.SettingsTab(sp2[1]); } StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
@@ -269,7 +271,7 @@ namespace WorkshopWreckage
             migrationReport = "";
             if (_layoutSeed != seed && !BuildWorkshop(seed)) return false;
             var gen = new WorldGenerator { forbidden = InsideContainerG };
-            int total = Json.Int(db.config, "total_items", 4096);
+            int total = db.WorldTotal;
             var w = gen.Generate(db, layout, seed, itemCount > 0 && itemCount < total ? itemCount : -1);
             if (w == null) { hud.ShowFatal("World could not be generated:\n\n" + string.Join("\n", gen.errors.Take(20))); return false; }
             Debug.Log($"[world] preset {presetId}, seed {seed}: {w.Count} items in {gen.lastGenerationMs:0} ms ({layout.piles.Count} pile sites, {layout.surfaces.Count} surfaces, {units.Count} storage units)");
@@ -309,7 +311,9 @@ namespace WorkshopWreckage
                 if (hd >= 0) inventory.Select(hd);
                 progress.Load(Json.Obj(save["progress"]));
             }
+            SyncPegboard();
             renderer.Build(world);
+            Pegboard.ScatteredTools.Attach(world, renderer);   // the board's tools in the room, merged (docs/PEGBOARD.md)
             index = new ItemSpatialIndex(world);
             // the previous world's simulation goes first: the settle hands its last falling parts
             // on to play, and clearing after it froze them in mid-air
@@ -1321,7 +1325,7 @@ namespace WorkshopWreckage
                 // the ledger and the level points agree: a save from before the ledger keeps its completions,
                 // and a destination the ledger finished but never paid out pays now (once)
                 foreach (var d in progression.completedDestinations) progress.completedDefs.Add(d);
-                foreach (var d in progress.completedDefs.ToList()) progression.OnDefinitionCompleted(d, world.TotalOf(d));
+                foreach (var d in progress.completedDefs.Where(d => db.Get(d)?.IsPegboardTool != true).ToList()) progression.OnDefinitionCompleted(d, world.TotalOf(d));
                 _restoredAnnounced = FullyRestored;
             }
             // gameplay counters: from the save, or (a save from before they existed) seeded from what it shows
@@ -1352,6 +1356,7 @@ namespace WorkshopWreckage
                 bool robot = storage.lastDepositor.StartsWith("robot");
                 var def = world.DefOf(id);
                 GameEvents.Raise(GameEventKind.PartSorted, storage.lastDepositor, RobotTypeOf(storage.lastDepositor), def.id, def.CategoryName, box);
+                if (def.IsPegboardTool) { builder?.pegboard?.Install(def.PegSlot, def); telemetry.Sorted(false, playTime, progress.sortedTotal); return; }   // restored %, no XP (docs/PEGBOARD.md)
                 progression.OnSorted(id, robot);
                 if (robot) robots.FirstOrDefault(r => r.Owner == storage.lastDepositor)?.stats.Dropped(id, def.id, Time.time, false);
                 telemetry.Sorted(robot, playTime, progress.sortedTotal);
@@ -1359,6 +1364,7 @@ namespace WorkshopWreckage
             // the level point: once per destination, whoever (player or robot) stored the last copy
             progress.DefinitionCompleted += id =>
             {
+                if (db.Get(id)?.IsPegboardTool == true) { CheckFullyRestored(); return; }   // a hung tool: no level point
                 bool fresh = !progression.completedDestinations.Contains(id);
                 if (fresh && robots.FirstOrDefault(r => r.Owner == storage.lastDepositor) is Robot last) last.stats.finals++;   // it stored the last copy
                 progression.OnDefinitionCompleted(id, world.TotalOf(id));
@@ -1366,7 +1372,7 @@ namespace WorkshopWreckage
                 CheckFullyRestored();
             };
             progress.DefinitionHalf += id => progression.OnDefinitionHalf(id, world.TotalOf(id));
-            progress.Discovered += id => { if (!db.Get(id).IsToolItem) progression.OnDiscovered(id, db.Get(id).IsRobotPart);   // Part Radar items: no level progress (spec §1.13)
+            progress.Discovered += id => { if (!db.Get(id).IsToolItem && !db.Get(id).IsPegboardTool) progression.OnDiscovered(id, db.Get(id).IsRobotPart);   // Part Radar items: no level progress (spec §1.13)
                  if (progression.Has("reveal_totals")) progress.revealed.Add(id); };
             progress.DefinitionCompleted += id => progress.revealed.Add(id);   // a finished set shows its total
             progress.Milestone += (key, _) =>
@@ -1487,7 +1493,7 @@ namespace WorkshopWreckage
             var problem = SaveSystem.Check(d, db);
             if (problem != "") { hud.OnFeedback(problem, false); hud.SetStatus(problem); return; }
             int count = Json.Int(d, "item_count", -1);
-            itemCount = count == Json.Int(db.config, "total_items", 4096) || SaveSystem.NeedsMigration(d, db) ? -1 : count;
+            itemCount = count == db.WorldTotal || SaveSystem.NeedsMigration(d, db) ? -1 : count;
             if (StartWorld(Json.Int(d, "seed"), d))
             {
                 SetState("play");
@@ -1522,10 +1528,25 @@ namespace WorkshopWreckage
 
         public Matrix4x4 StoragePlacement(string box, int id, int index)
         {
+            if (PegSlotOf(box) is string slot && builder?.pegboard != null && builder.pegboard.cfg.slotById.ContainsKey(slot)) return builder.pegboard.SlotWorld(slot);
             if (!db.boxes.TryGetValue(box, out var d)) return Matrix4x4.identity;
             var u = units[Json.Str(d, "unit")];
             if (u.type == "drawer_cabinet") return Matrix4x4.identity;
             return u.DestWorld(box) * StorageArrangement.SlotLocal(world.DefOf(id), index, StorageUnit.Inner(d));
+        }
+
+        /// <summary>The pegboard slot a destination id names ("PB-&lt;slot&gt;"), or null.</summary>
+        public static string PegSlotOf(string dest) => dest != null && dest.StartsWith(Pegboard.PegboardConfig.DestPrefix) ? dest.Substring(Pegboard.PegboardConfig.DestPrefix.Length) : null;
+
+        /// <summary>The pegboard shows exactly the tools stored in its slots (new world, load).</summary>
+        void SyncPegboard()
+        {
+            var pb = builder?.pegboard;
+            if (pb == null) return;
+            pb.Clear();
+            foreach (var kv in storage.contents)
+                if (PegSlotOf(kv.Key) is string slot)
+                    foreach (var id in kv.Value) pb.Install(slot, world.DefOf(id));
         }
 
         /// <summary>Parts assigned to a destination in this world: the target of its X/X count
@@ -1535,8 +1556,8 @@ namespace WorkshopWreckage
         /// <summary>Destinations with at least one part assigned (each gives one level point when complete).</summary>
         /// <summary>The end condition (design v1.0 §13.4), separate from level 25: every destination
         /// permanently complete and no robot component left lying about.</summary>
-        public bool FullyRestored => progression != null && progress != null && progress.completedDefs.Count >= progression.destinationTotal
-                                     && InventoryAudit.LooseRobotParts(this).Count == 0;
+        public bool FullyRestored => progression != null && progress != null && progress.completedDefs.Count(d => db.Get(d)?.IsPegboardTool != true) >= progression.destinationTotal
+                                     && InventoryAudit.LooseRobotParts(this).Count == 0 && (builder?.pegboard == null || builder.pegboard.Missing == 0);
         bool _restoredAnnounced;
         float _recoverT;
 

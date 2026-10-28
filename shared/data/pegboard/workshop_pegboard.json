@@ -1,0 +1,144 @@
+{
+ "schemaVersion": 1,
+ "note": "The interactive tool pegboard (docs/PEGBOARD.md). Lengths in metres, colours sRGB hex. The board's own frame: x right, y up from the bottom edge of the frame, z out of the wall (the root sits on the wall surface). Tools: tool_definitions.json; slots: tool_slots.json.",
+ "board": {
+  "mount_y": 1.02,
+  "width": 6.0,
+  "height": 1.62,
+  "panel_inset": 0.11,
+  "top_band": 0.2,
+  "depth": 0.1,
+  "wall_offset": 0.035
+ },
+ "frame": {
+  "color": "#5c4a3a",
+  "chip": 0.72,
+  "rail": 0.11,
+  "flange": 0.012,
+  "bolt_spacing": 0.62,
+  "bolt_radius": 0.016,
+  "corner_plate": 0.19,
+  "top_brackets": [
+   -1.95,
+   0.0,
+   1.95
+  ],
+  "weld_color": "#2e2620"
+ },
+ "panel": {
+  "color": "#744421",
+  "rust_color": "#4e2410",
+  "grime_color": "#2a1a10",
+  "wear": 0.7,
+  "thickness": 0.006,
+  "hole_pitch": 0.052,
+  "hole_radius": 0.0085,
+  "hole_segments": 8,
+  "backing_gap": 0.025,
+  "backing_color": "#120c08",
+  "texture_width": 4096
+ },
+ "lights": {
+  "count": 3,
+  "length": 1.7,
+  "tube_color": "#ffc47a",
+  "tube_emission": 1.7,
+  "light_color": "#ffd4a0",
+  "light_intensity": 2.9,
+  "light_range": 4.5,
+  "spot_angle": 100,
+  "shadows": false,
+  "tube_radius": 0.022,
+  "throw": 1.3,
+  "aim": 0.62,
+  "lift": 0.3
+ },
+ "silhouette": {
+  "color": "#26160c",
+  "alpha": 0.93,
+  "rim_color": "#0f0704",
+  "rim_mm": 3,
+  "chip": 0.72,
+  "halo": 0.35,
+  "halo_mm": 9,
+  "lift": 0.0015
+ },
+ "highlight": {
+  "color": "#ffd27a",
+  "intensity": 0.55,
+  "pulse_hz": 1.6
+ },
+ "interaction": {
+  "reach": 2.4,
+  "aim_radius": 0.16,
+  "prompt": "Hang {tool}",
+  "wrong_prompt": "{tool} doesn't belong here",
+  "sound": "peg_hang"
+ },
+ "hooks": {
+  "color": "#a3a6ab",
+  "radius": 0.0045,
+  "length": 0.045
+ },
+ "racks": [
+  {
+   "id": "rack_screwdrivers",
+   "slots": [
+    "SD01",
+    "SD02",
+    "SD03",
+    "SD04",
+    "SD05",
+    "SD06"
+   ]
+  },
+  {
+   "id": "rack_stubby",
+   "slots": [
+    "ST01",
+    "ST02",
+    "ST03"
+   ]
+  },
+  {
+   "id": "rack_precision",
+   "slots": [
+    "PS01",
+    "PS02",
+    "PS03",
+    "PS04",
+    "PS05"
+   ]
+  },
+  {
+   "id": "rack_chisels",
+   "slots": [
+    "CH01",
+    "CH02",
+    "CH03",
+    "CH04",
+    "CH05",
+    "CH06"
+   ]
+  }
+ ],
+ "delivery": {
+  "robots": [
+   "spiderbot",
+   "hoverbot"
+  ],
+  "spots": 6,
+  "area": [
+   -2.7,
+   -1.5
+  ],
+  "spacing": 0.24,
+  "fallback": "skip"
+ },
+ "completion": {
+  "counts_toward_restored": true,
+  "xp": false,
+  "levels": false
+ },
+ "racks_note": "a rack is a steel strip with one hole per tool, built along the hook points of its slots (the tools stand in it)"
+}

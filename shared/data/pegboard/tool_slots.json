@@ -1,0 +1,806 @@
+{
+ "schemaVersion": 1,
+ "note": "One slot per tool. pos = [x, y] in metres on the panel (0,0 = panel centre, +x right, +y up); angle = degrees counter-clockwise (90 = lying horizontal). id is stable (saves, destinations PB-<id>).",
+ "slots": [
+  {
+   "id": "WR01",
+   "zone": "wrenches",
+   "tool": "wr01",
+   "pos": [
+    -2.676,
+    0.239
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR02",
+   "zone": "wrenches",
+   "tool": "wr02",
+   "pos": [
+    -2.499,
+    0.272
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR03",
+   "zone": "wrenches",
+   "tool": "wr03",
+   "pos": [
+    -2.331,
+    0.303
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR04",
+   "zone": "wrenches",
+   "tool": "wr04",
+   "pos": [
+    -2.164,
+    0.324
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR05",
+   "zone": "wrenches",
+   "tool": "wr05",
+   "pos": [
+    -2.007,
+    0.342
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR06",
+   "zone": "wrenches",
+   "tool": "wr06",
+   "pos": [
+    -1.856,
+    0.364
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR07",
+   "zone": "wrenches",
+   "tool": "wr07",
+   "pos": [
+    -1.723,
+    0.382
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR08",
+   "zone": "wrenches",
+   "tool": "wr08",
+   "pos": [
+    -1.616,
+    0.401
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR09",
+   "zone": "wrenches",
+   "tool": "wr09",
+   "pos": [
+    -1.505,
+    0.415
+   ],
+   "angle": 0
+  },
+  {
+   "id": "WR10",
+   "zone": "wrenches",
+   "tool": "wr10",
+   "pos": [
+    -2.836,
+    0.117
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PL01",
+   "zone": "pliers",
+   "tool": "pl01",
+   "pos": [
+    -2.753,
+    -0.41
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PL02",
+   "zone": "pliers",
+   "tool": "pl02",
+   "pos": [
+    -2.535,
+    -0.359
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PL03",
+   "zone": "pliers",
+   "tool": "pl03",
+   "pos": [
+    -2.318,
+    -0.352
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PL04",
+   "zone": "pliers",
+   "tool": "pl04",
+   "pos": [
+    -2.101,
+    -0.27
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PL05",
+   "zone": "pliers",
+   "tool": "pl05",
+   "pos": [
+    -1.89,
+    -0.087
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SW01",
+   "zone": "wrenches",
+   "tool": "sw01",
+   "pos": [
+    -1.696,
+    -0.471
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SW02",
+   "zone": "wrenches",
+   "tool": "sw02",
+   "pos": [
+    -1.585,
+    -0.466
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SW03",
+   "zone": "wrenches",
+   "tool": "sw03",
+   "pos": [
+    -1.475,
+    -0.46
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SW04",
+   "zone": "wrenches",
+   "tool": "sw04",
+   "pos": [
+    -1.365,
+    -0.454
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SW05",
+   "zone": "wrenches",
+   "tool": "sw05",
+   "pos": [
+    -1.254,
+    -0.448
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SW06",
+   "zone": "wrenches",
+   "tool": "sw06",
+   "pos": [
+    -1.144,
+    -0.442
+   ],
+   "angle": 0
+  },
+  {
+   "id": "HX01",
+   "zone": "sockets",
+   "tool": "hx01",
+   "pos": [
+    -0.846,
+    -0.352
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD01",
+   "zone": "screwdrivers",
+   "tool": "sd01",
+   "pos": [
+    -1.331,
+    0.368
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD02",
+   "zone": "screwdrivers",
+   "tool": "sd02",
+   "pos": [
+    -1.213,
+    0.368
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD03",
+   "zone": "screwdrivers",
+   "tool": "sd03",
+   "pos": [
+    -1.094,
+    0.368
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD04",
+   "zone": "screwdrivers",
+   "tool": "sd04",
+   "pos": [
+    -0.975,
+    0.368
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD05",
+   "zone": "screwdrivers",
+   "tool": "sd05",
+   "pos": [
+    -0.856,
+    0.368
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD06",
+   "zone": "screwdrivers",
+   "tool": "sd06",
+   "pos": [
+    -0.738,
+    0.368
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD07",
+   "zone": "screwdrivers",
+   "tool": "sd07",
+   "pos": [
+    -1.749,
+    -0.087
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD08",
+   "zone": "screwdrivers",
+   "tool": "sd08",
+   "pos": [
+    -1.622,
+    -0.087
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD09",
+   "zone": "screwdrivers",
+   "tool": "sd09",
+   "pos": [
+    -1.495,
+    -0.087
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD10",
+   "zone": "screwdrivers",
+   "tool": "sd10",
+   "pos": [
+    -1.368,
+    -0.087
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD11",
+   "zone": "screwdrivers",
+   "tool": "sd11",
+   "pos": [
+    -1.241,
+    -0.087
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SD12",
+   "zone": "screwdrivers",
+   "tool": "sd12",
+   "pos": [
+    -1.114,
+    -0.087
+   ],
+   "angle": 0
+  },
+  {
+   "id": "ST01",
+   "zone": "screwdrivers",
+   "tool": "st01",
+   "pos": [
+    -0.92,
+    0.07
+   ],
+   "angle": 0
+  },
+  {
+   "id": "ST02",
+   "zone": "screwdrivers",
+   "tool": "st02",
+   "pos": [
+    -0.793,
+    0.07
+   ],
+   "angle": 0
+  },
+  {
+   "id": "ST03",
+   "zone": "screwdrivers",
+   "tool": "st03",
+   "pos": [
+    -0.666,
+    0.07
+   ],
+   "angle": 0
+  },
+  {
+   "id": "HM01",
+   "zone": "hammers",
+   "tool": "hm01",
+   "pos": [
+    -0.512,
+    0.124
+   ],
+   "angle": 0
+  },
+  {
+   "id": "HM02",
+   "zone": "hammers",
+   "tool": "hm02",
+   "pos": [
+    -0.358,
+    0.281
+   ],
+   "angle": 0
+  },
+  {
+   "id": "HM03",
+   "zone": "hammers",
+   "tool": "hm03",
+   "pos": [
+    -0.134,
+    0.188
+   ],
+   "angle": 0
+  },
+  {
+   "id": "HM04",
+   "zone": "hammers",
+   "tool": "hm04",
+   "pos": [
+    0.077,
+    0.235
+   ],
+   "angle": 0
+  },
+  {
+   "id": "HM05",
+   "zone": "hammers",
+   "tool": "hm05",
+   "pos": [
+    0.345,
+    0.476
+   ],
+   "angle": 0
+  },
+  {
+   "id": "HM06",
+   "zone": "hammers",
+   "tool": "hm06",
+   "pos": [
+    0.251,
+    0.106
+   ],
+   "angle": 0
+  },
+  {
+   "id": "HM07",
+   "zone": "hammers",
+   "tool": "hm07",
+   "pos": [
+    0.452,
+    0.124
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SK01",
+   "zone": "sockets",
+   "tool": "sk01",
+   "pos": [
+    -0.278,
+    -0.204
+   ],
+   "angle": 90
+  },
+  {
+   "id": "SK02",
+   "zone": "sockets",
+   "tool": "sk02",
+   "pos": [
+    -0.251,
+    -0.378
+   ],
+   "angle": 90
+  },
+  {
+   "id": "SK03",
+   "zone": "sockets",
+   "tool": "sk03",
+   "pos": [
+    -0.244,
+    -0.532
+   ],
+   "angle": 90
+  },
+  {
+   "id": "SK04",
+   "zone": "sockets",
+   "tool": "sk04",
+   "pos": [
+    0.117,
+    -0.305
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SK05",
+   "zone": "sockets",
+   "tool": "sk05",
+   "pos": [
+    0.803,
+    -0.03
+   ],
+   "angle": 90
+  },
+  {
+   "id": "SK06",
+   "zone": "sockets",
+   "tool": "sk06",
+   "pos": [
+    0.485,
+    -0.199
+   ],
+   "angle": 90
+  },
+  {
+   "id": "SK07",
+   "zone": "sockets",
+   "tool": "sk07",
+   "pos": [
+    0.87,
+    -0.352
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SK08",
+   "zone": "sockets",
+   "tool": "sk08",
+   "pos": [
+    0.552,
+    -0.476
+   ],
+   "angle": 90
+  },
+  {
+   "id": "SK09",
+   "zone": "sockets",
+   "tool": "sk09",
+   "pos": [
+    1.027,
+    -0.392
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SK10",
+   "zone": "sockets",
+   "tool": "sk10",
+   "pos": [
+    0.569,
+    -0.281
+   ],
+   "angle": 90
+  },
+  {
+   "id": "MC01",
+   "zone": "measuring",
+   "tool": "mc01",
+   "pos": [
+    0.719,
+    0.321
+   ],
+   "angle": -12
+  },
+  {
+   "id": "MC02",
+   "zone": "measuring",
+   "tool": "mc02",
+   "pos": [
+    0.987,
+    0.317
+   ],
+   "angle": 0
+  },
+  {
+   "id": "MC03",
+   "zone": "measuring",
+   "tool": "mc03",
+   "pos": [
+    1.381,
+    0.453
+   ],
+   "angle": 90
+  },
+  {
+   "id": "MC04",
+   "zone": "measuring",
+   "tool": "mc04",
+   "pos": [
+    1.422,
+    0.242
+   ],
+   "angle": 90
+  },
+  {
+   "id": "MC05",
+   "zone": "measuring",
+   "tool": "mc05",
+   "pos": [
+    1.405,
+    0.063
+   ],
+   "angle": 0
+  },
+  {
+   "id": "MC06",
+   "zone": "measuring",
+   "tool": "mc06",
+   "pos": [
+    1.221,
+    -0.34
+   ],
+   "angle": 0
+  },
+  {
+   "id": "MC07",
+   "zone": "measuring",
+   "tool": "mc07",
+   "pos": [
+    2.392,
+    0.551
+   ],
+   "angle": 90
+  },
+  {
+   "id": "SP01",
+   "zone": "specialty",
+   "tool": "sp01",
+   "pos": [
+    1.756,
+    0.305
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SP02",
+   "zone": "specialty",
+   "tool": "sp02",
+   "pos": [
+    2.024,
+    0.204
+   ],
+   "angle": 0
+  },
+  {
+   "id": "CH01",
+   "zone": "specialty",
+   "tool": "ch01",
+   "pos": [
+    2.141,
+    0.176
+   ],
+   "angle": 0
+  },
+  {
+   "id": "CH02",
+   "zone": "specialty",
+   "tool": "ch02",
+   "pos": [
+    2.253,
+    0.176
+   ],
+   "angle": 0
+  },
+  {
+   "id": "CH03",
+   "zone": "specialty",
+   "tool": "ch03",
+   "pos": [
+    2.365,
+    0.176
+   ],
+   "angle": 0
+  },
+  {
+   "id": "CH04",
+   "zone": "specialty",
+   "tool": "ch04",
+   "pos": [
+    2.477,
+    0.176
+   ],
+   "angle": 0
+  },
+  {
+   "id": "CH05",
+   "zone": "specialty",
+   "tool": "ch05",
+   "pos": [
+    2.589,
+    0.176
+   ],
+   "angle": 0
+  },
+  {
+   "id": "CH06",
+   "zone": "specialty",
+   "tool": "ch06",
+   "pos": [
+    2.701,
+    0.176
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SP03",
+   "zone": "specialty",
+   "tool": "sp03",
+   "pos": [
+    1.381,
+    -0.34
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SP04",
+   "zone": "specialty",
+   "tool": "sp04",
+   "pos": [
+    1.555,
+    -0.335
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SP05",
+   "zone": "specialty",
+   "tool": "sp05",
+   "pos": [
+    1.779,
+    -0.335
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PS01",
+   "zone": "specialty",
+   "tool": "ps01",
+   "pos": [
+    1.99,
+    -0.258
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PS02",
+   "zone": "specialty",
+   "tool": "ps02",
+   "pos": [
+    2.104,
+    -0.258
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PS03",
+   "zone": "specialty",
+   "tool": "ps03",
+   "pos": [
+    2.218,
+    -0.258
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PS04",
+   "zone": "specialty",
+   "tool": "ps04",
+   "pos": [
+    2.331,
+    -0.258
+   ],
+   "angle": 0
+  },
+  {
+   "id": "PS05",
+   "zone": "specialty",
+   "tool": "ps05",
+   "pos": [
+    2.445,
+    -0.258
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SP06",
+   "zone": "specialty",
+   "tool": "sp06",
+   "pos": [
+    2.649,
+    -0.258
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SP07",
+   "zone": "specialty",
+   "tool": "sp07",
+   "pos": [
+    2.826,
+    -0.288
+   ],
+   "angle": 0
+  },
+  {
+   "id": "SP08",
+   "zone": "specialty",
+   "tool": "sp08",
+   "pos": [
+    2.475,
+    -0.504
+   ],
+   "angle": 90
+  }
+ ]
+}

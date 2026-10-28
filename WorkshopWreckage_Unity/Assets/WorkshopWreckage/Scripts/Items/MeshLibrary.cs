@@ -26,7 +26,7 @@ namespace WorkshopWreckage
 
         static string FileFor(string key, int lod) => Shared.MeshPath(key.Replace(":", "_") + "__lod" + lod + ".obj.gz");
 
-        public static bool Has(string key) => SalvageMeshes.Has(key) || _cache.ContainsKey(key + "|1") || File.Exists(FileFor(key, LodWorld));
+        public static bool Has(string key) => SalvageMeshes.Has(key) || Pegboard.ToolFactory.Has(key) || _cache.ContainsKey(key + "|1") || File.Exists(FileFor(key, LodWorld));
 
         static IEnumerable<string> Lines(string path)
         {
@@ -42,7 +42,9 @@ namespace WorkshopWreckage
             var k = key + "|" + lod;
             if (!_cache.TryGetValue(k, out var e))
             {
-                e = SalvageMeshes.Has(key) ? SalvageMeshes.Build(key, lod) : Load(FileFor(key, lod), key);
+                e = SalvageMeshes.Has(key) ? SalvageMeshes.Build(key, lod)
+                    : Pegboard.ToolFactory.Has(key) ? Pegboard.ToolFactory.Build(key, lod)   // pegboard hand tools
+                    : Load(FileFor(key, lod), key);
                 _cache[k] = e;
             }
             return e;

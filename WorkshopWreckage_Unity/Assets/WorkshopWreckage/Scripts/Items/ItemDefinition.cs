@@ -11,7 +11,7 @@ namespace WorkshopWreckage
         public static readonly string[] CategoryNames =
         {
             "Screws", "Nuts", "Washers", "Gears", "Springs", "Bearings", "Shafts & Pins",
-            "Electronics", "Specialty Parts", "Machine Parts", "Robot Parts",
+            "Electronics", "Specialty Parts", "Machine Parts", "Hand Tools", "Robot Parts",   // Robot Parts stays last (IsRobotPart)
         };
 
         public int id;
@@ -38,6 +38,10 @@ namespace WorkshopWreckage
         /// <summary>A Part Radar component or battery (shared/data/tools/part_radar.json): category Robot Parts
         /// (no drawer, delivered to the Robot Workbench) but no robot's component, no ordinary part.</summary>
         public bool IsToolItem => craftingPurpose != null && craftingPurpose.StartsWith("tool:");
+        /// <summary>A pegboard hand tool (shared/data/pegboard): one of a kind, hung by the player in its slot on the
+        /// tool board (destination PB-&lt;slot&gt;); counts toward restored, gives no XP and no level.</summary>
+        public bool IsPegboardTool => craftingPurpose != null && craftingPurpose.StartsWith("pegboard:");
+        public string PegSlot => IsPegboardTool ? craftingPurpose.Substring("pegboard:".Length) : "";
         /// <summary>A robot's own component (robot_parts.json): a robot part that is not a tool item.</summary>
         public bool IsRobotComponent => IsRobotPart && !IsToolItem;
         /// <summary>The tool item's type ("radar_housing", ..., "battery"); "" for anything else.</summary>

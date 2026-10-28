@@ -39,12 +39,13 @@ namespace WorkshopWreckage
             var p = g.progress;
             switch (o.type)
             {
-                case "collected": return p.CollectedTotal;
-                case "sorted": return p.sortedTotal;
+                // the pegboard's tools count toward restored % only, never toward an objective's XP (docs/PEGBOARD.md)
+                case "collected": return p.CollectedTotal - g.world.instances.Count(i => i.state != ItemState.InWorld && g.world.DefOf(i.id).IsPegboardTool);
+                case "sorted": return p.sortedTotal - (g.builder?.pegboard?.Hung ?? 0);
                 case "robot_parts": return g.workbench.InstalledCount(o.robot);
                 case "robot_active": return g.robots.Any(r => r.id == o.robot && r.Operational) ? 1 : 0;
                 case "robots_active": return g.robots.Count(r => r.Operational);
-                case "sets_completed": return g.db.order.Count(d => !g.db.Get(d).IsRobotPart && p.IsComplete(d));
+                case "sets_completed": return g.db.order.Count(d => !g.db.Get(d).IsRobotPart && !g.db.Get(d).IsPegboardTool && p.IsComplete(d));
                 case "zone_percent": return Mathf.FloorToInt(Enumerable.Range(0, g.layout.zones.Count).Max(z => p.ZonePercent(z)));
                 case "skills": return g.progression.unlocked.Count + g.progression.RanksBought;
                 case "level": return g.progression.level;

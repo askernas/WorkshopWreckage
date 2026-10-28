@@ -104,7 +104,11 @@ namespace WorkshopWreckage
             float north = -D / 2, south = D / 2, west = -W / 2, east = W / 2;
             F("bench", new Vector3(0, 0, north + 0.6f), new Vector3(6, 0.94f, 0.9f));
             foreach (var x in new[] { -2.9f, 2.9f }) Block(new Vector2(x, north + 0.6f), new Vector2(0.14f, 0.9f));
-            F("pegboard", new Vector3(0, 1.25f, north + 0.03f), new Vector3(5.4f, 1.5f, 0.04f));
+            {
+                // the interactive tool pegboard (Scripts/Pegboard): its root on the wall, the bottom of its frame at mount_y
+                var pb = Pegboard.PegboardConfig.Load();
+                F("pegboard", new Vector3(0, pb.mountY, north), new Vector3(pb.width, pb.height, pb.depth));
+            }
             F("bench", new Vector3(0.9f, 0, -0.75f), new Vector3(3.2f, 0.94f, 1.3f), 0, new Dictionary<string, object> { ["shelf"] = true });
             foreach (var x in new[] { -0.6f, 2.4f }) foreach (var z in new[] { -1.3f, -0.2f }) Block(new Vector2(x, z), new Vector2(0.14f, 0.14f));
             F("sign", new Vector3(0, 3.7f, north + 0.05f), new Vector3(4.6f, 1.3f, 0.1f));

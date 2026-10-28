@@ -19,6 +19,13 @@ Shader "WorkshopWreckage/Env"
         _AO ("Mask B is occlusion", Range(0,1)) = 0
         _Macro ("Anti-tiling variation", Range(0,1)) = 0
         _Grime ("Contact grime near the floor", Range(0,1)) = 0
+        _SilTex ("Painted outlines (R signed distance, G chips, B brush, A scuffs)", 2D) = "black" {}
+        _SilOn ("Painted outlines on (_WW_UV)", Float) = 0
+        _SilRange ("Outline distance range (m)", Float) = 0.016
+        _SilRim ("Outline rim width (m)", Float) = 0.0022
+        _SilChip ("Outline chip threshold", Float) = 0.76
+        _SilColor ("Outline fill (a = opacity)", Color) = (0.17, 0.1, 0.06, 0.9)
+        _SilRimColor ("Outline rim", Color) = (0.08, 0.04, 0.02, 1)
     }
 
     HLSLINCLUDE
@@ -34,10 +41,34 @@ Shader "WorkshopWreckage/Env"
         float _AO;
         float _Macro;
         float _Grime;
+        float _SilOn;
+        float _SilRange;
+        float _SilRim;
+        float _SilChip;
+        float4 _SilColor;
+        float4 _SilRimColor;
     CBUFFER_END
     TEXTURE2D(_MainTex); SAMPLER(sampler_MainTex);
     TEXTURE2D(_MaskTex); SAMPLER(sampler_MaskTex);
     TEXTURE2D(_BumpMap); SAMPLER(sampler_BumpMap);
+    TEXTURE2D(_SilTex); SAMPLER(sampler_SilTex);
+
+    // the pegboard's painted tool outlines (Pegboard/PegboardMaterials.cs): a signed distance field, so the edge
+    // stays crisp at any distance; a darker rim inside the edge, brush streaks, chips and scuffs from noise channels
+    float3 PaintedOutlines(float3 c, float2 uv)
+    {
+        float4 t = SAMPLE_TEXTURE2D(_SilTex, sampler_SilTex, uv);
+        float d = (t.r - 0.5) * _SilRange;                       // metres from the outline, + inside
+        float w = max(fwidth(d), 1e-5);
+        float gw = max(fwidth(t.g), 1e-4);
+        float inside = saturate(d / w + 0.5);
+        float rim = (1 - saturate((d - _SilRim) / w + 0.5)) * inside;
+        float chip = saturate((t.g - (_SilChip - 0.06 * rim)) / gw + 0.5);   // knocked off along the rim first
+        float scuff = smoothstep(0.68, 0.82, t.a) * 0.25;
+        float3 fill = _SilColor.rgb * (0.86 + 0.26 * t.b);
+        fill = lerp(fill, _SilRimColor.rgb, rim);
+        return lerp(c, fill, inside * _SilColor.a * (1 - chip * 0.85) * (1 - scuff));
+    }
 
     struct Attributes
     {
@@ -130,6 +161,7 @@ Shader "WorkshopWreckage/Env"
                 #if defined(_WW_UV)
                     float4 albedo = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv);
                     float4 mask = float4(1, 1, 1, 1);
+                    if (_SilOn > 0) albedo.rgb = PaintedOutlines(albedo.rgb, i.uv);
                 #elif defined(_WW_OBJECT)
                     // things that move (robots): the wear sticks to the object instead of the room
                     float3 on = normalize(i.normalOS);

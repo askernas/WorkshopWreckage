@@ -54,8 +54,13 @@ namespace WorkshopWreckage
         public static (Color albedo, Vector4 custom) Params(ItemDefinition def)
         {
             var p = Materials.TryGetValue(def.material, out var m) ? m : Materials["steel"];
-            if (def.material == "painted") p.albedo = ItemSkins.Applies(def) ? ItemSkins.PaintOf(def) : Vintage(def.variantColor) * 0.85f;   // skins: industrial enamel; robot parts: worn enamel
+            if (def.material == "painted") p.albedo = ItemSkins.Applies(def) ? ItemSkins.PaintOf(def) : def.IsPegboardTool ? def.variantColor : Vintage(def.variantColor) * 0.85f;   // pegboard tools: their catalogue colour   // skins: industrial enamel; robot parts: worn enamel
             if (def.material == "electronic") p.albedo = def.variantColor;
+            else if (def.IsPegboardTool && def.material != "painted")   // pegboard steel: tinted by its catalogue colour (cool chrome under the warm board lights)
+            {
+                var vc = def.variantColor; float mx = Mathf.Max(0.05f, Mathf.Max(vc.r, Mathf.Max(vc.g, vc.b)));
+                p.albedo = new Color(p.albedo.r * vc.r / mx, p.albedo.g * vc.g / mx, p.albedo.b * vc.b / mx) * 0.85f;
+            }
             switch (def.finish)
             {
                 case "zinc": p.albedo = new Color(0.42f, 0.44f, 0.46f); p.roughness = 0.45f; break;
@@ -105,6 +110,7 @@ namespace WorkshopWreckage
         /// <summary>Per-definition material for non-instanced (inspection/held) models.</summary>
         public static Material For(ItemDefinition def)
         {
+            if (def.IsPegboardTool && ItemSkins.Enabled) return Pegboard.ToolBatch.HeldMaterial(def);   // the board's tool look
             var (albedo, c) = Params(def);
             float wear = Mathf.Clamp01(0.45f + c.z * 0.8f);   // held / inspected: as worn as the parts on the floor
             var (sa, sb) = ItemSkins.For(def, ItemSkins.Applies(def) ? ItemSkins.Condition(def) : wear);

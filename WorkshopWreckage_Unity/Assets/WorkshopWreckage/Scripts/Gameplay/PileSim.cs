@@ -115,7 +115,8 @@ namespace WorkshopWreckage
         {
             var inst = g.world.instances[id];
             var def = g.world.DefOf(id);
-            var mesh = MeshLibrary.Get(def.geometryKey, MeshLibrary.LodWorld).mesh;
+            var mesh = Pegboard.ToolFactory.Has(def.geometryKey) ? Pegboard.ToolFactory.CollisionMesh(def.geometryKey)   // board tools: unbevelled hull
+                : MeshLibrary.Get(def.geometryKey, MeshLibrary.LodWorld).mesh;
             var go = new GameObject("part" + id);
             SceneManager.MoveGameObjectToScene(go, _scene);
             var m = inst.transform;

@@ -117,6 +117,7 @@ namespace WorkshopWreckage
             _clips["loop_machine"] = Loop("machine");
             _clips["supermagnet"] = Sweep(0.9f, 140, 1250, 0.6f);
             _clips["robot_part"] = RobotFind();
+            _clips["peg_hang"] = Clink(1250, 0.24f, 0.55f);   // a tool settling on its hooks
             for (int k = 0; k < 12; k++) _2d.Add(gameObject.AddComponent<AudioSource>());
             for (int k = 0; k < 10; k++)
             {

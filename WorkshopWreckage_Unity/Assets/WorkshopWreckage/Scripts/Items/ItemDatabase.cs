@@ -10,7 +10,7 @@ namespace WorkshopWreckage
     /// an invalid database refuses to produce a world.</summary>
     public class ItemDatabase
     {
-        static readonly string[] KnownFamilies = { "screw", "nut", "washer", "gear", "spring", "bearing", "shaft", "elec", "spec", "mach", "robot" };
+        static readonly string[] KnownFamilies = { "screw", "nut", "washer", "gear", "spring", "bearing", "shaft", "elec", "spec", "mach", "robot", "tool" };
         public static readonly string[] Kinds = { "drawer", "cardboard_box", "metal_bin", "wooden_crate", "shelf_section", "floor_pallet" };
         static readonly string[] OpenKinds = { "cardboard_box", "metal_bin", "wooden_crate", "shelf_section", "floor_pallet" };
         static readonly Dictionary<string, string> KindNames = new()
@@ -62,7 +62,7 @@ namespace WorkshopWreckage
                 var catText = File.ReadAllText(P("item_catalog.json"));
                 var stoText = File.ReadAllText(P("storage_layout.json"));
                 db.Load(cfg, Json.Obj(Json.Parse(catText)), Json.Obj(Json.Parse(stoText)));
-                db.catalogHash = Fnv(catText) ^ Fnv(stoText);
+                db.catalogHash = Fnv(catText) ^ Fnv(stoText) ^ db.MergePegboard();
             }
             catch (System.Exception e)
             {
@@ -110,6 +110,31 @@ namespace WorkshopWreckage
             }
         }
 
+        /// <summary>The tool pegboard (Pegboard/, shared/data/pegboard/): its tools join every preset as unique,
+        /// player-only items, each assigned to its own slot (a one-place station "PB-&lt;slot&gt;"). Returns a hash
+        /// of the pegboard files, so a save from before a change to them is migrated like a catalogue change.</summary>
+        public long MergePegboard()
+        {
+            if (!Pegboard.PegboardConfig.Present) return 0;
+            var pb = Pegboard.PegboardConfig.Load();
+            if (pb.errors.Count > 0) { errors.AddRange(pb.errors.Select(e => "pegboard: " + e)); return 0; }
+            foreach (var t in pb.tools)
+            {
+                var def = ItemDefinition.FromDict(pb.ItemDict(t), 1, errors);
+                if (definitions.ContainsKey(def.id)) { errors.Add($"Pegboard tool '{t.id}': item id {def.id} is already used"); continue; }
+                def.componentScale = 1f;
+                def.robotCarry = false;   // only the player hangs tools
+                definitions[def.id] = def;
+                order.Add(def.id);
+            }
+            foreach (var s in pb.slots)
+                stations[s.Destination] = new Dictionary<string, object>
+                {
+                    ["id"] = s.Destination, ["label"] = "Tool board: " + pb.toolById[s.tool].name, ["capacity"] = 1.0, ["tool"] = "pegboard",
+                };
+            return Fnv(File.ReadAllText(Pegboard.PegboardConfig.Path("tool_definitions.json"))) ^ Fnv(File.ReadAllText(Pegboard.PegboardConfig.Path("tool_slots.json")));
+        }
+
         /// <summary>Deterministic 64-bit FNV-1a (string.GetHashCode is not stable across runs).</summary>
         public static long Fnv(string s)
         {
@@ -153,6 +178,9 @@ namespace WorkshopWreckage
         public List<int> RobotPartIds(string robot = "")
             => order.Where(id => definitions[id].IsRobotComponent && (robot == "" || definitions[id].craftingPurpose == "robot:" + robot)).ToList();
 
+        /// <summary>Instances in a world: the preset's total_items plus the pegboard's tools (one each).</summary>
+        public int WorldTotal => Json.Int(config, "total_items", 4096) + order.Count(id => definitions[id].IsPegboardTool);
+
         public int TotalSpawn() => order.Sum(id => definitions[id].spawnCount);
 
         /// <summary>World extents of a definition's model, largest first (needs meshes loaded).</summary>
@@ -184,14 +212,19 @@ namespace WorkshopWreckage
             int maxDefault = Json.Int(config, "max_spawn_default", 10);
             int maxHigh = Json.Int(config, "max_spawn_high_quantity", 25);
             var highCats = Json.Arr(config.GetValueOrDefault("high_quantity_categories")).Select(x => x.ToString()).ToHashSet();
-            int ordinary = 0, robot = 0, tool = 0;
+            int ordinary = 0, robot = 0, tool = 0, peg = 0;
             var load = new Dictionary<string, int>();
             foreach (var id in order)
             {
                 var d = definitions[id];
                 var label = $"Item {d.id} ({d.displayName})";
                 if (d.spawnCount < 1) errors.Add($"{label}: spawn_count {d.spawnCount} must be at least 1");
-                if (d.IsToolItem) tool += d.spawnCount;   // Part Radar parts and batteries: copies allowed
+                if (d.IsPegboardTool)
+                {
+                    peg += d.spawnCount;   // the pegboard's own count (not part of the preset's totals)
+                    if (d.spawnCount != 1) errors.Add($"{label}: pegboard tools are unique; spawn_count must be 1 (is {d.spawnCount})");
+                }
+                else if (d.IsToolItem) tool += d.spawnCount;   // Part Radar parts and batteries: copies allowed
                 else if (d.IsRobotPart)
                 {
                     robot += d.spawnCount;
@@ -231,6 +264,8 @@ namespace WorkshopWreckage
             if (robot != wantRobot) errors.Add($"Robot part items total {robot}, configuration requires {wantRobot}");
             int wantTool = Json.Int(config, "tool_part_items", 0);
             if (tool != wantTool) errors.Add($"Part Radar items total {tool}, configuration requires {wantTool}");
+            int wantPeg = Pegboard.PegboardConfig.Present && Pegboard.PegboardConfig.Load().errors.Count == 0 ? Pegboard.PegboardConfig.Load().tools.Count : 0;
+            if (peg != wantPeg) errors.Add($"Pegboard tools total {peg}, the pegboard defines {wantPeg}");
             if (ordinary + robot + tool != wantTotal) errors.Add($"World population totals {ordinary + robot + tool}, configuration requires exactly {wantTotal}");
         }
 

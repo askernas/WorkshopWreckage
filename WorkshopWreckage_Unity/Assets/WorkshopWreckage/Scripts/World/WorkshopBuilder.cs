@@ -113,7 +113,7 @@ namespace WorkshopWreckage
             switch (type)
             {
                 case "bench": Bench(b, size, Json.Bool(f, "shelf")); break;
-                case "pegboard": Pegboard(b, size); break;
+                case "pegboard": pegboard = Pegboard.WorkshopPegboard.Create(g, Vector3.zero, Quaternion.identity, Pegboard.PegboardConfig.Load()); break;
                 case "overturned_chest":
                     b.Box(new Vector3(0, size.z / 2, 0), new Vector3(size.y, size.z, size.x), EnvMaterials.Metal(new Color(0.55f, 0.15f, 0.1f), 0.45f), true);
                     for (int k = 0; k < 3; k++)
@@ -214,42 +214,8 @@ namespace WorkshopWreckage
             b.Box(new Vector3(size.x / 2 - 0.35f, size.y + 0.07f, size.z / 2), new Vector3(0.22f, 0.12f, 0.04f), steel);
         }
 
-        void Pegboard(Batch b, Vector3 size)
-        {
-            b.Box(Vector3.zero, size, EnvMaterials.Wood(new Color(0.55f, 0.42f, 0.28f)));
-            var steel = EnvMaterials.Plain(new Color(0.55f, 0.56f, 0.58f), 1, 0.65f);
-            var red = EnvMaterials.Plain(new Color(0.6f, 0.1f, 0.08f), 0.1f, 0.5f);
-            var handle = EnvMaterials.Wood(new Color(0.4f, 0.25f, 0.12f));
-            var rng = new System.Random(42);
-            float R01() => (float)rng.NextDouble();
-            float x = -size.x / 2 + 0.25f;
-            while (x < size.x / 2 - 0.2f)
-            {
-                int kind = rng.Next(0, 4);
-                float y = -0.2f + R01() * 0.45f;
-                switch (kind)
-                {
-                    case 0:
-                        float l = 0.18f + R01() * 0.16f;
-                        b.Box(new Vector3(x, y, 0.04f), new Vector3(0.025f, l, 0.008f), steel);
-                        b.Cylinder(new Vector3(x, y + l / 2, 0.04f), 0.03f, 0.01f, steel, R(Vector3.right, Mathf.PI / 2), 8);
-                        break;
-                    case 1:
-                        b.Cylinder(new Vector3(x, y - 0.06f, 0.05f), 0.016f, 0.12f, R01() < 0.5f ? red : handle, null, 8);
-                        b.Cylinder(new Vector3(x, y + 0.07f, 0.05f), 0.004f, 0.16f, steel, null, 6);
-                        break;
-                    case 2:
-                        b.Cylinder(new Vector3(x, y - 0.05f, 0.05f), 0.014f, 0.3f, handle, null, 8);
-                        b.Box(new Vector3(x, y + 0.11f, 0.05f), new Vector3(0.12f, 0.035f, 0.035f), steel);
-                        break;
-                    default:
-                        b.Box(new Vector3(x - 0.012f, y, 0.04f), new Vector3(0.012f, 0.2f, 0.01f), red, false, R(Vector3.forward, 0.08f));
-                        b.Box(new Vector3(x + 0.012f, y, 0.04f), new Vector3(0.012f, 0.2f, 0.01f), red, false, R(Vector3.forward, -0.08f));
-                        break;
-                }
-                x += 0.12f + R01() * 0.1f;
-            }
-        }
+        /// <summary>The interactive tool pegboard behind the north bench (furniture "pegboard").</summary>
+        public Pegboard.WorkshopPegboard pegboard;
 
         public Transform machineSpindle, machineHandwheel;
         public Light machineLamp;

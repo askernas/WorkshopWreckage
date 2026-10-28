@@ -155,7 +155,7 @@ namespace WorkshopWreckage
                 {
                     case "door": case "blueprint": return -1;
                     case "plant": continue;
-                    case "pegboard": bottom = Mathf.Max(bottom, p.y + s.y / 2 + 0.15f); break;   // above the tool board
+                    case "pegboard": return -1;   // the tool pegboard fills the wall up to the sign: its sheets hang elsewhere
                     case "sign": case "clock":
                         mounted.Add(p.y - s.y / 2);   // wall-mounted: checked once the height is known
                         break;

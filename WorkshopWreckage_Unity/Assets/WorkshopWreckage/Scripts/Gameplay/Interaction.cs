@@ -51,6 +51,8 @@ namespace WorkshopWreckage
         public double lastActionMicros;
         public readonly HashSet<int> busy = new();
         public string targetSocket;
+        /// <summary>The pegboard slot aimed at (targetType "peg").</summary>
+        public string targetPeg;
         public event Action<TargetInfo> TargetChanged;
         public event Action<string, bool> Feedback;
         public event Action<bool, ItemDefinition> InspectChanged;
@@ -179,6 +181,7 @@ namespace WorkshopWreckage
             targetItem = -1;
             targetDest = null;
             targetUnit = null;
+            targetPeg = null;
             // a pile in front of a drawer must not stop you storing into it: while you hold a part
             // that belongs right there, aiming through the pile (within 0.8 m of it) selects the drawer
             if (pid >= 0 && hit.HasValue && Inv.HeldId() >= 0 && hit.Value.distance - pdist < 0.8f
@@ -195,6 +198,7 @@ namespace WorkshopWreckage
             }
             if (targetArm != null) targetType = "arm";
             else if (pid >= 0) { targetType = "item"; targetItem = pid; }
+            else if (PegAim(o, dir, envT, hit) is string peg) { targetType = "peg"; targetPeg = peg; }
             else if (hit.HasValue)
             {
                 var st = hit.Value.collider.GetComponent<StorageTarget>();
@@ -207,6 +211,29 @@ namespace WorkshopWreckage
             NoteHover();
             ShowHover();
             TargetChanged?.Invoke(Describe());
+        }
+
+        /// <summary>The pegboard slot under the crosshair (docs/PEGBOARD.md), unless something nearer is in the way.
+        /// Carrying a board tool, its own slot wins whenever the crosshair is near it.</summary>
+        string PegAim(Vector3 o, Vector3 dir, float envT, RaycastHit? hit)
+        {
+            var pb = game.builder?.pegboard;
+            if (pb == null) return null;
+            int held = Inv.HeldId();
+            string prefer = held >= 0 && World.DefOf(held).IsPegboardTool ? World.DefOf(held).PegSlot : null;
+            var slot = pb.SlotUnderRay(new Ray(o, dir), Mathf.Min(envT + 0.15f, Reach), out float d, prefer);
+            if (slot == null || hit.HasValue && hit.Value.distance < d - 0.12f) return null;
+            return slot;
+        }
+
+        /// <summary>The board tool you carry that belongs in a slot (the held one first), or -1.</summary>
+        int CarriedToolFor(string slot)
+        {
+            var dest = Pegboard.PegboardConfig.DestPrefix + slot;
+            int held = Inv.HeldId();
+            if (held >= 0 && World.DefOf(held).storageBox == dest) return held;
+            foreach (var id in Inv.items) if (World.DefOf(id).storageBox == dest) return id;
+            return -1;
         }
 
         /// <summary>The crosshair left a robot part lying in the world: it blinks once.</summary>
@@ -244,6 +271,7 @@ namespace WorkshopWreckage
         void ShowHover()
         {
             HideHover();
+            game.builder?.pegboard?.Highlight(targetType == "peg" && !game.builder.pegboard.IsOccupied(targetPeg) && CarriedToolFor(targetPeg) >= 0 ? targetPeg : null);
             if (targetType == "item")
             {
                 var inst = World.instances[targetItem];
@@ -332,6 +360,21 @@ namespace WorkshopWreckage
                     }
                     return new TargetInfo { title = title, sub = sub, hint = Storage.ResultText(r, targetDest, held), tone = -1 };
                 }
+                case "peg":
+                {
+                    var pb = game.builder.pegboard;
+                    var tool = pb.cfg.toolById[pb.cfg.slotById[targetPeg].tool];
+                    var title = "Tool board  ·  " + tool.name;
+                    var sub = $"{pb.Hung} / {pb.Total} tools hung" + (pb.IsOccupied(targetPeg) ? "  ·  in its place" : "  ·  this slot is empty");
+                    if (pb.IsOccupied(targetPeg)) return new TargetInfo { title = title, sub = sub, hint = "" };
+                    int n = Inv.items.Count(i => World.DefOf(i).IsPegboardTool);
+                    string all = n > 1 ? $"    [G] Hang all {n}" : "";
+                    if (CarriedToolFor(targetPeg) >= 0)
+                        return new TargetInfo { title = title, sub = sub, hint = "[LMB] " + pb.cfg.S("interaction", "prompt", "Hang {tool}").Replace("{tool}", tool.name) + all, tone = 1 };
+                    if (held >= 0)
+                        return new TargetInfo { title = title, sub = sub, hint = pb.cfg.S("interaction", "wrong_prompt", "{tool} doesn't belong here").Replace("{tool}", World.DefOf(held).displayName) + all, tone = -1 };
+                    return new TargetInfo { title = title, sub = sub, hint = $"Find the {tool.name.ToLowerInvariant()} to hang it here", tone = 0 };
+                }
                 case "tray":
                 {
                     int n = Inv.items.Count(i => !World.DefOf(i).IsRobotPart);
@@ -393,6 +436,19 @@ namespace WorkshopWreckage
                 case "tray":
                     if (Inv.HeldId() >= 0) DropInTray(Inv.HeldId());
                     break;
+                case "peg":
+                {
+                    var pb = game.builder.pegboard;
+                    if (pb.IsOccupied(targetPeg)) break;
+                    int tool = CarriedToolFor(targetPeg);
+                    if (tool >= 0) HangTool(tool);
+                    else if (Inv.HeldId() >= 0)
+                    {
+                        Feedback?.Invoke(pb.cfg.S("interaction", "wrong_prompt", "{tool} doesn't belong here").Replace("{tool}", World.DefOf(Inv.HeldId()).displayName), false);
+                        Sfx.Play("reject", null, -4);
+                    }
+                    break;
+                }
                 case "exit":
                     game.SetState("exit");
                     break;
@@ -485,10 +541,28 @@ namespace WorkshopWreckage
                 Quaternion.Euler(UnityEngine.Random.Range(-10f, 10f), UnityEngine.Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
         }
 
+        /// <summary>Hangs a carried board tool in its own slot (only the player hangs tools; it can only go
+        /// where its silhouette is): stored in the slot's destination, drawn by the board from then on.</summary>
+        public bool HangTool(int id)
+        {
+            var def = World.DefOf(id);
+            var pb = game.builder?.pegboard;
+            if (pb == null || !def.IsPegboardTool) return false;
+            var dest = def.storageBox;
+            var r = Storage.Check(dest, id);
+            if (r != StorageSystem.Result.Ok) { Feedback?.Invoke(Storage.ResultText(r, dest, id), false); Sfx.Play("reject", null, -4); return false; }
+            Inv.Remove(id);
+            Storage.Deposit(dest, id);   // the board hangs it (Game: Deposited)
+            Sfx.Play(pb.cfg.S("interaction", "sound", "peg_hang"), pb.SlotCentre(def.PegSlot), -3);
+            Feedback?.Invoke($"Hung: {def.displayName}  ({pb.Hung}/{pb.Total} on the tool board)", true);
+            return true;
+        }
+
         public bool DropInTray(int id, bool feedback = true)
         {
             var def = World.DefOf(id);
             if (def.IsRobotPart) { if (feedback) Feedback?.Invoke("Robot parts go to the Robot Workbench — carry them there yourself", false); return false; }
+            if (def.IsPegboardTool) { if (feedback) Feedback?.Invoke("Tools go on the tool board — only you can hang them", false); return false; }
             var m = TrayMatrix(def);
             var p = (Vector3)m.GetColumn(3);
             var from = game.held.HandWorld();
@@ -560,6 +634,11 @@ namespace WorkshopWreckage
             {
                 int n = StationParts().Count(DepositStation);
                 if (n > 1) Feedback?.Invoke($"Delivered {n} parts to the workbench", true);
+            }
+            else if (targetType == "peg")
+            {
+                int n = Inv.items.Where(id => World.DefOf(id).IsPegboardTool).ToList().Count(HangTool);
+                if (n > 1) Feedback?.Invoke($"Hung {n} tools ({game.builder.pegboard.Hung}/{game.builder.pegboard.Total} on the tool board)", true);
             }
             else if (targetType == "tray")
             {

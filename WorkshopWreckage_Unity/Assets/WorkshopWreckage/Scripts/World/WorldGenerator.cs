@@ -193,9 +193,9 @@ namespace WorkshopWreckage
             var world = new ItemWorld(db) { seed = seed, layoutHash = ItemDatabase.Fnv(db.presetId + ":" + seed) };
             foreach (var defId in db.order)
                 for (int c = 0; c < db.Get(defId).spawnCount; c++) world.Add(defId, Matrix4x4.identity);
-            if (world.Count != Json.Int(db.config, "total_items", 4096))
+            if (world.Count != db.WorldTotal)
             {
-                errors.Add($"Expanded {world.Count} instances, expected {Json.Int(db.config, "total_items", 4096)}");
+                errors.Add($"Expanded {world.Count} instances, expected {db.WorldTotal}");
                 return null;
             }
             if (limit > 0 && limit < world.Count)
@@ -222,15 +222,17 @@ namespace WorkshopWreckage
             int clearN = surfaces[0].blockers.Count - clear0;
 
             var robotIds = new List<int>();
+            var pegIds = new List<int>();
             var groups = new Dictionary<int, List<int>>();
             foreach (var inst in world.instances)
             {
                 var def = db.Get(inst.defId);
                 if (def.IsRobotPart) { robotIds.Add(inst.id); continue; }
+                if (def.IsPegboardTool) { pegIds.Add(inst.id); continue; }
                 if (!groups.TryGetValue(def.id, out var g)) groups[def.id] = g = new List<int>();
                 g.Add(inst.id);
             }
-            int ordinary = world.Count - robotIds.Count;
+            int ordinary = world.Count - robotIds.Count - pegIds.Count;
             var caps = Capacities(layout, ordinary);
             var assign = Distribute(layout, caps, groups, db);
             // the starter assortment: one copy each of a few different large parts in plain
@@ -307,18 +309,21 @@ namespace WorkshopWreckage
                     errors.Add($"Could not place instance {retroPlaced[k]}");
             }
             PlaceToolItems(world, robotIds.Where(id => world.DefOf(id).IsToolItem).ToList(), surfaces, layout, floorPile, seed);
+            PlaceToolItems(world, pegIds, surfaces, layout, floorPile, seed, "pegboard:");
+            foreach (var id in pegIds) world.instances[id].zone = -1;   // the board's tools earn no zone-restored XP
             lastGenerationMs = sw.Elapsed.TotalMilliseconds;
             return errors.Count == 0 ? world : null;
         }
 
         /// <summary>Part Radar parts and batteries (spec v1.2 §4, §8): spread over the floor piles of the whole
         /// workshop, on top (placed after everything else, so never buried), from their own random stream: the
-        /// rest of the world lies exactly where it would without them, and older saves keep their positions.</summary>
-        void PlaceToolItems(ItemWorld world, List<int> ids, List<PileSurface> surfaces, WorkshopLayout layout, PileSite floorPile, int seed)
+        /// rest of the world lies exactly where it would without them, and older saves keep their positions.
+        /// The pegboard's tools (docs/PEGBOARD.md) are placed the same way, from a stream of their own.</summary>
+        void PlaceToolItems(ItemWorld world, List<int> ids, List<PileSurface> surfaces, WorkshopLayout layout, PileSite floorPile, int seed, string stream = "part-radar:")
         {
             if (ids.Count == 0) return;
             var keep = _rng;
-            _rng = new System.Random((int)(ItemDatabase.Fnv("part-radar:" + seed) & 0x7fffffff));
+            _rng = new System.Random((int)(ItemDatabase.Fnv(stream + seed) & 0x7fffffff));
             var piles = Enumerable.Range(0, layout.piles.Count).Where(p => layout.piles[p].surface == 0 && layout.piles[p].kind != "feature").ToList();
             for (int k = ids.Count - 1; k > 0; k--) { int j = _rng.Next(k + 1); (ids[k], ids[j]) = (ids[j], ids[k]); }
             for (int k = 0; k < ids.Count; k++)

@@ -28,6 +28,7 @@ namespace WorkshopWreckage
             public List<MaterialPropertyBlock> blocks = new();
             public List<Bounds> chunkBounds = new();   // tight per-chunk bounds so URP can cull per view / shadow pass
             public float radius;
+            public bool external;   // drawn elsewhere: the pegboard's tools (Pegboard.ScatteredTools)
         }
 
         public ItemWorld world;
@@ -71,7 +72,7 @@ namespace WorkshopWreckage
             int offset = 0;
             foreach (var kv in members)
             {
-                var g = new Group { entry = MeshLibrary.Get(kv.Key.key, MeshLibrary.LodWorld) };
+                var g = new Group { entry = MeshLibrary.Get(kv.Key.key, MeshLibrary.LodWorld), external = kv.Key.key.StartsWith(Pegboard.ToolFactory.Prefix) };
                 g.radius = 0;
                 foreach (var id in kv.Value) g.radius = Mathf.Max(g.radius, g.entry.bounds.extents.magnitude * w.DefOf(id).worldScale);
                 g.mats = ItemAppearance.SlotMaterials(g.entry, kv.Key.skin ? _skinMaterial : _material);
@@ -180,6 +181,7 @@ namespace WorkshopWreckage
             if (world == null) return;
             foreach (var g in _groupList)
             {
+                if (g.external) continue;
                 for (int c = 0; c < g.chunks.Count; c++)
                 {
                     for (int sub = 0; sub < g.mats.Length; sub++)

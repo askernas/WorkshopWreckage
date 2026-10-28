@@ -166,6 +166,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "pegboard")
+            {
+                yield return PegboardChecks();   // QA: the tool pegboard (docs/PEGBOARD.md): hang, refuse, no XP, save/load, full board
+                Finish();
+                yield break;
+            }
             if (section == "radarplans")
             {
                 yield return RadarPlanChecks();   // QA: the robot parts pool and the Part Radar plans (playtest 2026-10-26)
@@ -1795,6 +1801,89 @@ namespace WorkshopWreckage
                   $"Unibot stored {uni.delivered - u0} ({uni.tosses - tz0} tossed in), Hoverbot stored {hov.delivered - h0}; {lowStored} new parts in low destinations; {uni.Describe()} / {hov.Describe()}");
         }
 
+        /// <summary>The tool pegboard (docs/PEGBOARD.md): the tools are unique player-only items in the world, each
+        /// hangs only in its own slot (aimed with the crosshair), counts toward restored % with no XP or level, and
+        /// the board survives a save and load.</summary>
+        IEnumerator PegboardChecks()
+        {
+            var pb = g.builder.pegboard;
+            var it = g.interaction;
+            g.player.enabled = false;
+            var tools = g.world.instances.Where(i => g.world.DefOf(i.id).IsPegboardTool).ToList();
+            var defs = tools.Select(i => g.world.DefOf(i.id)).ToList();
+            Check("every board tool is one unique, player-only item lying in the world with its own slot destination",
+                  pb != null && tools.Count == pb.Total && pb.Total >= 60 && defs.Select(d => d.id).Distinct().Count() == tools.Count && defs.All(d => d.spawnCount == 1 && !d.robotCarry && !g.db.CanRobotCarry(d.id))
+                  && tools.All(i => i.state == ItemState.InWorld && i.zone == -1) && defs.All(d => g.db.stations.ContainsKey(d.storageBox) && d.storageBox == "PB-" + d.PegSlot) && pb.Hung == 0,
+                  $"{tools.Count} tools, {pb?.Total} slots, {pb?.Hung} hung at the start");
+
+            ItemInstance a = tools[0], b = tools[1];
+            var bAt = pb.SlotCentre(g.world.DefOf(b.id).PegSlot);
+            var c = tools.Skip(2).First(i => Vector3.Distance(pb.SlotCentre(g.world.DefOf(i.id).PegSlot), bAt) > 0.6f);   // far from b's own slot (its aim assist)
+            IEnumerator AimAtSlot(string slot)
+            {
+                var at = pb.SlotCentre(slot);
+                LookFrom(at - pb.transform.forward * 1.1f + Vector3.down * 0.15f, at);
+                yield return Frames(2);
+                it.UpdateTarget();
+            }
+            long xp0 = g.progression.xp; int lv0 = g.progression.level, pts0 = g.progression.skillPoints;
+            float pct0 = g.progress.OverallPercent;
+            it.Pickup(a.id, false);
+            yield return AimAtSlot(g.world.DefOf(a.id).PegSlot);
+            var info = it.Describe();
+            Check("aiming at the held tool's slot targets it and prompts to hang it, with the slot highlighted",
+                  it.targetType == "peg" && it.targetPeg == g.world.DefOf(a.id).PegSlot && info.tone == 1 && info.hint.Contains("Hang"),
+                  $"target {it.targetType} {it.targetPeg}, hint '{info.hint}'");
+            yield return g.Capture(Path.Combine(outDir, "peg_highlight.png"), 1);
+            it.Primary();
+            yield return Frames(2);
+            Check("[LMB] hangs it: stored in its slot, drawn on the board, restored % up, no XP, level or skill point",
+                  pb.IsOccupied(g.world.DefOf(a.id).PegSlot) && pb.Hung == 1 && a.state == ItemState.Stored && a.owner == "box:" + g.world.DefOf(a.id).storageBox && !g.inventory.Has(a.id)
+                  && g.progress.OverallPercent > pct0 && g.progression.xp == xp0 && g.progression.level == lv0 && g.progression.skillPoints == pts0,
+                  $"hung {pb.Hung}, state {a.state} {a.owner}, {pct0:0.000}% -> {g.progress.OverallPercent:0.000}%, xp {xp0} -> {g.progression.xp}");
+
+            // the wrong tool: refused at another tool's empty slot, and not taken by the tray
+            it.Pickup(b.id, false);
+            yield return AimAtSlot(g.world.DefOf(c.id).PegSlot);
+            info = it.Describe();
+            it.Primary();
+            Check("a wrong tool is never accepted: refused at another tool's slot, still in hand",
+                  it.targetType == "peg" && it.targetPeg == g.world.DefOf(c.id).PegSlot && info.tone == -1 && !pb.IsOccupied(it.targetPeg) && g.inventory.Has(b.id) && b.state == ItemState.Carried && pb.Hung == 1,
+                  $"target {it.targetPeg}, hint '{info.hint}', still carried {g.inventory.Has(b.id)}");
+            Check("tools do not go in the sorting tray (only the player hangs them)", !it.DropInTray(b.id, false) && g.inventory.Has(b.id), "");
+            Check("a robot never picks a board tool", g.robots.All(r => tools.All(i => !g.db.CanRobotCarry(i.defId))), "");
+
+            // save and load: the hung tool is back on the board, the carried one in hand
+            g.piles.Finish();
+            g.SaveGame("autotest_peg");
+            g.StartWorld(g.world.seed, null);
+            Check("a new world starts with an empty board", g.builder.pegboard.Hung == 0, $"{g.builder.pegboard.Hung} hung");
+            g.LoadGame("autotest_peg");
+            g.player.enabled = false;
+            yield return Frames(3);
+            pb = g.builder.pegboard;
+            a = g.world.instances[a.id]; b = g.world.instances[b.id];
+            Check("save and load restore the board: the hung tool in its slot, the other still carried",
+                  pb.Hung == 1 && pb.IsOccupied(g.world.DefOf(a.id).PegSlot) && a.state == ItemState.Stored && g.inventory.Has(b.id) && g.progression.xp == xp0,
+                  $"hung {pb.Hung}, a {a.state}, b carried {g.inventory.Has(b.id)}, xp {g.progression.xp}");
+
+            // every tool hung: the board is complete (100 %), still no XP
+            int refused = 0;
+            foreach (var i in g.world.instances.Where(i => g.world.DefOf(i.id).IsPegboardTool && i.state != ItemState.Stored).ToList())
+            {
+                if (!g.inventory.Has(i.id) && !it.Pickup(i.id, false)) { refused++; continue; }
+                if (!it.HangTool(i.id)) refused++;
+            }
+            yield return Frames(3);
+            Check("every tool hangs in its own slot: the board shows all of them, none missing, 100 %, no XP",
+                  refused == 0 && pb.Missing == 0 && pb.Percent >= 99.99f && g.progression.xp == xp0 && g.progression.level == lv0,
+                  $"{pb.Hung}/{pb.Total} hung, {refused} refused, xp {g.progression.xp}");
+            var mid = pb.transform.TransformPoint(new Vector3(0, pb.cfg.PanelCentre.y, pb.cfg.PanelFront));
+            LookFrom(mid - pb.transform.forward * 3.2f, mid);
+            yield return Frames(3);
+            yield return g.Capture(Path.Combine(outDir, "peg_full.png"), 1);
+        }
+
         IEnumerator RadarPlanChecks()
         {
             var wb = g.workbench;
@@ -3003,7 +3092,7 @@ namespace WorkshopWreckage
         IEnumerator DestinationChecks()
         {
             // 1. accounting: unique ids, one destination per part, assigned totals, achievable
-            var ordinary = g.world.instances.Where(i => !g.world.DefOf(i.id).IsRobotPart).ToList();
+            var ordinary = g.world.instances.Where(i => !g.world.DefOf(i.id).IsRobotPart && !g.world.DefOf(i.id).IsPegboardTool).ToList();   // board tools: their own slots (PegboardChecks)
             bool idsOk = g.world.instances.Select((inst, k) => inst.id == k).All(x => x);
             var defDest = new Dictionary<int, string>();
             int dupDefs = 0, missing = 0, overCap = 0, labelBad = 0, empty = 0;
@@ -3099,7 +3188,7 @@ namespace WorkshopWreckage
         /// <summary>Component rescale and the robot carry limit (ComponentScale, docs/COMPONENT_RESCALE.md).</summary>
         IEnumerator RescaleChecks()
         {
-            var sortable = g.db.order.Select(g.db.Get).Where(d => !d.IsRobotPart).ToList();
+            var sortable = g.db.order.Select(g.db.Get).Where(d => !d.IsRobotPart && !d.IsPegboardTool).ToList();   // board tools: not catalogue components, never rescaled, player-only by design
             bool on = ComponentScale.Enabled;
             float largestBase = sortable.Max(d => ItemDatabase.Extents(d)[0] / d.componentScale), largest = sortable.Max(d => ItemDatabase.Extents(d)[0]);
             Check("component rescale: factors 1x to the configured maximum by size, the largest parts keep their size, eligibility from the catalogue list",

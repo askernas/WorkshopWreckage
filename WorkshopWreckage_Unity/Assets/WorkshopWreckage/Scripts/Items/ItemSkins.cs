@@ -49,7 +49,7 @@ namespace WorkshopWreckage
             AccentSilver = new(0.66f, 0.67f, 0.69f), AccentNearBlack = new(0.06f, 0.06f, 0.07f);
 
         /// <summary>Skins are for sortable components; robot assembly parts keep their own look.</summary>
-        public static bool Applies(ItemDefinition def) => Enabled && !def.IsRobotPart && !def.geometryKey.StartsWith("robot:");
+        public static bool Applies(ItemDefinition def) => Enabled && !def.IsRobotPart && !def.IsPegboardTool && !def.geometryKey.StartsWith("robot:");   // pegboard tools keep their own colours
 
         public static int FamilyOf(ItemDefinition def)
         {

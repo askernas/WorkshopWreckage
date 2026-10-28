@@ -181,13 +181,39 @@ Shader "WorkshopWreckage/Item"
             //   recess   thread valleys and gear roots: darker, oil, the first rust
             //   scratch  sparse directional scratches on worn parts
             static float4 gArtDbg = 0;   // QA (--itemdebug=6): the art layers' masks (chip, worn edge, wash)
+
+            // pegboard tools: wood with its grain along the handle. On a turned handle the grain runs along the axis
+            // (uv.y) and the normal picks the streak round the handle; on a flat face it follows the longer side.
+            float3 ToolWood(float3 vc, float2 uv, float kind, float4 sinfo, float scale, float3 nWS, float seed, float edge, float cond, out float rough)
+            {
+                float2 g;
+                if (kind > 0.5 && kind < 1.5) g = float2(dot(normalize(nWS), float3(2.1, 1.3, 2.9)) * 1.6, uv.y * sinfo.y * scale * 2.5);
+                else
+                {
+                    float2 m = uv * sinfo.xy * scale;
+                    g = sinfo.y >= sinfo.x ? float2(m.x * 45.0, m.y * 2.5) : float2(m.y * 45.0, m.x * 2.5);
+                }
+                g += seed * 13.0;
+                float w1 = WN(g);
+                float w2 = WN(float2(g.x * 2.3 + w1 * 0.8, g.y * 0.6) + 0.37);
+                float streak = smoothstep(0.3, 0.75, w1 * 0.55 + w2 * 0.45);
+                float pore = smoothstep(0.6, 0.68, WN(float2(g.x * 7.0, g.y * 30.0)));
+                float3 c = vc * lerp(0.6, 1.18, streak) * (1.0 - pore * 0.2);
+                c = lerp(c, c * 0.55, edge * (0.25 + 0.5 * cond));   // ends and arrises darkened by hands and oil
+                rough = lerp(0.66, 0.5, streak) - 0.08 * cond;       // handled wood polishes a little
+                return c;
+            }
+
             void Skin(Varyings i, out float3 col, out float metal, out float rough, out float3 emit, inout float3 nWS)
             {
                 float packed = round(i.skinA.x);
                 float fam = fmod(packed, 8);
                 float prof = fmod(floor(packed / 8), 8);
-                float fin = floor(packed / 64);
-                float cond = i.skinB.w;
+                float fin = fmod(floor(packed / 64), 8);
+                // pegboard tools (Pegboard/ToolBatch.cs): +512; condition per tool in UV2.w (+10) of the merged mesh,
+                // family 7 = wood, and plastic, wood and steel parts never chip to bare steel
+                bool tool = packed > 511.5;
+                float cond = tool && i.sinfo.w > 9.5 ? i.sinfo.w - 10 : i.skinB.w;
                 float seed = i.custom.w;
                 float3 wp = i.objPos * i.scale;
                 float kind = round(i.sinfo.z);
@@ -261,6 +287,13 @@ Shader "WorkshopWreckage/Item"
                         col = lerp(col, col * 0.75 + bare * 0.2, scratch * 0.5);
                         metal = chip * 0.7;
                         rough = lerp(0.42 + 0.14 * cond, 0.4, chip);
+                        if (tool)           // painted tools: the odd knock across the face too, in patches, more on older tools
+                        {
+                            float knockT = smoothstep(0.585, 0.605, WN(wp.xy * 9.0 + wp.zz * 6.0 + seed * 13.0) * (0.85 + 0.3 * big));   // the fBm noise peaks near 0.7
+                            knockT *= saturate(0.45 + cond);
+                            col = lerp(col, lerp(bare * 0.85, float3(0.05, 0.04, 0.035), smoothstep(0.4, 0.7, nFine)), knockT);
+                            metal = max(metal, knockT * 0.7); rough = lerp(rough, 0.42, knockT);
+                        }
                     }
                     else if (fam < 3.5)     // bare and warm metal: the finish decides colour, gloss and pattern
                     {
@@ -277,7 +310,7 @@ Shader "WorkshopWreckage/Item"
                         else if (fin < 4.5) { col *= 0.96 + 0.06 * nFine; machAmt = 0.04; m = 0.8; r = 0.5; }   // aluminium: bead-blasted, soft
                         else if (fin < 5.5) { machAmt = 0.05; m = 0.95; r = 0.13; }              // polished
                         else { machAmt = 0.08; m = 0.9; r = 0.34; }                               // brass, copper
-                        if (!hardware && kind < 1.5 && fin < 4.5)                                 // housings: cast or blasted body, turned faces stay bright
+                        if (!hardware && kind < 1.5 && fin < 4.5 && !tool)                        // housings: cast or blasted body, turned faces stay bright
                         {
                             float grain = WN(wp.xy * 140.0 + wp.zz * 90.0);
                             col *= 0.9 + 0.1 * grain;
@@ -286,6 +319,7 @@ Shader "WorkshopWreckage/Item"
                         col *= 1 + (mach - 0.5) * 2 * machAmt;
                         rough = r + (mach - 0.5) * machAmt + 0.1 * cond;
                         metal = m;
+                        if (tool) { metal = min(m, 0.5); col *= 1.3; }   // hand tools: bright forged chrome under the warm board lights, not the room's dark reflection
                         if (fin > 5.5 || (fam > 2.5 && fin > 4.5))                                // warm metals tarnish evenly; handled spots stay bright
                         {
                             float tarn = saturate((0.12 + 0.7 * cond) * (0.75 + 0.25 * big + 0.25 * nEdge)) * (1 - polish);
@@ -350,11 +384,17 @@ Shader "WorkshopWreckage/Item"
                             rough = lerp(0.66, 0.42, bareAmt);
                         }
                     }
-                    else                    // electronics: clean solder mask / plastic, worn only at the corners
+                    else if (fam < 6.5)     // electronics: clean solder mask / plastic, worn only at the corners
                     {
                         col = lerp(col, col * 1.3 + 0.05, edge * 0.35);
                         rough = 0.45;
+                        if (tool)           // tool handles: satin moulded plastic, dulled and a little grimy where the hand works
+                        {
+                            col *= 1 - 0.14 * cond * smoothstep(0.35, 0.8, big);
+                            rough = 0.32 + 0.22 * cond * big + 0.06 * nFine;
+                        }
                     }
+                    else col = ToolWood(vc, uv, kind, i.sinfo, i.scale, nWS, seed, edge, cond, rough);   // tools: wooden handles
 
                     // drive motors: body, cooling ribs, end bells and foot read as separate parts
                     if (prof > 0.5 && prof < 2.5)
@@ -422,6 +462,30 @@ Shader "WorkshopWreckage/Item"
                         col = vc * vc * (0.9 + 0.2 * mach);
                         metal = 0.7; rough = 0.3 + 0.1 * mach;
                     }
+                    else if (tool)          // tool accents: wood, brass, steel fittings, dipped and moulded plastic grips
+                    {
+                        col = vc * vc;
+                        float sat = max(vc.r, max(vc.g, vc.b)) - min(vc.r, min(vc.g, vc.b));
+                        if (Near(vc, float3(0.58, 0.4, 0.22), 0.02) || Near(vc, float3(0.36, 0.22, 0.12), 0.02))
+                            col = ToolWood(col, uv, kind, i.sinfo, i.scale, nWS, seed, edge, cond, rough);
+                        else if (Near(vc, float3(0.68, 0.52, 0.24), 0.02))   // brass: a warm tarnish, bright where it rubs
+                        {
+                            col = lerp(col * (0.9 + 0.2 * mach), col * float3(0.6, 0.5, 0.38), saturate(0.2 + 0.6 * cond) * (1 - contact) * big);
+                            metal = 0.85; rough = 0.32 + 0.12 * cond;
+                        }
+                        else if (sat < 0.04)                                  // steel fittings: ferrules, screws, the dark knurled nuts
+                        {
+                            col *= 0.9 + 0.2 * mach;
+                            col = lerp(col, col * 1.4 + 0.02, contact * 0.5);
+                            metal = 0.7; rough = 0.32 + 0.1 * mach + 0.1 * cond;
+                        }
+                        else                                                  // plastic: satin, dulled by hands, grime in the creases
+                        {
+                            col *= 1 - 0.14 * cond * smoothstep(0.35, 0.8, big);
+                            col = lerp(col, col * 1.2 + 0.015, edge * 0.3);
+                            rough = 0.34 + 0.22 * cond * big;
+                        }
+                    }
                     else
                     {
                         col = vc * vc;   // the accent colours are sRGB-ish: to linear
@@ -432,7 +496,7 @@ Shader "WorkshopWreckage/Item"
                 }
 
                 // labels: type plates, stencils, warnings, PCB faces from the shared atlas
-                float ls = round(i.sinfo.w);
+                float ls = tool ? 0 : round(i.sinfo.w);
                 float t = ls < 0.5 ? 0 : ls < 1.5 ? i.skinA.y : ls < 2.5 ? i.skinA.z : i.skinA.w;
                 if (abs(t) > 0.5 && kind < 0.5)
                 {
@@ -499,7 +563,7 @@ Shader "WorkshopWreckage/Item"
                     float raised = saturate(cx * 1.6 + 0.25) * (1 - smoothstep(0.2, 0.6, cc));
                     float worn = saturate(max(ew * (0.4 + 0.6 * stress), corner)) * raised;
                     float knock = smoothstep(0.78, 0.81, nFine * 0.7 + nEdge * 0.45) * smoothstep(0.06, 0.15, faceSize) * stress * 0.8;   // the odd knock on a broad panel
-                    float wearAmt = (0.75 + 0.5 * cond) * (1 - metal);
+                    float wearAmt = (0.75 + 0.5 * cond) * (1 - metal) * (tool && (_Slot > 0.5 || fam > 1.5) ? 0.0 : 1.0);   // tools: only paint chips
                     float brkC = 0.3 + 0.9 * smoothstep(0.35, 0.65, nEdge * 0.6 + nFine * 0.4);   // breaks a worn edge into separate chips
                     chip = smoothstep(0.27, 0.39, max(worn, knock) * brkC * wearAmt);
                     float rub = smoothstep(0.14, 0.3, worn * brkC * wearAmt) * (1 - chip);   // paint rubbed thin around a chip
