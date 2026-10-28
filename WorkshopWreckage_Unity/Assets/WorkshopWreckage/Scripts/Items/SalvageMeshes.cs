@@ -300,7 +300,7 @@ namespace WorkshopWreckage
 
         public static MeshLibrary.Entry Build(string key, int lod)
         {
-            var b = new B { seg = lod == MeshLibrary.LodInspect ? 24 : 12 };
+            var b = new B { seg = lod == MeshLibrary.LodInspect ? 24 : lod > MeshLibrary.LodWorld ? 16 * lod : 12 };
             if (key.StartsWith(ServoShaftPrefix)) ServoShaft(b, float.Parse(key.Substring(ServoShaftPrefix.Length), System.Globalization.CultureInfo.InvariantCulture));
             else Builders[key](b);
             return b.Finish(key + "_lod" + lod);

@@ -37,6 +37,17 @@ namespace WorkshopWreckage
             BuildTrayLight();
         }
 
+        /// <summary>The empty room as the game lights it: walls, windows, floor, ceiling, the ceiling fixtures, sun,
+        /// ambient, grading and the sun shafts; no furniture (the visual sandbox).</summary>
+        public void BuildShell(WorkshopLayout l)
+        {
+            layout = l;
+            BuildRoom();
+            for (int k = 0; k < l.fixtures.Count; k++) BuildFixture(l.fixtures[k], k);
+            BuildLighting();
+            BuildShafts();
+        }
+
         Transform Group(string name, Vector3 posG, float rotG = 0)
         {
             var go = new GameObject(name);
@@ -513,7 +524,8 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- lighting
 
-        void BuildLighting()
+        /// <summary>Sun, ambient, fog and the grading volume (also the visual sandbox's WORKSHOP lighting).</summary>
+        public void BuildLighting()
         {
             foreach (var l in FindObjectsByType<Light>())
                 if (l.type == LightType.Directional) Destroy(l.gameObject);

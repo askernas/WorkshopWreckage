@@ -31,6 +31,10 @@ namespace WorkshopWreckage
             public bool external;   // drawn elsewhere: the pegboard's tools (Pegboard.ScatteredTools)
         }
 
+        /// <summary>The visual sandbox's geometry quality: the mesh LOD for a geometry key at a size (largest world
+        /// extent of its instances, m). Null, as in the game, draws every part at MeshLibrary.LodWorld.</summary>
+        public static System.Func<string, float, int> WorldLod;
+
         public ItemWorld world;
         readonly Dictionary<(string, bool), Group> _groups = new();
         int[] _group;      // instance -> group index into _groupList
@@ -49,13 +53,16 @@ namespace WorkshopWreckage
             _groups.Clear();
             _groupList.Clear();
             _hidden.Clear();
-            _material = new Material(ItemAppearance.Shader) { name = "ItemInstanced", enableInstancing = true };
-            _material.EnableKeyword("_WW_INSTANCED");
-            _material.SetTexture("_WearNoise", ItemAppearance.Noise);
-            _material.SetTexture("_Decals", ItemAppearance.Decals);
-            // skinned parts draw with their own variant, so neither look pays for the other's registers
-            _skinMaterial = new Material(_material) { name = "ItemInstancedSkin" };
-            _skinMaterial.EnableKeyword("_WW_SKIN");
+            if (_material == null)   // a rebuild (the visual sandbox's pile) keeps its materials and their slot copies
+            {
+                _material = new Material(ItemAppearance.Shader) { name = "ItemInstanced", enableInstancing = true };
+                _material.EnableKeyword("_WW_INSTANCED");
+                _material.SetTexture("_WearNoise", ItemAppearance.Noise);
+                _material.SetTexture("_Decals", ItemAppearance.Decals);
+                // skinned parts draw with their own variant, so neither look pays for the other's registers
+                _skinMaterial = new Material(_material) { name = "ItemInstancedSkin" };
+                _skinMaterial.EnableKeyword("_WW_SKIN");
+            }
             _group = new int[w.Count];
             _slot = new int[w.Count];
             var members = new Dictionary<(string key, bool skin), List<int>>();
@@ -75,6 +82,14 @@ namespace WorkshopWreckage
                 var g = new Group { entry = MeshLibrary.Get(kv.Key.key, MeshLibrary.LodWorld), external = kv.Key.key.StartsWith(Pegboard.ToolFactory.Prefix) };
                 g.radius = 0;
                 foreach (var id in kv.Value) g.radius = Mathf.Max(g.radius, g.entry.bounds.extents.magnitude * w.DefOf(id).worldScale);
+                if (WorldLod != null && !g.external)
+                {
+                    var bs = g.entry.bounds.size;
+                    float ext = Mathf.Max(bs.x, Mathf.Max(bs.y, bs.z)), size = 0;
+                    foreach (var id in kv.Value) size = Mathf.Max(size, ext * w.DefOf(id).worldScale);
+                    int lod = WorldLod(kv.Key.key, size);
+                    if (lod != MeshLibrary.LodWorld) g.entry = MeshLibrary.Get(kv.Key.key, lod);
+                }
                 g.mats = ItemAppearance.SlotMaterials(g.entry, kv.Key.skin ? _skinMaterial : _material);
                 var ids = kv.Value;
                 for (int c = 0; c < ids.Count; c += Chunk)

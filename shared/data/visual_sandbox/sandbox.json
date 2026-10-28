@@ -1,0 +1,24 @@
+{
+  "_note": "visual sandbox settings (docs/VISUAL_SANDBOX.md); styles/ holds the style presets",
+  "pile": {
+    "count": 40,
+    "seed": 1,
+    "radius": 0.45,
+    "size_variation": 0,
+    "mix": "game",
+    "categories": [],
+    "reuse_seed": false
+  },
+  "screenshot": {
+    "width": 1920,
+    "height": 1080
+  },
+  "environment": {
+    "floor": "neutral"
+  },
+  "start": {
+    "lighting": "workshop",
+    "style": "baseline",
+    "camera": 1
+  }
+}

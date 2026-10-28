@@ -50,6 +50,12 @@ Shader "WorkshopWreckage/Item"
     float _WWArtSat, _WWArtRim, _WWArtAmbient, _WWArtWear, _WWArtGloss;
     float _WWArtWash, _WWArtGrime, _WWArtEdgeWear, _WWArtEdge, _WWArtRough, _WWArtMetal, _WWArtWashEdge, _WWArtChipSize;
     float4 _WWArtRimColor, _WWArtWashColor, _WWArtGrimeColor;
+    // the visual sandbox's experiments (Scripts/VisualSandbox/VisualStyle.cs): 0, as in the game, skips them
+    float _WWLabBevel, _WWLabBevelW, _WWLabNormal;
+    // sandbox Variant B "Playful Industrial" (docs/VISUAL_SANDBOX.md): _WWLabB 0 (the game) skips all of it.
+    // Paint smoothness (absolute, 0 = as authored), roughness variation, metal response (0 = the item gloss damping,
+    // 1 = full PBR like the robots), rust in old chips and recesses, the room's ambient in reflections, edge polish
+    float _WWLabB, _WWLabPaintSmooth, _WWLabRoughVar, _WWLabMetalResp, _WWLabRust, _WWLabEnvRefl, _WWLabEdgePolish;
 
     struct Attributes
     {
@@ -181,6 +187,7 @@ Shader "WorkshopWreckage/Item"
             //   recess   thread valleys and gear roots: darker, oil, the first rust
             //   scratch  sparse directional scratches on worn parts
             static float4 gArtDbg = 0;   // QA (--itemdebug=6): the art layers' masks (chip, worn edge, wash)
+            static float3 gLabB = float3(0, 0, 1);   // sandbox Variant B: paint coverage, roughness variation, reflection occlusion
 
             // pegboard tools: wood with its grain along the handle. On a turned handle the grain runs along the axis
             // (uv.y) and the normal picks the streak round the handle; on a flat face it follows the longer side.
@@ -583,6 +590,43 @@ Shader "WorkshopWreckage/Item"
                     // paint response: rougher = broader, softer highlights; metallic scaled
                     rough = saturate(rough + _WWArtRough);
                     metal = saturate(metal * (1 + _WWArtMetal));
+
+                    // sandbox Variant B: layered wear (paint -> exposed steel -> the odd bit of rust), steel chips with
+                    // the robots' response, polished edges on bare metal; SkinSurface turns paint and metal up
+                    [branch] if (_WWLabB > 0)
+                    {
+                        bool painted = _Slot < 0.5 && fam < 1.5;
+                        bool steelish = _Slot < 0.5 && (fam < 3.5 || (fam > 4.5 && fam < 5.5));   // paint over steel, bare and used metal: not rust, plastic or wood
+                        // exposed steel in the chips: the robots' dark steel (metallic 0.8, smoothness 0.4)
+                        metal = lerp(metal, 0.8, chip * _WWArtEdgeWear);
+                        rough = lerp(rough, 0.55, chip * _WWArtEdgeWear);
+                        // rust: only on old parts, at the heart of the chips and in creases and thread roots, in patches
+                        float age = saturate(cond * 1.6 - 0.45);
+                        float rustM = max(chip * smoothstep(0.5, 0.72, nEdge), max(cc * 0.7, recess * 0.6) * smoothstep(0.55, 0.75, big * 0.55 + nFine * 0.45));
+                        rustM = saturate(rustM * age * _WWLabRust * 1.4) * (steelish ? 1.0 : 0.0);
+                        col = lerp(col, lerp(rustDark * 1.4, rustLight, smoothstep(0.3, 0.8, nFine)), rustM);
+                        metal = lerp(metal, 0, rustM); rough = lerp(rough, 0.85, rustM);
+                        // bare metal: raised edges and rubbed spots polished brighter and sharper
+                        float hiB = saturate(cx * (1 - smoothstep(0.0, edgeW * 3.0, ed)) + polish * 0.5) * (1 - wash) * saturate(metal * 1.5 - 0.3);
+                        col = lerp(col, col * 1.25 + 0.015, hiB * _WWLabEdgePolish * 0.6);
+                        rough = lerp(rough, rough * 0.55, hiB * _WWLabEdgePolish);
+                        gLabB = float3(painted ? 1 - saturate(metal / 0.6) : 0, big * 0.65 + nFine * 0.35 - 0.5, (1 - wash * 0.7) * (1 - cc * 0.6));
+                    }
+                }
+
+                // sandbox: painted bevels. The face's edge distance as a rounded height ramp; its screen-space slope
+                // bends the normal round the edge like a small chamfer, with no change to the mesh
+                [branch] if (_WWLabBevel > 0)
+                {
+                    float bw = max(_WWLabBevelW, 1e-4);
+                    float r = 1 - saturate(ed / bw);
+                    float hgt = bw * (1 - r * r);
+                    float3 dpx = ddx(i.positionWS), dpy = ddy(i.positionWS);
+                    float3 n0 = normalize(nWS);
+                    float3 r1 = cross(dpy, n0), r2 = cross(n0, dpx);
+                    float det = dot(dpx, r1);
+                    float3 grad = sign(det) * (ddx(hgt) * r1 + ddy(hgt) * r2);
+                    nWS = normalize(abs(det) * n0 - grad * _WWLabBevel);
                 }
             }
 
@@ -599,6 +643,16 @@ Shader "WorkshopWreckage/Item"
                 float gloss = _WWItemGloss > 0 ? _WWItemGloss * 4.0 : 0.5;
                 metallic = metal * 0.75;
                 smoothness = (1.0 - rough) * gloss;
+                // sandbox Variant B: the item gloss damping lifted for metals (full at 1, as the robots), a little for
+                // plastic and rubber, paint at a set satin with low-frequency variation: each material reads as itself
+                [branch] if (_WWLabB > 0)
+                {
+                    float mr = _WWLabMetalResp * saturate(metal * 1.4);
+                    metallic = metal * lerp(0.75, 1.0, mr);
+                    smoothness = (1.0 - rough) * lerp(gloss, 1.0, mr + (1 - mr) * 0.35 * _WWLabMetalResp);
+                    if (_WWLabPaintSmooth > 0) smoothness = lerp(smoothness, _WWLabPaintSmooth, gLabB.x);
+                    smoothness = saturate(smoothness - gLabB.y * 2.0 * _WWLabRoughVar);
+                }
             }
 
             #endif
@@ -661,6 +715,8 @@ Shader "WorkshopWreckage/Item"
                 #else
                     LegacySurface(i, nWS, albedo, metallic, smoothness);
                 #endif
+                // sandbox: how strongly the surface detail bends the normal (0 as authored)
+                [branch] if (_WWLabNormal != 0) nWS = normalize(lerp(normalize(i.normalWS), normalize(nWS), 1 + _WWLabNormal));
 
                 InputData d = (InputData)0;
                 d.positionWS = i.positionWS;
@@ -712,6 +768,18 @@ Shader "WorkshopWreckage/Item"
                 half4 col = UniversalFragmentPBR(d, s);
                 float rim = pow(1.0 - saturate(dot(nWS, d.viewDirectionWS)), 3.0);
                 col.rgb += rim * _WWArtRim * _WWArtRimColor.rgb * (0.3 + 0.7 * albedo) * dot(d.bakedGI, float3(0.2126, 0.7152, 0.0722));
+                #if defined(_WW_SKIN)
+                // sandbox Variant B: no realtime probe, so metals reflect the dim sky; the room's ambient (SH) in the
+                // reflection direction instead, Fresnel-weighted, shaded in creases. Skins only: robot parts keep their look
+                [branch] if (_WWLabEnvRefl > 0 && _WWItemDebug < 0.5)
+                {
+                    float3 R = reflect(-d.viewDirectionWS, nWS);
+                    float nv = saturate(dot(nWS, d.viewDirectionWS));
+                    float3 f0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+                    float3 fr = f0 + (max(smoothness.xxx, f0) - f0) * pow(1.0 - nv, 5.0);
+                    col.rgb += SampleSH(R) * fr * smoothness * smoothness * gLabB.z * _WWLabEnvRefl * (1.0 + _WWArtAmbient);
+                }
+                #endif
                 col.rgb = MixFog(col.rgb, i.fog);
                 return col;
             }

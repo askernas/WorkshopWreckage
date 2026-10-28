@@ -35,8 +35,6 @@ namespace WorkshopWreckage
         WorkshopLayout _builtFor;
         readonly Dictionary<int, Body> _bodies = new();
         float _acc, _quiet, _since, _scanT;
-        static PhysicsMaterial _mat;
-        static readonly HashSet<EntityId> _baked = new();
 
         public int Count => _bodies.Count;
         public bool Settling => _bodies.Count > 0;
@@ -60,7 +58,6 @@ namespace WorkshopWreckage
             _scene = SceneManager.CreateScene("PileSim" + Time.frameCount, new CreateSceneParameters(LocalPhysicsMode.Physics3D));
             _phys = _scene.GetPhysicsScene();
             _builtFor = g.layout;
-            _mat ??= new PhysicsMaterial("parts") { staticFriction = 0.85f, dynamicFriction = 0.7f, bounciness = 0.02f, frictionCombine = PhysicsMaterialCombine.Average, bounceCombine = PhysicsMaterialCombine.Minimum };
             BuildStatics();
         }
 
@@ -74,7 +71,7 @@ namespace WorkshopWreckage
             go.transform.position = new Vector3(gr.center.x, (y0 + y1) / 2, -gr.center.y);
             var c = go.AddComponent<BoxCollider>();
             c.size = new Vector3(gr.width, y1 - y0, gr.height);
-            c.sharedMaterial = _mat;
+            c.sharedMaterial = PileBodies.Material;
             c.contactOffset = 0.002f;
         }
 
@@ -115,20 +112,12 @@ namespace WorkshopWreckage
         {
             var inst = g.world.instances[id];
             var def = g.world.DefOf(id);
-            var mesh = Pegboard.ToolFactory.Has(def.geometryKey) ? Pegboard.ToolFactory.CollisionMesh(def.geometryKey)   // board tools: unbevelled hull
-                : MeshLibrary.Get(def.geometryKey, MeshLibrary.LodWorld).mesh;
             var go = new GameObject("part" + id);
             SceneManager.MoveGameObjectToScene(go, _scene);
             var m = inst.transform;
             go.transform.SetPositionAndRotation(m.GetColumn(3), m.rotation);
             go.transform.localScale = Vector3.one * def.worldScale;
-            var mc = go.AddComponent<MeshCollider>();
-            mc.convex = true;
-            if (_baked.Add(mesh.GetEntityId())) Physics.BakeMesh(mesh.GetEntityId(), true);
-            mc.sharedMesh = mesh;
-            mc.sharedMaterial = _mat;
-            var e = ItemDatabase.Extents(def);
-            mc.contactOffset = Mathf.Clamp(Mathf.Min(e[0], e[1], e[2]) * 0.08f, 0.0005f, 0.003f);
+            PileBodies.AddCollider(go, def);
             var b = new Body { go = go, start = m, last = m, scale = def.worldScale };
             if (dynamic) MakeDynamic(b, def);
             _bodies[id] = b;
@@ -138,18 +127,7 @@ namespace WorkshopWreckage
         void MakeDynamic(Body b, ItemDefinition def)
         {
             if (b.rb != null) return;
-            var rb = b.go.AddComponent<Rigidbody>();
-            // heavier parts weigh more, but compressed (square root): a stack whose masses differ
-            // 100:1 is more than the solver can hold, and the heavy part sinks into the light ones
-            rb.mass = Mathf.Sqrt(Mathf.Clamp(def.weightG, 1f, 2000f)) / 100f;
-            rb.linearDamping = 0.25f;
-            rb.angularDamping = 2.2f;   // rolling resistance: rods and nuts come to rest instead of rolling across the room
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;   // thin plates must not pass through small parts
-            rb.solverIterations = 24;
-            rb.solverVelocityIterations = 6;
-            rb.maxDepenetrationVelocity = 0.15f;   // parts generated slightly inside each other ease apart, never pop
-            rb.sleepThreshold = 0.002f;
-            b.rb = rb;
+            b.rb = PileBodies.AddRigidbody(b.go, def);
         }
 
         bool CanMove(int id)
@@ -309,12 +287,7 @@ namespace WorkshopWreckage
                 if (loose)
                 {
                     n++;
-                    // the whole room at once: a coarser solver (a drop in play keeps the fine one)
-                    b.rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
-                    b.rb.solverIterations = 10;
-                    b.rb.solverVelocityIterations = 2;
-                    b.rb.sleepThreshold = 0.006f;
-                    b.rb.maxDepenetrationVelocity = 0.3f;
+                    PileBodies.Bulk(b.rb);   // the whole room at once
                 }
                 else fixedParts++;
             }

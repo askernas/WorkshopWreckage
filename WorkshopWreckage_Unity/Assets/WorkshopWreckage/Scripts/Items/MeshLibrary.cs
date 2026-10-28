@@ -37,12 +37,17 @@ namespace WorkshopWreckage
             while ((line = r.ReadLine()) != null) yield return line;
         }
 
+        /// <summary>Builder for LODs above LodWorld. Only the visual sandbox sets it (its geometry pass); the game
+        /// never asks for those LODs.</summary>
+        public static System.Func<string, int, Entry> Extra;
+
         public static Entry Get(string key, int lod)
         {
             var k = key + "|" + lod;
             if (!_cache.TryGetValue(k, out var e))
             {
-                e = SalvageMeshes.Has(key) ? SalvageMeshes.Build(key, lod)
+                e = lod > LodWorld && Extra != null ? Extra(key, lod)   // sandbox-only extra LODs (null in the game)
+                    : SalvageMeshes.Has(key) ? SalvageMeshes.Build(key, lod)
                     : Pegboard.ToolFactory.Has(key) ? Pegboard.ToolFactory.Build(key, lod)   // pegboard hand tools
                     : Load(FileFor(key, lod), key);
                 _cache[k] = e;

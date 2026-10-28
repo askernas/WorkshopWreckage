@@ -103,6 +103,14 @@ namespace WorkshopWreckage
             if (args.TryGetValue("preset", out var pr)) presetId = pr;
             bool valid = LoadPreset(presetId);
             Debug.Log($"[boot] preset {presetId} loaded, valid {valid} ({sw.ElapsedMilliseconds} ms)");
+            if (valid && args.ContainsKey("sandbox"))   // the visual development sandbox (docs/VISUAL_SANDBOX.md): no workshop, no game systems
+            {
+                if (args.TryGetValue("skins", out var sbSkins)) ItemSkins.Enabled = sbSkins != "0";
+                WorkshopArtDirectionProfile.Load(args);
+                Sandbox.VisualSandbox.Open(this);
+                enabled = false;
+                return;
+            }
             hud = new GameObject("UI").AddComponent<Hud>();
             hud.transform.SetParent(transform, false);
             hud.Init(this);
