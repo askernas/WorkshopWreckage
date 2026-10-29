@@ -20,13 +20,14 @@ namespace WorkshopWreckage
             public Mesh mesh;
             public int[] slots;      // material slot of each submesh
             public Bounds bounds;    // unit space, centred
+            public Material[] materials;   // drawn with these instead of the item slots (robot parts: their robot's own, RobotPartMeshes)
         }
 
         static readonly Dictionary<string, Entry> _cache = new();
 
         static string FileFor(string key, int lod) => Shared.MeshPath(key.Replace(":", "_") + "__lod" + lod + ".obj.gz");
 
-        public static bool Has(string key) => SalvageMeshes.Has(key) || Pegboard.ToolFactory.Has(key) || _cache.ContainsKey(key + "|1") || File.Exists(FileFor(key, LodWorld));
+        public static bool Has(string key) => RobotPartMeshes.Has(key) || SalvageMeshes.Has(key) || Pegboard.ToolFactory.Has(key) || _cache.ContainsKey(key + "|1") || File.Exists(FileFor(key, LodWorld));
 
         static IEnumerable<string> Lines(string path)
         {
@@ -46,7 +47,8 @@ namespace WorkshopWreckage
             var k = key + "|" + lod;
             if (!_cache.TryGetValue(k, out var e))
             {
-                e = lod > LodWorld && Extra != null ? Extra(key, lod)   // sandbox-only extra LODs (null in the game)
+                e = RobotPartMeshes.Has(key) ? RobotPartMeshes.Build(key, lod)   // a robot part cut out of its robot
+                    : lod > LodWorld && Extra != null ? Extra(key, lod)   // sandbox-only extra LODs (null in the game)
                     : SalvageMeshes.Has(key) ? SalvageMeshes.Build(key, lod)
                     : Pegboard.ToolFactory.Has(key) ? Pegboard.ToolFactory.Build(key, lod)   // pegboard hand tools
                     : Load(FileFor(key, lod), key);

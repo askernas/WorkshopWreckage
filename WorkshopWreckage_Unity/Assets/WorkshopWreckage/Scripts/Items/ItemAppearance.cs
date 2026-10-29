@@ -147,6 +147,7 @@ namespace WorkshopWreckage
         /// <summary>Materials for each submesh of an entry (slot 0 = part material).</summary>
         public static Material[] SlotMaterials(MeshLibrary.Entry e, Material primary)
         {
+            if (e.materials != null) return e.materials;   // a robot part: its robot's materials
             var (tin, accent) = SlotPair(primary);
             var mats = new Material[e.slots.Length];
             for (int i = 0; i < mats.Length; i++)

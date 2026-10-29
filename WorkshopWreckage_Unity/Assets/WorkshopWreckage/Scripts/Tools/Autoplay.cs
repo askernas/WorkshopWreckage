@@ -79,6 +79,24 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "partcompare")
+            {
+                yield return PartCompare();   // QA: each loose robot part next to the same part cut out of its robot
+                Finish();
+                yield break;
+            }
+            if (section == "partsides")
+            {
+                yield return PartSides();   // QA: each loose robot part from six sides (holes, missing backs)
+                Finish();
+                yield break;
+            }
+            if (section == "partaudit")
+            {
+                yield return PartAudit();   // QA: each robot part on its robot and where it lies in the workshop
+                Finish();
+                yield break;
+            }
             if (section == "partshots")
             {
                 yield return PartShots();   // QA: close-ups of single parts (geometry checks)
@@ -2147,11 +2165,24 @@ namespace WorkshopWreckage
                 // in the hands and turned in the inspect view (F): large, centred, slowly rotating
                 string tag = key.Replace(":", "_");
                 float size = MeshLibrary.UnitBounds(def.geometryKey).size.magnitude * def.worldScale;
+                // where it lies, in the room's own light
+                g.player.enabled = false;
+                g.hud.SetHudVisible(false);
+                float far = 0.35f + size * 1.5f;
+                LookFrom(inst.Position + new Vector3(far * 0.6f, far * 0.7f, far * 0.6f), inst.Position);
+                yield return Frames(6);
+                yield return g.Capture(Path.Combine(outDir, $"partshot_{tag}_w.png"), 1);
+                // F inspects what the crosshair is on before what is in the hands: aim at open air
+                var air = inst.Position + Vector3.up * 2.2f;
+                LookFrom(air, air + new Vector3(1, 0.25f, 0.3f));
+                yield return Frames(2);
+                g.player.enabled = true;
                 g.index.Remove(inst.id);
                 g.world.SetState(inst.id, ItemState.Carried, "player");
                 g.inventory.Add(inst.id);
                 g.inventory.Select(inst.defId);
                 g.interaction.UpdateTarget();
+                bool held = g.interaction.targetType != "item";   // else F would inspect the aimed item
                 g.hud.SetHudVisible(false);
                 g.interaction.BeginInspect();
                 yield return Frames(25);
@@ -2164,8 +2195,302 @@ namespace WorkshopWreckage
                 g.inventory.Remove(inst.id);
                 g.world.SetState(inst.id, ItemState.InWorld, "world");
                 g.index.Insert(inst.id);
-                Check($"close-ups of {def.displayName} ({key})", true, $"{MeshLibrary.Get(key, MeshLibrary.LodWorld).mesh.vertexCount} vertices, {size:0.00} m");
+                Check($"close-ups of {def.displayName} ({key})", held, $"{(held ? "" : "an aimed item was inspected instead; ")}{MeshLibrary.Get(key, MeshLibrary.LodWorld).mesh.vertexCount} vertices, {size:0.00} m");
             }
+        }
+
+        /// <summary>Playtest 2026-10-29 ("the robot parts we find look different in size and scale from the parts on
+        /// the robots"): every robot part kind of each first unit, cut out of its robot model (built with only that
+        /// part, at the robot's world scale) and floated beside its loose item at world size. partcompare/<type>_<key>.png
+        /// (robot left, loose right) and partcompare.tsv (both sizes, largest side first, in mm).</summary>
+        IEnumerator PartCompare()
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var dir = Path.Combine(outDir, "partcompare");
+            Directory.CreateDirectory(dir);
+            var tsv = new System.Text.StringBuilder("type\tkey\tgeometry_key\trobot_mm\tloose_mm\tratio\tloose_xyz_mm\n");
+            var lo = g.layout.roomMin; var hi = g.layout.roomMax;
+            var spawn = Shared.Pos(g.layout.spawn.x, 0, g.layout.spawn.z);
+            var mid = new Vector3((lo.x + hi.x) / 2, 0, -(lo.z + hi.z) / 2);
+            var fwd = mid - spawn; fwd.y = 0; fwd = fwd.sqrMagnitude > 0.01f ? fwd.normalized : Vector3.forward;
+            var right = Vector3.Cross(Vector3.up, fwd);
+            var stage = spawn + fwd * 1.4f + Vector3.up * 1.3f;
+            g.hud.SetHudVisible(false);
+            // a close-up camera of its own over the player's (the player cannot float at the stage), and a plain
+            // grey card behind the parts
+            var main = Camera.main;
+            var cam = new GameObject("QA_compare_cam").AddComponent<Camera>();
+            cam.CopyFrom(main);
+            cam.depth = main.depth + 10;
+            cam.fieldOfView = 30;
+            cam.nearClipPlane = 0.005f;
+            var card = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            Object.Destroy(card.GetComponent<Collider>());
+            card.GetComponent<Renderer>().material.color = new Color(0.42f, 0.43f, 0.45f);
+            string Mm(Vector3 v) { var a = new[] { v.x, v.y, v.z }.OrderByDescending(x => x).Select(x => (x * 1000).ToString("0", inv)); return string.Join("x", a); }
+            Bounds BoundsOf(GameObject go)
+            {
+                var rs = go.GetComponentsInChildren<Renderer>().Where(r => r.enabled && r.gameObject.activeInHierarchy).ToList();
+                if (rs.Count == 0) return new Bounds(go.transform.position, Vector3.zero);
+                var b = rs[0].bounds;
+                foreach (var r in rs.Skip(1)) b.Encapsulate(r.bounds);
+                return b;
+            }
+            void Put(GameObject go, Vector3 at) { var b = BoundsOf(go); go.transform.position += at - b.center; }
+            // every robot's parts, then the Part Radar's (built at true size; its cell is a model of its own)
+            var jobs = new List<(string type, float scale, ItemDefinition def, string key)>();
+            foreach (var type in new[] { "retrobot", "unibot", "spiderbot", "caterpillarbot", "hoverbot", "sorting_arm" })
+            {
+                var live = g.robots.Find(r => r.type == type);
+                float scale = live != null ? live.GetComponentInChildren<RobotModel>(true).transform.localScale.x : 1f;
+                foreach (var id in g.workbench.PartIds(g.workbench.P(type))) jobs.Add((type, scale, g.world.DefOf(id), Robot.PartKey(g.world.DefOf(id))));
+            }
+            foreach (var did in g.db.order)
+            {
+                var d = g.db.Get(did);
+                if (d.subcategory == "part_radar") jobs.Add(("part_radar", 1f, d, d.craftingPurpose.Substring(d.craftingPurpose.LastIndexOf(':') + 1)));
+            }
+            foreach (var (type, scale, def, key) in jobs)
+            {
+                {
+                    var go = new GameObject("QA_cut_" + type);
+                    RobotModel m = type switch
+                    {
+                        "unibot" => go.AddComponent<UnibotModel>(), "spiderbot" => go.AddComponent<SpiderbotModel>(),
+                        "caterpillarbot" => go.AddComponent<CaterpillarbotModel>(), "hoverbot" => go.AddComponent<HoverbotModel>(),
+                        "sorting_arm" => go.AddComponent<SortingArmModel>(), "part_radar" => go.AddComponent<PartRadarModel>(), _ => go.AddComponent<RetrobotModel>(),
+                    };
+                    if (m is PartRadarModel prm && key == "battery") prm.battery = true;
+                    m.Init();
+                    m.Build(new HashSet<string> { key });
+                    go.transform.localScale = Vector3.one * scale;
+                    yield return null;
+                    var rb = BoundsOf(go);
+                    var loose = HeldView.MakeModel(def);
+                    loose.transform.localScale = Vector3.one * def.worldScale;
+                    yield return null;
+                    var lb = BoundsOf(loose);
+                    float big = Mathf.Max(rb.size.magnitude, lb.size.magnitude, 0.03f);
+                    float gap = 0.04f + big * 0.15f;
+                    Put(go, stage - right * (rb.extents.magnitude * 0.5f + gap));
+                    Put(loose, stage + right * (lb.extents.magnitude * 0.5f + gap));
+                    float width = rb.size.magnitude * 0.5f + lb.size.magnitude * 0.5f + gap * 2;
+                    float dist = Mathf.Max(0.12f, width * 0.5f / Mathf.Tan(24 * Mathf.Deg2Rad) * 1.15f);
+                    var eye = stage - fwd * dist + Vector3.up * dist * 0.35f;
+                    cam.transform.SetPositionAndRotation(eye, Quaternion.LookRotation(stage - eye));
+                    card.transform.SetPositionAndRotation(stage + fwd * (big + 0.05f), Quaternion.LookRotation(fwd));
+                    card.transform.localScale = Vector3.one * (width * 3 + 0.3f);
+                    string tag = (type + "_" + key).Replace(' ', '_');
+                    yield return g.Capture(Path.Combine(dir, tag + ".png"), 4);
+                    float ratio = lb.size.magnitude > 0 ? rb.size.magnitude / lb.size.magnitude : 0;
+                    tsv.Append(type).Append('\t').Append(key).Append('\t').Append(def.geometryKey).Append('\t').Append(Mm(rb.size)).Append('\t')
+                       .Append(Mm(lb.size)).Append('\t').Append(ratio.ToString("0.00", inv)).Append('\t')
+                       .Append(string.Join("x", new[] { 0, 1, 2 }.Select(i => (MeshLibrary.UnitBounds(def.geometryKey).size[i] * def.worldScale * 1000).ToString("0", inv)))).Append('\n');
+                    Object.Destroy(go); Object.Destroy(loose);
+                }
+            }
+            g.hud.SetHudVisible(true);
+            Object.Destroy(cam.gameObject); Object.Destroy(card);
+            File.WriteAllText(Path.Combine(outDir, "partcompare.tsv"), tsv.ToString());
+            Check("every robot part kind compared with its robot (partcompare.tsv)", true, $"{tsv.ToString().Count(c => c == '\n') - 1} parts");
+        }
+
+        /// <summary>Playtest 2026-10-29 ("the tracks look hollow", "the saucer shells have no inside"): every loose robot
+        /// part floated in the room and seen from front, back, left, right, above and below,
+        /// partsides/<type>_<key>_<0-5>.png, so holes and missing backs show.</summary>
+        IEnumerator PartSides()
+        {
+            var dir = Path.Combine(outDir, "partsides");
+            Directory.CreateDirectory(dir);
+            var spawn = Shared.Pos(g.layout.spawn.x, 0, g.layout.spawn.z);
+            var stage = spawn + Vector3.up * 1.4f;
+            g.hud.SetHudVisible(false);
+            g.player.enabled = false;
+            var main = Camera.main;
+            var cam = new GameObject("QA_sides_cam").AddComponent<Camera>();
+            cam.CopyFrom(main);
+            cam.depth = main.depth + 10;
+            cam.fieldOfView = 30;
+            cam.nearClipPlane = 0.005f;
+            var views = new[] { new Vector3(0, 0.25f, -1), new Vector3(0, 0.25f, 1), new Vector3(-1, 0.25f, 0), new Vector3(1, 0.25f, 0), new Vector3(0.15f, 1, -0.1f), new Vector3(0.15f, -1, -0.1f) };
+            int n = 0;
+            foreach (var did in g.db.order)
+            {
+                var def = g.db.Get(did);
+                if (!def.geometryKey.StartsWith("robot:part:") || def.craftingPurpose.StartsWith("robot:hoverbot_") || def.craftingPurpose.StartsWith("robot:sorting_arm_")) continue;
+                var go = HeldView.MakeModel(def);
+                go.transform.localScale = Vector3.one * def.worldScale;
+                go.transform.position = stage;
+                yield return null;
+                var rs = go.GetComponentsInChildren<Renderer>();
+                var b = rs[0].bounds; foreach (var r in rs.Skip(1)) b.Encapsulate(r.bounds);
+                float dist = Mathf.Max(0.12f, b.size.magnitude * 0.5f / Mathf.Tan(15 * Mathf.Deg2Rad) * 1.15f);
+                string tag = def.geometryKey.Substring("robot:part:".Length).Replace(':', '_');
+                for (int k = 0; k < views.Length; k++)
+                {
+                    var eye = b.center + views[k].normalized * dist;
+                    cam.transform.SetPositionAndRotation(eye, Quaternion.LookRotation(b.center - eye, Mathf.Abs(views[k].normalized.y) > 0.9f ? Vector3.forward : Vector3.up));
+                    yield return g.Capture(Path.Combine(dir, $"{tag}_{k}.png"), 1);
+                }
+                Object.Destroy(go);
+                n++;
+            }
+            Object.Destroy(cam.gameObject);
+            g.player.enabled = true;
+            g.hud.SetHudVisible(true);
+            Check("every loose robot part seen from six sides (partsides/)", n > 0, $"{n} parts");
+        }
+
+        /// <summary>Part audit 2026-10-29 ("a render of each robot part as it looks in the workshop, compared to how it
+        /// looks on the robot"): per part four shots in the room's own light, partaudit/<type>_<key>_{a,b,c,d}.png:
+        /// a = the finished robot on the floor, b = the same robot ghosted with only this part solid, c = one loose
+        /// copy where it lies in the workshop, seen from as far as the robot shots (same scale), d = that copy close up.
+        /// partaudit.tsv lists where each copy lay.</summary>
+        IEnumerator PartAudit()
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var dir = Path.Combine(outDir, "partaudit");
+            Directory.CreateDirectory(dir);
+            var tsv = new System.Text.StringBuilder("type\tkey\tname\tloose_mm\tlies\tshot_c_m\n");
+            var lo = g.layout.roomMin; var hi = g.layout.roomMax;
+            var spawn = Shared.Pos(g.layout.spawn.x, 0, g.layout.spawn.z);
+            var mid = new Vector3((lo.x + hi.x) / 2, 0, -(lo.z + hi.z) / 2);
+            var fwd = mid - spawn; fwd.y = 0; fwd = fwd.sqrMagnitude > 0.01f ? fwd.normalized : Vector3.forward;
+            var stage = spawn + fwd * 1.6f;
+            g.hud.SetHudVisible(false);
+            g.player.enabled = false;
+            var main = Camera.main;
+            var cam = new GameObject("QA_audit_cam").AddComponent<Camera>();
+            cam.CopyFrom(main);
+            cam.depth = main.depth + 10;
+            cam.fieldOfView = 30;
+            cam.nearClipPlane = 0.005f;
+            var ghost = EnvMaterials.NewGhost();
+            ghost.SetColor("_Color", new Color(0.8f, 0.85f, 0.9f, 0.18f));
+            string Mm(Vector3 v) { var a = new[] { v.x, v.y, v.z }.OrderByDescending(x => x).Select(x => (x * 1000).ToString("0", inv)); return string.Join("x", a); }
+            Bounds BoundsOf(GameObject go)
+            {
+                var rs = go.GetComponentsInChildren<Renderer>().Where(r => r.enabled && r.gameObject.activeInHierarchy).ToList();
+                if (rs.Count == 0) return new Bounds(go.transform.position, Vector3.zero);
+                var b = rs[0].bounds;
+                foreach (var r in rs.Skip(1)) b.Encapsulate(r.bounds);
+                return b;
+            }
+            float Dist(float size) => Mathf.Max(0.15f, size * 0.5f / Mathf.Tan(15 * Mathf.Deg2Rad) * 1.25f);
+            // a view of `at` from `dist` away, slightly from above, turned until nothing solid is in the way
+            void Aim(Vector3 at, float dist, Vector3 baseDir)
+            {
+                Vector3 eye = at;
+                for (int k = 0; k < 12; k++)
+                {
+                    var d = Quaternion.Euler(0, k * 30f, 0) * baseDir;
+                    float up = k < 6 ? 0.55f : 1.2f;
+                    eye = at + (new Vector3(d.x, 0, d.z).normalized + Vector3.up * up).normalized * dist;
+                    if (!Physics.Linecast(eye, at + Vector3.up * 0.01f)) break;
+                }
+                cam.transform.SetPositionAndRotation(eye, Quaternion.LookRotation(at - eye));
+            }
+            RobotModel Make(string type, float scale, HashSet<string> have)
+            {
+                var go = new GameObject("QA_audit_" + type);
+                RobotModel m = type switch
+                {
+                    "unibot" => go.AddComponent<UnibotModel>(), "spiderbot" => go.AddComponent<SpiderbotModel>(),
+                    "caterpillarbot" => go.AddComponent<CaterpillarbotModel>(), "hoverbot" => go.AddComponent<HoverbotModel>(),
+                    "sorting_arm" => go.AddComponent<SortingArmModel>(), "part_radar" => go.AddComponent<PartRadarModel>(), _ => go.AddComponent<RetrobotModel>(),
+                };
+                if (m is PartRadarModel prm && have.Contains("battery")) prm.battery = true;
+                m.Init();
+                m.Build(have);
+                go.transform.localScale = Vector3.one * scale;
+                return m;
+            }
+            void Floor(GameObject go) { var b = BoundsOf(go); go.transform.position += new Vector3(stage.x - b.center.x, -b.min.y, stage.z - b.center.z); }
+            var jobs = new List<(string type, float scale, ItemDefinition def, string key)>();
+            foreach (var type in new[] { "retrobot", "unibot", "spiderbot", "caterpillarbot", "hoverbot", "sorting_arm" })
+            {
+                var live = g.robots.Find(r => r.type == type);
+                float scale = live != null ? live.GetComponentInChildren<RobotModel>(true).transform.localScale.x : 1f;
+                foreach (var did in g.db.RobotPartIds(type)) jobs.Add((type, scale, g.db.Get(did), Robot.PartKey(g.db.Get(did))));
+            }
+            foreach (var did in g.db.order)
+            {
+                var d = g.db.Get(did);
+                if (d.subcategory == "part_radar") jobs.Add(("part_radar", 1f, d, d.craftingPurpose.Substring(d.craftingPurpose.LastIndexOf(':') + 1)));
+            }
+            // the live robots and the parts' world copies stay where they are; robots walking into a shot are parked
+            foreach (var r in g.robots) r.gameObject.SetActive(false);
+            var face = Quaternion.LookRotation(-fwd) * Quaternion.Euler(0, -25, 0);
+            int shots = 0, missing = 0;
+            foreach (var (type, scale, def, key) in jobs)
+            {
+                string tag = (type + "_" + key).Replace(' ', '_');
+                var all = new HashSet<string>(jobs.Where(j => j.type == type).Select(j => j.key));
+                if (type == "part_radar") all.Remove("battery");
+                // a: the finished robot
+                var full = Make(type, scale, all);
+                full.transform.rotation = face;
+                yield return null;
+                Floor(full.gameObject);
+                var rb = BoundsOf(full.gameObject);
+                float dist = Dist(rb.size.magnitude);
+                Aim(rb.center, dist, -fwd);
+                yield return g.Capture(Path.Combine(dir, tag + "_a.png"), 3);
+                // b: the robot ghosted, only this part solid (the same pose, so it shows where the part sits)
+                var rest = Make(type, scale, new HashSet<string>(all.Where(k => k != key)));
+                var part = Make(type, scale, new HashSet<string> { key });
+                foreach (var m in new[] { rest, part }) { m.transform.rotation = face; m.transform.position = full.transform.position; }
+                Object.Destroy(full.gameObject);
+                foreach (var r in rest.GetComponentsInChildren<Renderer>()) r.sharedMaterials = r.sharedMaterials.Select(_ => ghost).ToArray();
+                yield return null;
+                yield return g.Capture(Path.Combine(dir, tag + "_b.png"), 3);
+                Object.Destroy(rest.gameObject); Object.Destroy(part.gameObject);
+                // e: a loose copy where it lies in the wreckage, as the player comes across it
+                var inst = g.world.IdsOf(def.id).Select(i => g.world.instances[i]).FirstOrDefault(i => i.state == ItemState.InWorld);
+                if (inst == null) { missing++; tsv.Append($"{type}\t{key}\t{def.displayName}\t\tno copy in the wreckage\t\n"); continue; }
+                string lies = inst.owner.StartsWith("stage:") ? "staging pile" : "in the wreckage";
+                var wb = g.index.WorldBounds(inst.id);
+                Aim(wb.center, 0.9f, -fwd);
+                yield return g.Capture(Path.Combine(dir, tag + "_e.png"), 3);
+                // c, d: the same copy set down on the open floor in its rest pose beside the finished robot (same
+                // scale in one frame), then close up; put back where it lay afterwards
+                var was = g.world.instances[inst.id].transform;
+                var full2 = Make(type, scale, all);
+                full2.transform.rotation = face;
+                yield return null;
+                Floor(full2.gameObject);
+                var fb = BoundsOf(full2.gameObject);
+                var right = Vector3.Cross(Vector3.up, -fwd).normalized;   // the camera's right, seen from -fwd
+                var spot = stage + right * (fb.extents.x + fb.extents.z + 0.08f);
+                var rot = Quaternion.Euler(0, 20, 0) * (def.restMode == RestMode.Side ? Quaternion.Euler(90, 0, 0) : def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, 90) : Quaternion.identity);
+                g.index.Remove(inst.id);
+                g.world.SetTransform(inst.id, Matrix4x4.TRS(spot + Vector3.up * 0.5f, rot, Vector3.one * def.worldScale));
+                g.index.Insert(inst.id);
+                var sb = g.index.WorldBounds(inst.id);
+                g.index.Remove(inst.id);
+                g.world.SetTransform(inst.id, Matrix4x4.TRS(spot + Vector3.up * (0.5f - sb.min.y + 0.001f) + (spot - sb.center).x * Vector3.right + (spot - sb.center).z * Vector3.forward, rot, Vector3.one * def.worldScale));
+                g.index.Insert(inst.id);
+                yield return null;
+                var both = fb; both.Encapsulate(g.index.WorldBounds(inst.id));
+                Aim(both.center, Dist(both.size.magnitude), -fwd);
+                yield return g.Capture(Path.Combine(dir, tag + "_c.png"), 3);
+                Object.Destroy(full2.gameObject);
+                wb = g.index.WorldBounds(inst.id);
+                Aim(wb.center, Dist(wb.size.magnitude) * 1.4f, -fwd);
+                yield return g.Capture(Path.Combine(dir, tag + "_d.png"), 3);
+                g.index.Remove(inst.id);
+                g.world.SetTransform(inst.id, was);
+                g.index.Insert(inst.id);
+                shots++;
+                tsv.Append(type).Append('\t').Append(key).Append('\t').Append(def.displayName).Append('\t').Append(Mm(wb.size)).Append('\t')
+                   .Append(lies).Append('\t').Append(dist.ToString("0.00", inv)).Append('\n');
+            }
+            foreach (var r in g.robots) r.gameObject.SetActive(true);
+            Object.Destroy(cam.gameObject);
+            g.player.enabled = true;
+            g.hud.SetHudVisible(true);
+            File.WriteAllText(Path.Combine(outDir, "partaudit.tsv"), tsv.ToString());
+            Check("every robot part shot on its robot and in the workshop (partaudit.tsv)", missing == 0, $"{shots} parts, {missing} without a copy");
         }
 
         /// <summary>Puts a part into the player's hands, wherever it lies (test setup).</summary>

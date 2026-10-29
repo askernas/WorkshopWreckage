@@ -1041,6 +1041,9 @@ namespace WorkshopWreckage
             _inspect.transform.localScale = Vector3.one * (InspectSize / r);
             _pivot.localRotation = Quaternion.Euler(-30, 0, def.restMode == RestMode.Long ? -35 : 0);
             _pivot.localScale = Vector3.one * 0.3f;
+            // a robot part keeps the robot's own materials, which the close key bleaches (playtest 2026-10-29):
+            // lit like a whole robot in the hands
+            if (MeshLibrary.Get(def.geometryKey, MeshLibrary.LodInspect).materials != null) RobotKey();
             if (_hand) _hand.SetActive(false);
             _dof.weight = 1;
         }
@@ -1049,8 +1052,23 @@ namespace WorkshopWreckage
         {
             if (_inspect) Destroy(_inspect);
             _inspect = null;
+            PartKey();
             if (_hand) _hand.SetActive(true);
             _dof.weight = 0;
+        }
+
+        void RobotKey()
+        {
+            _key.transform.localPosition = new Vector3(0.45f, 0.5f, -0.45f);
+            _key.range = 2.2f;
+            _key.intensity = 0.5f;
+        }
+
+        void PartKey()
+        {
+            _key.transform.localPosition = new Vector3(0.18f, 0.2f, -0.1f);
+            _key.range = 0.8f;
+            _key.intensity = 0.8f;
         }
 
         Light _key;
@@ -1071,9 +1089,7 @@ namespace WorkshopWreckage
             _pivot.localScale = Vector3.one * 0.3f;
             float k = 0.17f / Mathf.Max(0.05f, height);
             // a whole robot is bigger than a part: keep the key light well clear of it
-            _key.transform.localPosition = new Vector3(0.45f, 0.5f, -0.45f);
-            _key.range = 2.2f;
-            _key.intensity = 0.5f;
+            RobotKey();
             obj.SetParent(_pivot, false);
             obj.localScale = _objectScale * k;
             obj.localRotation = Quaternion.identity;
@@ -1091,9 +1107,7 @@ namespace WorkshopWreckage
             _object.SetParent(_objectParent, false);
             _object.localPosition = _objectPos; _object.localRotation = _objectRot; _object.localScale = _objectScale;
             _object = null;
-            _key.transform.localPosition = new Vector3(0.18f, 0.2f, -0.1f);
-            _key.range = 0.8f;
-            _key.intensity = 0.8f;
+            PartKey();
             if (_hand) _hand.SetActive(true);
             _dof.weight = 0;
         }

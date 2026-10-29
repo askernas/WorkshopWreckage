@@ -138,7 +138,7 @@ namespace WorkshopWreckage
             }
             _data = new GraphicsBuffer(GraphicsBuffer.Target.Structured, data.Length, 16);
             _data.SetData(data);
-            foreach (var g in _groupList) foreach (var m in g.mats) m.SetBuffer("_ItemData", _data);
+            foreach (var g in _groupList) if (g.entry.materials == null) foreach (var m in g.mats) m.SetBuffer("_ItemData", _data);
             foreach (var inst in w.instances) Refresh(inst.id);
             Recount();
             w.StateChanged += (inst, _) => { Refresh(inst.id); Recount(); };

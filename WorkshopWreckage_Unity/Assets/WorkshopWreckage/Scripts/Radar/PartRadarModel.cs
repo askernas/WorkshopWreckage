@@ -247,8 +247,9 @@ namespace WorkshopWreckage
                             b.Lathe(p + new Vector3(Mathf.Sin(a), Mathf.Cos(a), 0) * (e * 0.0048f), Disc(0.0022f, 0.0008f, 0.0002f), M(Dial, Dark), FwdRot, 8);
                     }
                 }
-                Bolt(b, F(L * 0.016f, 0.05f), front, 0.004f, M(Dial, RustBolt));
-                b.Lathe(F(-L * 0.1f, -0.062f, 0), Disc(0.006f, 0.004f, 0.001f), M(Dial, Gunmetal), FwdRot, 14);   // a jack socket
+                // the box's own: a screw and a jack socket clear of the dial (a loose dial does not carry them)
+                Bolt(b, F(L * 0.016f, 0.05f), front, 0.004f, M(Housing, RustBolt));
+                b.Lathe(F(-L * 0.1f, -0.062f, 0), Disc(0.006f, 0.004f, 0.001f), M(Housing, Gunmetal), FwdRot, 14);   // a jack socket
                 Done(b, body);
                 var bk = new Batch();
                 bk.Lathe(Vector3.zero, Disc(0.02f, 0.006f, 0.0015f), M(Dial, Gunmetal), FwdRot, 24);
