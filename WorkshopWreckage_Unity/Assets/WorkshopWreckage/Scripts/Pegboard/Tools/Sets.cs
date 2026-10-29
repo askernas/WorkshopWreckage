@@ -93,12 +93,12 @@ namespace WorkshopWreckage.Pegboard
         static void MetricSocket(ToolMesh b, int i)
         {
             float h = SocketH[i], r = SocketOd[i] / 2 / h, drive = 0.38f;
-            b.Cyl(new Vector3(0, 0, 0), new Vector3(0, drive, 0), r * (i < 4 ? 0.9f : 1f), Own, White, 16);   // drive end
-            b.Cyl(new Vector3(0, drive, 0), new Vector3(0, 1, 0), r, Own, White, 16);
+            if (i < 4) b.Cyl(new Vector3(0, 0, 0), new Vector3(0, drive, 0), r * 0.9f, Own, White, 16);   // drive end (narrower on the small sizes)
+            b.Cyl(new Vector3(0, i < 4 ? drive : 0, 0), new Vector3(0, 1, 0), r, Own, White, 16);   // one barrel on the big sizes: two equal ones left a doubled disc inside
             b.Cyl(new Vector3(0, 0.62f, 0), new Vector3(0, 0.74f, 0), r * 1.03f, Acc, Code[i], 16);   // the size ring
             b.Cyl(new Vector3(0, 0.08f, 0), new Vector3(0, 0.2f, 0), r * (i < 4 ? 0.93f : 1.03f), Tin, Steel, 12);   // knurl band
-            b.Cyl(new Vector3(0, 0.995f, 0), new Vector3(0, 1.002f, 0), SocketMm[i] / 2 / h * 1.15f, Acc, Rubber, 6);   // the hex opening
-            b.Cyl(new Vector3(0, -0.002f, 0), new Vector3(0, 0.005f, 0), 9.5f / 2 / h * 1.1f, Acc, Rubber, 4);   // the square drive
+            b.Cyl(new Vector3(0, 0.995f, 0), new Vector3(0, 1.007f, 0), SocketMm[i] / 2 / h * 1.15f, Acc, Rubber, 6);   // the hex opening (0.007 proud: 0.002 z-fought at range)
+            b.Cyl(new Vector3(0, -0.007f, 0), new Vector3(0, 0.005f, 0), 9.5f / 2 / h * 1.1f, Acc, Rubber, 4);   // the square drive
             b.Hook(new Vector2(0, 0.02f), 2);
         }
 
@@ -113,8 +113,8 @@ namespace WorkshopWreckage.Pegboard
             b.Cyl(new Vector3(0, 0.78f, 0), new Vector3(0, 0.84f, 0), r * 1.03f, Acc, Code[i], 16);   // the size ring
             b.Cyl(new Vector3(0, 0.04f, 0), new Vector3(0, 0.12f, 0), rd * 1.03f, Tin, Steel, 12);   // knurl band
             b.Cyl(new Vector3(0, 0.5f, 0), new Vector3(0, 0.52f, 0), r * 0.97f, Tin, Steel, 16);   // the groove half way
-            b.Cyl(new Vector3(0, 0.995f, 0), new Vector3(0, 1.002f, 0), SocketMm[i] / 2 / h * 1.15f, Acc, Rubber, 6);   // the hex opening
-            b.Cyl(new Vector3(0, -0.002f, 0), new Vector3(0, 0.005f, 0), 9.5f / 2 / h * 1.1f, Acc, Rubber, 4);   // the square drive
+            b.Cyl(new Vector3(0, 0.995f, 0), new Vector3(0, 1.007f, 0), SocketMm[i] / 2 / h * 1.15f, Acc, Rubber, 6);   // the hex opening (0.007 proud: 0.002 z-fought at range)
+            b.Cyl(new Vector3(0, -0.007f, 0), new Vector3(0, 0.005f, 0), 9.5f / 2 / h * 1.1f, Acc, Rubber, 4);   // the square drive
             b.Hook(new Vector2(0, 0.01f), 2);
         }
 

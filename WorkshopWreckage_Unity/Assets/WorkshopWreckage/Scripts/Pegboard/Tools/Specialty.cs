@@ -17,7 +17,7 @@ namespace WorkshopWreckage.Pegboard
         // F-clamp: a steel bar, a fixed jaw at the top, a sliding jaw with screw and wooden handle below
         static void FClamp(ToolMesh b)
         {
-            b.Box(new Vector3(-0.15f, 0.5f, 0), new Vector3(0.05f, 1f, 0.016f), Tin, White);
+            b.Box(new Vector3(-0.15f, 0.497f, 0), new Vector3(0.05f, 0.994f, 0.016f), Tin, White);   // the bar's top stays inside the fixed jaw (flush tops z-fought)
             b.Plate(new[] { new Vector2(-0.18f, 1f), new Vector2(0.2f, 1f), new Vector2(0.2f, 0.94f), new Vector2(-0.1f, 0.9f), new Vector2(-0.18f, 0.9f) }, -0.03f, 0.03f, Own, White);
             b.Plate(new[] { new Vector2(-0.18f, 0.58f), new Vector2(0.2f, 0.62f), new Vector2(0.2f, 0.68f), new Vector2(-0.1f, 0.7f), new Vector2(-0.18f, 0.7f) }, -0.03f, 0.03f, Own, White);
             b.Cyl(new Vector3(0.12f, 0.62f, 0), new Vector3(0.12f, 0.88f, 0), 0.015f, Tin, White, 8);

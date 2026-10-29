@@ -64,7 +64,7 @@ namespace WorkshopWreckage.Pegboard
         static void WoodChisel(ToolMesh b, float widthMm)
         {
             float e = widthMm / 514f / 2, neck = Mathf.Min(0.022f, e * 0.85f + 0.006f);
-            Handle(b, 0.56f, 1f, 0.043f, Own, White, false);
+            Handle(b, 0.56f, 0.996f, 0.043f, Own, White, false);   // the handle's end stays inside the hoop (flush ends z-fought)
             b.Cyl(new Vector3(0, 0.965f, 0), new Vector3(0, 1f, 0), 0.036f, Tin, White, 12);
             b.Cone(new Vector3(0, 0.5f, 0), new Vector3(0, 0.58f, 0), 0.018f, 0.034f, Tin, White, 10);
             b.Plate(new[] { new Vector2(-neck, 0.51f), new Vector2(neck, 0.51f), new Vector2(e, 0.03f), new Vector2(e, 0), new Vector2(-e, 0), new Vector2(-e, 0.03f) }, -0.008f, 0.006f, Tin, Chrome);

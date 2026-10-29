@@ -24,7 +24,7 @@ namespace WorkshopWreckage.Pegboard
         {
             float bell = x0 + (x1 - x0) * 0.72f, rim = x1 + 0.014f;
             b.Cone(new Vector3(x0, y, 0), new Vector3(bell, y, 0), r * 0.84f, r * 0.9f, Tin, White, 14);
-            b.Cone(new Vector3(bell, y, 0), new Vector3(rim + 0.012f, y, 0), r * 0.9f, r * 1.1f, Tin, White, 14);
+            b.Cone(new Vector3(bell, y, 0), new Vector3(rim + 0.012f, y, 0), r * 0.9f, r * 1.1f, Tin, White, 14, false);   // no caps: they doubled the neighbours' end discs
             b.Cyl(new Vector3(rim + 0.012f, y, 0), new Vector3(rim, y, 0), r * 1.1f, Tin, White, 14);
             b.Cone(new Vector3(rim, y, 0), new Vector3(x1, y, 0), r * 1.1f, r * 0.96f, Tin, Chrome, 14);   // ground face
         }
@@ -73,7 +73,7 @@ namespace WorkshopWreckage.Pegboard
         static void Mallet(ToolMesh b)
         {
             HammerHandle(b, 0.8f, 0.042f);
-            b.Lathe(Vector3.zero, new[] { new Vector2(0.05f, 0), new Vector2(0.056f, 0.02f), new Vector2(0.056f, 0.14f), new Vector2(0.048f, 0.16f), new Vector2(0, 0.16f) }, Acc, Rubber, 12);
+            b.Lathe(Vector3.zero, new[] { new Vector2(0.05f, -0.003f), new Vector2(0.056f, 0.02f), new Vector2(0.056f, 0.14f), new Vector2(0.048f, 0.16f), new Vector2(0, 0.16f) }, Acc, Rubber, 12);   // the grip's end a hair past the handle's (flush ends z-fought)
             b.Lathe(new Vector3(0, 0.16f, 0), new[] { new Vector2(0.05f, 0), new Vector2(0.054f, 0.01f), new Vector2(0.054f, 0.12f), new Vector2(0.044f, 0.14f), new Vector2(0, 0.14f) }, Acc, Red, 12);
             b.Box(new Vector3(0, 0.88f, 0), new Vector3(0.3f, 0.12f, 0.11f), Acc, Yellow);
             b.Box(new Vector3(0, 0.88f, 0), new Vector3(0.12f, 0.135f, 0.125f), Acc, Rubber);   // the band round the eye

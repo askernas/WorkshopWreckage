@@ -312,7 +312,7 @@ namespace WorkshopWreckage
             _wbHeader.GetComponent<LayoutElement>().preferredHeight = p.crafted ? 120 : 76;
             _wbHeader.text = statusLine + "\n"
                 + $"Assembly  {Bar(wb.Completion(p))}  {wb.Completion(p) * 100:0}%  ({wb.InstalledCount(p)} / {wb.Required(p)})" + (fitted > 0 ? $"  <color={Hex(Brass)}>· {fitted} tried on, not applied</color>" : "") + "\n"
-                + $"<color={Hex(Muted)}>◀ ▶ change the part in a place — it goes on at once, so you see it.  ✕ takes a tried-on part off.  Apply locks them in.</color>";
+                + $"<color={Hex(Muted)}>◀ ▶ change the part in a place — it goes on at once, so you see it.  ✕ takes it off.  Applied or not, parts can be changed until you Activate.</color>";
 
             if (p.crafted)
             {
@@ -376,7 +376,7 @@ namespace WorkshopWreckage
                         Arrow("◀", on >= 0 ? ring[(idx - 1 + n) % n] : ring[n - 1]);
                         Arrow("▶", on >= 0 ? ring[(idx + 1) % n] : ring[0]);
                     }
-                    if (on >= 0 && wb.IsFitted(on))
+                    if (on >= 0 && wb.Removable(p, on))   // tried on or applied alike (playtest 2026-10-29)
                     {
                         int part = on;
                         var x = MakeButton(row, "✕", () =>
@@ -490,7 +490,7 @@ namespace WorkshopWreckage
                     }
                 }
             }
-            t += $"\n<color=#9a8c74>[Mouse / Q E] turn   [Wheel] zoom\n[F / RMB] put it back   ·   to build, hold a part to the robot on its mat</color>";
+            t += $"\n<color=#9a8c74>[Mouse / Q E] turn   [Wheel] zoom\n[F / RMB] put it back   ·   to build, click the bench and fit parts on the bench screen</color>";
             _inspectText.text = t;
         }
 
@@ -505,7 +505,7 @@ namespace WorkshopWreckage
             if (types.Count == 0)
             {
                 _rbHeader.text = "";
-                _rbInfo.text = "No robots built yet.\n\nFind a robot's parts, carry them to the Robot Workbench and install them once its blueprint is unlocked (Retrobot: level 2). Each robot's upgrades appear here once it is operational.";
+                _rbInfo.text = "No robots built yet.\n\nFind a robot's parts, carry them to the Robot Workbench and fit them on the bench screen once its blueprint is unlocked. Each robot's upgrades appear here once it is operational.";
                 return;
             }
             if (!types.Contains(_robotSel)) _robotSel = types[0];

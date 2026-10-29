@@ -531,7 +531,7 @@ namespace WorkshopWreckage
             var s = StatusOf(p);
             if (s == Status.Operational) return $"{p.name} is operational.";
             if (s == Status.ReadyForActivation) return "Assembly complete — activate the robot.";
-            if (!p.crafted && FittedIds(p).Count is int nf && nf > 0 && Complete(p)) return $"Every part is fitted — apply {p.name} ([V] at the robot) to lock {nf} part{(nf == 1 ? "" : "s")} in.";
+            if (!p.crafted && FittedIds(p).Count is int nf && nf > 0 && Complete(p)) return $"Every part is fitted — Apply {nf} tried-on part{(nf == 1 ? "" : "s")} on the bench screen, then Activate {p.name}.";
             var bits = new List<string>();
             if (!Unlocked(p)) bits.Add(LockReason(p) + ".");
             if (p.crafted)
@@ -575,6 +575,7 @@ namespace WorkshopWreckage
             swap = -1;
             if (!Unlocked(p)) return LockReason(p);
             if (Operational(p)) return $"{p.name} is already operational";
+            if (Activating(p)) return $"{p.name} is starting up";
             var i = _g.world.instances[id];
             string origin = OriginOf(id);
             if (hands ? i.state != ItemState.Carried || i.owner != "player" : i.state != ItemState.Stored || i.owner != "box:" + StationOf(TypeOf(origin)))
@@ -587,16 +588,17 @@ namespace WorkshopWreckage
             var slot = SlotOfKey(p.type, key);
             if (slot is ModuleSlot rs && Reserved(p, rs) is RobotModule spare) return $"{p.name} has the spare {spare.Name} fitted: take it off first";
             int occ = InstalledIds(p).Where(x => x != id && KeyOn(p, x) == key).DefaultIfEmpty(-1).First();
-            if (occ < 0) return "";
-            if (_fitted.Contains(occ)) { swap = occ; return ""; }
-            string o = OriginOf(occ);
-            // until the robot runs, an applied head or arm can still be swapped for another robot's (playtest
-            // 2026-10-28: "i cannot take a part and build my robot with it"); the old one comes off
-            if (slot is ModuleSlot hs && MainSlotOf(id) == hs && MainSlotOf(occ) == hs && OriginOf(id) != o) { swap = occ; return ""; }
-            return slot is ModuleSlot sl && o != p.id && !(IsPooled(p) && TypeOf(o) == p.type)
-                ? $"{p.name} has {RobotModules.OriginName(o)}'s {RobotModules.SlotName(sl)} instead"
-                : $"{p.name} already has a {(slot is ModuleSlot s2 ? RobotModules.SlotName(s2) : key)}";
+            // the part in that place comes off for it, tried on or applied alike, until the robot is activated
+            // (playtest 2026-10-29: an applied arm could not be changed where it was put on)
+            swap = occ;
+            return "";
         }
+
+        /// <summary>Activate was pressed: the robot is starting up, and its parts are fixed from now on.</summary>
+        bool Activating(Project p) => RobotOf(p) is Robot r && r.mode == Robot.Mode.Activating;
+
+        /// <summary>Can that part of p come off (or be swapped) on the bench? Tried on or applied, until Activate.</summary>
+        public bool Removable(Project p, int id) => !Operational(p) && !Activating(p) && InstalledIds(p).Contains(id);
 
         // ---------------------------------------------------------------- hands-on fitting (playtest 2026-10-28)
 
@@ -628,13 +630,14 @@ namespace WorkshopWreckage
             Sfx.Play("servo", r != null ? r.transform.position : transform.position, -6);
             Refresh();
             var name = _g.world.DefOf(id).displayName;
-            return (true, $"{name} snaps onto {p.name}" + (back != null ? $"  ·  {_g.world.DefOf(swap).displayName} {back}" : "") + "  ·  [V] Apply to lock it in");
+            return (true, $"{name} snaps onto {p.name}" + (back != null ? $"  ·  {_g.world.DefOf(swap).displayName} {back}" : "") + "  ·  Apply, then Activate (until then any part can still be changed)");
         }
 
-        /// <summary>Takes a fitted (uncommitted) part off p into the player's hands (the pool if they are full).</summary>
+        /// <summary>Takes a part off p, tried on or applied, into the player's hands (the pool if they are full);
+        /// once the robot is activated its parts stay on.</summary>
         public (bool ok, string text) TakeOff(Project p, int id, bool toPool = false)
         {
-            if (!FittedIds(p).Contains(id)) return (false, "That part is committed");
+            if (!Removable(p, id)) return (false, Operational(p) || Activating(p) ? $"{p.name} is activated: its parts stay on" : "That part is not on the robot");
             string back = Detach(id, toPool);
             RobotOf(p)?.RefreshAssembly();
             Sfx.Play("drop_drawer", RobotOf(p)?.transform.position ?? transform.position, -6);
@@ -733,7 +736,7 @@ namespace WorkshopWreckage
             _g.inventory.Select(i.defId);
             Sfx.Play("pickup", transform.position, -6);
             Refresh();
-            return (true, $"{_g.world.DefOf(id).displayName} from the parts pool  ·  {FitsText(id)}: hold it to a robot on the bench to try it on");
+            return (true, $"{_g.world.DefOf(id).displayName} from the parts pool  ·  {FitsText(id)}: click the Robot Workbench to fit it on the bench screen");
         }
 
         /// <summary>The robot part in the pool tray nearest the aim ray (-1: none within a few cm).</summary>

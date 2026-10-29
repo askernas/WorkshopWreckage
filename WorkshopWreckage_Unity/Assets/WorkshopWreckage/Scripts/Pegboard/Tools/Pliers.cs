@@ -34,11 +34,12 @@ namespace WorkshopWreckage.Pegboard
                 // the handle runs down on the opposite side (the halves cross at the rivet)
                 var a = new Vector2(0, pivot); var mid = new Vector2(-side * spread * 0.55f, pivot * 0.55f); var end = new Vector2(-side * spread, 0.02f);
                 b.Strip(a, mid, 0.05f, 0.04f, z0, z1, Tin, White);
-                b.Strip(mid, end, 0.04f, 0.036f, z0, z1, Tin, White);
-                // dipped grip in the tool's colour, slightly fatter than the steel
+                b.Strip(mid, end + (mid - end).normalized * 0.004f, 0.04f, 0.036f, z0, z1, Tin, White);   // the steel stops just inside the grip's end (flush ends z-fought)
+                // dipped grip in the tool's colour, slightly fatter than the steel (a hair proud on the inner face too:
+                // flush with the steel there it z-fought)
                 var g0 = mid + (a - mid) * 0.35f;
-                b.Strip(g0, mid, 0.058f, 0.054f, z0 - (side < 0 ? 0.006f : 0), z1 + (side > 0 ? 0.006f : 0), Own, White);
-                b.Strip(mid, end, 0.054f, 0.05f, z0 - (side < 0 ? 0.006f : 0), z1 + (side > 0 ? 0.006f : 0), Own, White);
+                b.Strip(g0, mid, 0.058f, 0.054f, z0 - (side < 0 ? 0.006f : 0.002f), z1 + (side > 0 ? 0.006f : 0.002f), Own, White);
+                b.Strip(mid, end, 0.054f, 0.05f, z0 - (side < 0 ? 0.006f : 0.002f), z1 + (side > 0 ? 0.006f : 0.002f), Own, White);
             }
             b.Cyl(new Vector3(0, pivot, -0.024f), new Vector3(0, pivot, 0.024f), 0.028f, Tin, White, 12);   // rivet
             Rivet(b, new Vector3(0, pivot, 0), 0.024f, 0.03f);

@@ -110,7 +110,7 @@ namespace WorkshopWreckage.Sandbox
                 case "countersunk":
                     g.Shank(0.5f, 0, a - 0.5f, pitch, segs);
                     g.Lathe(g.RP(false, C(0, a - 0.55f), C(0.5f, a - 0.55f), C(1f, a, 0.03f, 1), C(1f, a + 0.05f, 0.03f), C(0, a + 0.05f)), hs);
-                    SlotCross(g, a + 0.05f, 1.7f, true);
+                    SlotCross(g, a + 0.05f, 1.7f, true, 0.04f);   // 0.02 proud of the flat head (the old 0.006 z-fought at range)
                     return;
             }
             if (threadEnd < a)
@@ -128,7 +128,7 @@ namespace WorkshopWreckage.Sandbox
                 case "socket_cap":
                     g.Lathe(g.RP(false, C(0, a), C(0.75f, a, 0.03f, 1), C(0.75f, a + 1f, 0.14f), C(0, a + 1f)), hs);
                     g.color = new Color(0.08f, 0.08f, 0.09f, 0); g.slot = 2;
-                    g.Prism(PolyRing(6, 0.3f, 6), a + 1f, a + 1.005f, 0, 1);
+                    g.Prism(PolyRing(6, 0.3f, 6), a + 1f, a + 1.02f, 0, 1);   // 0.02 proud: the old 0.005 skin z-fought at range
                     g.slot = 0; g.color = White;
                     break;
                 case "pan_head":
@@ -146,11 +146,14 @@ namespace WorkshopWreckage.Sandbox
             }
         }
 
-        static void SlotCross(G g, float y, float len, bool cross)
+        static void SlotCross(G g, float y, float len, bool cross, float h = 0.012f)
         {
             g.slot = 2; g.color = new Color(0.07f, 0.07f, 0.08f, 0);
-            g.Box(new Vector3(0, y, 0), new Vector3(len, 0.012f, 0.16f));
-            if (cross) g.Box(new Vector3(0, y, 0), new Vector3(0.16f, 0.012f, len));
+            // the cross arm is two halves that stop at the slot, so the two boxes no longer share their top face in the middle
+            g.Box(new Vector3(0, y, 0), new Vector3(len, h, 0.16f));
+            if (cross)
+                foreach (float s in new[] { -1f, 1f })
+                    g.Box(new Vector3(0, y, s * (len + 0.16f) / 4), new Vector3(0.16f, h, (len - 0.16f) / 2));
             g.slot = 0; g.color = White;
         }
 
@@ -910,7 +913,7 @@ namespace WorkshopWreckage.Sandbox
                     break;
                 }
                 case "sprocket_hub":
-                    g.Prism(GearOutline("sprocket", 24, 0.43f, 0.5f, g), 0, 0.06f, 0.012f, 1, 0.12f, 0.01f, g.S(36, 48));
+                    g.Prism(GearOutline("sprocket", 24, 0.43f, 0.5f, g), 0, 0.06f, 0.012f, 1, 0.125f, 0.01f, g.S(36, 48));   // bore a hair wider than the hub's: equal bores with other facet counts z-fought
                     g.Lathe(Ring(g, 0.12f, 0.2f, -0.18f, 0.24f, 0.03f, 0.012f), n);
                     g.Lathe(Ring(g, 0.2f, 0.3f, 0.06f, 0.1f, 0.015f, 0), n);
                     Acc(Bolt);

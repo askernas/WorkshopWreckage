@@ -55,14 +55,14 @@ namespace WorkshopWreckage
             // the Unibot's tyre as it is on the robot (UnibotModel.BuildWheel), not the old 7-sided export (playtest 2026-10-28)
             ["robot:tire"] = UnibotTire,
             // Sorting Arm unique parts (robot_parts.json, yellow enamel with red joints)
-            ["robot:sa_coupler"] = b => { b.Box(new Vector3(0, -0.3f, 0), new Vector3(1f, 0.16f, 0.7f), 0, Part); b.Box(new Vector3(0, -0.14f, -0.3f), new Vector3(0.7f, 0.2f, 0.12f), 2, DarkSteel); b.Cyl(new Vector3(0, -0.22f, 0.05f), new Vector3(0, 0.2f, 0.05f), 0.24f, 2, ArmRed); foreach (float x in new[] { -0.4f, 0.4f }) b.Cyl(new Vector3(x, -0.38f, 0.2f), new Vector3(x, -0.2f, 0.2f), 0.05f, 2, Hole); b.Box(new Vector3(0.3f, -0.21f, 0.25f), new Vector3(0.1f, 0.02f, 0.06f), 2, Lens); },
+            ["robot:sa_coupler"] = b => { b.Box(new Vector3(0, -0.3f, 0), new Vector3(1f, 0.16f, 0.7f), 0, Part); b.Box(new Vector3(0, -0.14f, -0.3f), new Vector3(0.7f, 0.2f, 0.12f), 2, DarkSteel); b.Cyl(new Vector3(0, -0.22f, 0.05f), new Vector3(0, 0.2f, 0.05f), 0.24f, 2, ArmRed); foreach (float x in new[] { -0.4f, 0.4f }) b.Cyl(new Vector3(x, -0.385f, 0.2f), new Vector3(x, -0.2f, 0.2f), 0.05f, 2, Hole); /* holes poke 0.005 through the bottom: flush they z-fought */ b.Box(new Vector3(0.3f, -0.21f, 0.25f), new Vector3(0.1f, 0.02f, 0.06f), 2, Lens); },
             ["robot:sa_shoulder"] = b => { b.Cyl(new Vector3(0, -0.4f, 0), new Vector3(0, 0.05f, 0), 0.45f, 2, ArmRed); b.Cyl(new Vector3(0, 0.05f, 0), new Vector3(0, 0.15f, 0), 0.38f, 2, DarkSteel); b.Box(new Vector3(0, 0.3f, 0), new Vector3(0.7f, 0.3f, 0.5f), 0, Part); b.Cyl(new Vector3(-0.38f, 0.32f, 0), new Vector3(0.38f, 0.32f, 0), 0.16f, 2, Chrome); },
             ["robot:sa_upper"] = b => ArmBeam(b, 1.7f, 0.28f),
             ["robot:sa_forearm"] = b => ArmBeam(b, 1.6f, 0.22f),
             ["robot:sa_elbow"] = b => { b.Cyl(new Vector3(-0.42f, 0, 0), new Vector3(0.42f, 0, 0), 0.4f, 2, ArmRed); b.Cyl(new Vector3(-0.5f, 0, 0), new Vector3(-0.42f, 0, 0), 0.22f, 2, DarkSteel); b.Box(new Vector3(0, -0.35f, 0), new Vector3(0.5f, 0.3f, 0.4f), 0, Part); b.Box(new Vector3(0.2f, 0.25f, 0.33f), new Vector3(0.18f, 0.08f, 0.01f), 2, Warn); },
             ["robot:sa_wrist"] = b => { b.Cyl(new Vector3(0, -0.45f, 0), new Vector3(0, 0.1f, 0), 0.32f, 0, Part); b.Cyl(new Vector3(0, 0.1f, 0), new Vector3(0, 0.25f, 0), 0.4f, 2, ArmRed); b.Cyl(new Vector3(0, 0.25f, 0), new Vector3(0, 0.45f, 0), 0.25f, 2, DarkSteel); },
             ["robot:sa_finger"] = b => { b.Box(new Vector3(0, 0, 0), new Vector3(0.22f, 1.3f, 0.3f), 0, Part); b.Box(new Vector3(0.1f, 0.55f, 0), new Vector3(0.22f, 0.25f, 0.28f), 2, Rubber); b.Cyl(new Vector3(0, -0.6f, -0.17f), new Vector3(0, -0.6f, 0.17f), 0.14f, 2, ArmRed); },
-            ["robot:sa_motor"] = b => { b.Cyl(new Vector3(0, -0.7f, 0), new Vector3(0, 0.5f, 0), 0.3f, 2, DarkSteel); for (int i = 0; i < 5; i++) b.Cyl(new Vector3(0, -0.5f + i * 0.2f, 0), new Vector3(0, -0.45f + i * 0.2f, 0), 0.34f, 0, Part); b.Cyl(new Vector3(0, 0.5f, 0), new Vector3(0, 0.75f, 0), 0.07f, 2, Chrome); b.Box(new Vector3(0.3f, -0.2f, 0), new Vector3(0.16f, 0.3f, 0.2f), 2, Rubber); },
+            ["robot:sa_motor"] = b => { b.Cyl(new Vector3(0, -0.7f, 0), new Vector3(0, 0.5f, 0), 0.3f, 2, DarkSteel); for (int i = 0; i < 5; i++) b.Cyl(new Vector3(0, -0.5f + i * 0.2f, 0), new Vector3(0, -0.45f + i * 0.2f, 0), 0.34f, 0, Part); b.Cyl(new Vector3(0, 0.5f, 0), new Vector3(0, 0.75f, 0), 0.07f, 2, Chrome); b.Box(new Vector3(0.3f, -0.205f, 0), new Vector3(0.16f, 0.29f, 0.2f), 2, Rubber); /* top 0.01 under the band: flush it z-fought */ },
             ["robot:sa_control"] = b => { b.Box(Vector3.zero, new Vector3(1f, 0.6f, 0.7f), 0, Part); b.Box(new Vector3(0, 0.05f, 0.355f), new Vector3(0.7f, 0.3f, 0.01f), 2, DarkSteel); for (int i = 0; i < 3; i++) b.Box(new Vector3(-0.2f + i * 0.2f, 0.05f, 0.362f), new Vector3(0.08f, 0.08f, 0.01f), 2, i == 1 ? Lens : ArmRed); for (int i = 0; i < 5; i++) b.Box(new Vector3(-0.4f + i * 0.2f, 0.31f, 0), new Vector3(0.06f, 0.02f, 0.6f), 2, DarkSteel); },
             ["robot:sa_sensor"] = b => { b.Box(new Vector3(0, 0, -0.1f), new Vector3(0.9f, 0.55f, 0.6f), 0, Part); foreach (float x in new[] { -0.22f, 0.22f }) { b.Cyl(new Vector3(x, 0, 0.2f), new Vector3(x, 0, 0.35f), 0.17f, 2, DarkSteel); b.Cyl(new Vector3(x, 0, 0.35f), new Vector3(x, 0, 0.38f), 0.12f, 2, Lens); } b.Box(new Vector3(0, 0.3f, -0.1f), new Vector3(0.2f, 0.08f, 0.2f), 2, ArmRed); },
             ["robot:sa_harness"] = b => { for (int i = 0; i < 9; i++) { float a0 = i * 0.7f, a1 = (i + 1) * 0.7f; var p0 = new Vector3(Mathf.Cos(a0) * 0.35f, -0.4f + i * 0.09f, Mathf.Sin(a0) * 0.35f); var p1 = new Vector3(Mathf.Cos(a1) * 0.35f, -0.4f + (i + 1) * 0.09f, Mathf.Sin(a1) * 0.35f); b.Cyl(p0, p1, 0.06f, 2, i % 3 == 0 ? ArmRed : Rubber, 8); } b.Box(new Vector3(0.35f, -0.45f, 0), new Vector3(0.2f, 0.14f, 0.14f), 0, Part); b.Box(new Vector3(0.3f, 0.45f, 0.2f), new Vector3(0.2f, 0.14f, 0.14f), 0, Part); },
@@ -155,7 +155,7 @@ namespace WorkshopWreckage
         static void RadarBattery(B b)
         {
             b.Cyl(new Vector3(0, -0.46f, 0), new Vector3(0, 0.46f, 0), 0.135f, 0, Part);
-            b.Cyl(new Vector3(0, -0.12f, 0), new Vector3(0, 0.18f, 0), 0.138f, 2, TapeC);
+            b.Cyl(new Vector3(0, -0.12f, 0), new Vector3(0, 0.18f, 0), 0.14f, 2, TapeC);   // 0.005 proud: the old 0.003 skin could flicker at range
             b.Cyl(new Vector3(0, 0.46f, 0), new Vector3(0, 0.5f, 0), 0.05f, 2, Chrome, 10);
             b.Cyl(new Vector3(0, -0.5f, 0), new Vector3(0, -0.46f, 0), 0.115f, 2, Chrome);
         }
@@ -172,7 +172,7 @@ namespace WorkshopWreckage
             for (int k = 0; k < 14; k++)
             {
                 float a = k * Mathf.PI * 2 / 14;
-                b.Box(new Vector3(0.38f, 0.04f + Mathf.Sin(a) * 0.32f, Mathf.Cos(a) * 0.32f), new Vector3(0.08f, 0.06f, 0.06f), 2, DarkSteel);
+                b.Box(new Vector3(0.38f, 0.04f + Mathf.Sin(a) * 0.32f, Mathf.Cos(a) * 0.32f), new Vector3(0.07f, 0.06f, 0.06f), 2, DarkSteel);   // teeth a hair narrower than the gear: flush sides z-fought
             }
             b.Cyl(new Vector3(0.42f, 0.04f, 0), new Vector3(0.56f, 0.04f, 0), 0.07f, 2, Chrome);    // output shaft
             b.Cyl(new Vector3(-0.48f, 0.12f, 0), new Vector3(-0.58f, 0.12f, 0), 0.12f, 2, DarkSteel);   // input
@@ -363,7 +363,7 @@ namespace WorkshopWreckage
                 b.Cyl(new Vector3(x, -0.09f, -0.02f), new Vector3(x, 0.09f, -0.02f), 0.035f, 2, Hole);
             b.Cyl(new Vector3(0, 0, 0.18f), new Vector3(0, 0, 0.24f), 0.13f, 2, DarkSteel);      // output spline
             b.Box(new Vector3(0, 0, 0.27f), new Vector3(0.62f, 0.12f, 0.05f), 2, new Color(0.9f, 0.9f, 0.86f, 0));   // horn
-            b.Box(new Vector3(0, 0, 0.27f), new Vector3(0.12f, 0.5f, 0.05f), 2, new Color(0.9f, 0.9f, 0.86f, 0));
+            b.Box(new Vector3(0, 0, 0.27f), new Vector3(0.12f, 0.5f, 0.044f), 2, new Color(0.9f, 0.9f, 0.86f, 0));   // a hair thinner: equal arms z-fought in the crossing
             b.Cyl(new Vector3(0, 0.3f, -0.1f), new Vector3(0, 0.46f, -0.1f), 0.06f, 2, Rubber);  // cable stub
             for (int i = 0; i < 3; i++)
                 b.Cyl(new Vector3(-0.03f + i * 0.03f, 0.46f, -0.1f), new Vector3(-0.05f + i * 0.05f, 0.56f, -0.12f), 0.014f, 2, i == 0 ? WireRed : i == 1 ? Rubber : Warn);
@@ -416,7 +416,7 @@ namespace WorkshopWreckage
         static void ChassisBracket(B b)
         {
             b.Box(new Vector3(0, -0.39f, 0), new Vector3(1f, 0.08f, 0.6f), 0, Part);           // base plate
-            b.Box(new Vector3(0, 0, -0.26f), new Vector3(1f, 0.86f, 0.08f), 0, Part);          // upright
+            b.Box(new Vector3(0, 0.04f, -0.26f), new Vector3(1f, 0.78f, 0.08f), 0, Part);      // upright (stands on the base plate: the old full-height box shared its side, back and bottom faces in the corner)
             foreach (float x in new[] { -0.36f, 0.36f })
                 b.Prism(new[] { new Vector2(-0.22f, -0.35f), new Vector2(0.28f, -0.35f), new Vector2(-0.22f, 0.3f) }, x - 0.03f, x + 0.03f, 0, Part);   // gussets (profile in ZY)
             foreach (float x in new[] { -0.15f, 0.15f })
@@ -480,8 +480,8 @@ namespace WorkshopWreckage
         static void TrackLink(B b)
         {
             b.Box(new Vector3(0, -0.05f, 0.04f), new Vector3(1f, 0.12f, 0.5f), 0, Part);                          // shoe plate
-            b.Box(new Vector3(0, 0.06f, 0.1f), new Vector3(1f, 0.12f, 0.1f), 0, Part);                             // grouser
-            foreach (var (x0, x1) in new[] { (-0.5f, -0.24f), (-0.08f, 0.08f), (0.24f, 0.5f) })
+            b.Box(new Vector3(0, 0.065f, 0.1f), new Vector3(1f, 0.11f, 0.1f), 0, Part);                            // grouser (sits on the plate: sunk in, its ends z-fought the plate's)
+            foreach (var (x0, x1) in new[] { (-0.495f, -0.24f), (-0.08f, 0.08f), (0.24f, 0.495f) })                // outer knuckles stop a hair inside the plate's ends
                 b.Cyl(new Vector3(x0, -0.03f, -0.27f), new Vector3(x1, -0.03f, -0.27f), 0.09f, 0, Part);          // hinge knuckles
             b.Cyl(new Vector3(-0.52f, -0.03f, -0.27f), new Vector3(0.52f, -0.03f, -0.27f), 0.04f, 2, Chrome, 8);   // track pin
             foreach (float x in new[] { -0.3f, 0.3f })
@@ -498,8 +498,9 @@ namespace WorkshopWreckage
                 foreach (float z in new[] { -0.32f, 0.32f })
                     b.Cyl(new Vector3(x * 1.1f, 0, z), new Vector3(x * 1.2f, 0, z), 0.13f, 2, DarkSteel, 10);       // pin bosses
             }
-            b.Box(new Vector3(0, 0.24f, 0), new Vector3(0.8f, 0.08f, 0.3f), 0, Part);                               // crossbar
-            b.Box(new Vector3(0, -0.25f, 0), new Vector3(0.8f, 0.06f, 0.7f), 0, Part);                              // bottom shelf
+            // crossbar and shelf end at the side plates' inner faces: run into the plates, their flush top / bottom z-fought
+            b.Box(new Vector3(0, 0.24f, 0), new Vector3(0.72f, 0.08f, 0.3f), 0, Part);                              // crossbar
+            b.Box(new Vector3(0, -0.25f, 0), new Vector3(0.72f, 0.06f, 0.7f), 0, Part);                             // bottom shelf
         }
 
         /// <summary>Rotor hub (no blades): a stepped hub, two blade-root clamp blocks with clamp bolts,
@@ -541,7 +542,10 @@ namespace WorkshopWreckage
         static void BatteryCell(B b)
         {
             foreach (float x in new[] { -0.3f, 0f, 0.3f })
-                b.Cyl(new Vector3(x, 0, -0.45f), new Vector3(x, 0, 0.45f), 0.155f, 0, Part);                       // cells
+            {
+                float e = x == 0 ? 0.445f : 0.45f;   // the middle cell sits a hair short: neighbouring cells overlap, so equal end caps fought
+                b.Cyl(new Vector3(x, 0, -e), new Vector3(x, 0, e), 0.155f, 0, Part);                               // cells
+            }
             b.Box(new Vector3(0, 0, 0), new Vector3(0.94f, 0.33f, 0.36f), 2, Warn);                               // wrap band (label)
             foreach (float x in new[] { -0.3f, 0.3f })
                 b.Box(new Vector3(x, 0, 0.465f), new Vector3(0.22f, 0.2f, 0.03f), 2, Chrome);                      // terminal tabs
@@ -556,7 +560,7 @@ namespace WorkshopWreckage
             b.Box(new Vector3(0, -0.4f, 0), new Vector3(1.0f, 0.08f, 0.8f), 0, Part);                              // board (variant colour)
             foreach (float x in new[] { -0.3f, 0.3f })
                 b.Box(new Vector3(x, -0.08f, -0.05f), new Vector3(0.08f, 0.56f, 0.16f), 2, Alu);                   // uprights
-            b.Cyl(new Vector3(-0.34f, 0.05f, -0.05f), new Vector3(0.34f, 0.05f, -0.05f), 0.045f, 2, Chrome, 8);    // axle
+            b.Cyl(new Vector3(-0.346f, 0.05f, -0.05f), new Vector3(0.346f, 0.05f, -0.05f), 0.045f, 2, Chrome, 8);  // axle (ends just proud of the uprights, not flush: flush ends z-fought)
             b.Cyl(new Vector3(-0.07f, 0.05f, -0.05f), new Vector3(0.07f, 0.05f, -0.05f), 0.27f, 2, DarkSteel);     // rotor
             b.Cyl(new Vector3(-0.09f, 0.05f, -0.05f), new Vector3(0.09f, 0.05f, -0.05f), 0.09f, 2, ArmRed, 8);    // rotor hub
             b.Box(new Vector3(0.28f, -0.33f, 0.27f), new Vector3(0.22f, 0.06f, 0.18f), 2, Chip);                  // sensor chip
@@ -573,7 +577,7 @@ namespace WorkshopWreckage
             {
                 b.Box(new Vector3(0, s * (h - 0.22f), 0.42f), new Vector3(0.06f, 0.44f, 0.2f), 2, Hole);           // clamp slit
                 b.Cyl(new Vector3(-0.3f, s * (h - 0.22f), 0.32f), new Vector3(0.3f, s * (h - 0.22f), 0.32f), 0.08f, 2, DarkSteel, 8);   // cap screw
-                b.Cyl(new Vector3(0, s * h, 0), new Vector3(0, s * (h + 0.005f), 0), 0.22f, 2, Hole, 10);          // bore
+                b.Cyl(new Vector3(0, s * h, 0), new Vector3(0, s * (h + 0.008f), 0), 0.22f, 2, Hole, 10);          // bore (0.008 proud: 0.005 could flicker at range)
             }
         }
 
@@ -589,7 +593,7 @@ namespace WorkshopWreckage
             foreach (float s in new[] { -1f, 1f })
             {
                 b.Box(new Vector3(0, s * (h - 0.15f), 0), new Vector3(0.6f, 0.3f, 0.5f), s < 0 ? 0 : 2, s < 0 ? Part : Chrome);   // clevis eye
-                b.Cyl(new Vector3(-0.31f, s * (h - 0.15f), 0), new Vector3(0.31f, s * (h - 0.15f), 0), 0.12f, 2, Hole, 8);
+                b.Cyl(new Vector3(-0.312f, s * (h - 0.15f), 0), new Vector3(0.312f, s * (h - 0.15f), 0), 0.12f, 2, Hole, 8);   // 0.012 proud of the eye (0.01 could flicker at range)
             }
         }
 
@@ -615,7 +619,7 @@ namespace WorkshopWreckage
                 b.Box(new Vector3(Mathf.Cos(a) * 0.38f, 0.053f, Mathf.Sin(a) * 0.38f), new Vector3(0.07f, 0.008f, 0.07f), 2, Hole);   // slots
             }
             b.Cyl(new Vector3(0, -0.05f, 0), new Vector3(0, 0.2f, 0), 0.18f, 2, DarkSteel);                       // hub (starts inside the disc: its base never shares the disc's underside)
-            b.Cyl(new Vector3(0, 0.2f, 0), new Vector3(0, 0.205f, 0), 0.08f, 2, Hole, 8);                         // bore
+            b.Cyl(new Vector3(0, 0.19f, 0), new Vector3(0, 0.215f, 0), 0.08f, 2, Hole, 8);                        // bore (starts inside the hub: its base never shares the hub's top)
             b.Cyl(new Vector3(0.17f, 0.1f, 0), new Vector3(0.23f, 0.1f, 0), 0.035f, 2, Chrome, 6);                // set screw
         }
 

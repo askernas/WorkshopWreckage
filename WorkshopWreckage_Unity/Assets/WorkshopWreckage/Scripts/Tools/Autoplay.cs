@@ -1918,9 +1918,21 @@ namespace WorkshopWreckage
                 bool blocked = wb.Complete(p) && !wb.CanActivate(p) && wb.StatusOf(p) != RobotWorkbench.Status.ReadyForActivation;
                 int n = wb.Commit(p);
                 var last = wb.InstalledIds(p)[0];
-                Check("Retrobot: every part fitted, it activates only once committed; committed parts stay on",
-                      blocked && n == wb.Required(p) && wb.CanActivate(p) && !wb.TakeOff(p, last).ok && wb.FittedIds(p).Count == 0,
+                Check("Retrobot: every part fitted, it activates only once committed",
+                      blocked && n == wb.Required(p) && wb.CanActivate(p) && wb.FittedIds(p).Count == 0,
                       $"{n} committed, {wb.Summary(p)}");
+                // an applied part comes off and goes back on in the same place, like a tried-on one (playtest 2026-10-29)
+                var off = wb.TakeOff(p, last, true);
+                bool offOk = off.ok && !wb.InstalledIds(p).Contains(last) && !wb.CanActivate(p);
+                var on = wb.Fit(p, last, true);
+                wb.Commit(p);
+                int arm = wb.InstalledIds(p).Where(id => wb.MainSlotOf(id) == ModuleSlot.ArmL).DefaultIfEmpty(-1).First();
+                var armOff = arm >= 0 ? wb.TakeOff(p, arm, true) : (false, "no left arm");
+                bool armBack = armOff.Item1 && wb.Fit(p, arm, true).ok && wb.Commit(p) == 1;
+                Check("Retrobot: an applied part (and an applied arm) comes off and back on in its place until Activate",
+                      offOk && on.ok && armBack && wb.CanActivate(p), $"{off.text} / {on.text} / {armOff.Item2}");
+                wb.Activate(p);
+                Check("Retrobot: once activated its parts stay on", !wb.TakeOff(p, last).ok && !wb.Removable(p, last), wb.Summary(p));
             }
 
             // fitted parts survive save / load (and stay loose)
@@ -1985,6 +1997,9 @@ namespace WorkshopWreckage
 
         /// <summary>QA: writes every item geometry key's meshes (both LODs) to outDir/meshes/<key>__lod<n>.obj, one
         /// group per submesh, with the material slot in the group name; also a key list with one example item.</summary>
+        /// Also (overlap audit 2026-10-29): the shape-mesh LODs the playtest look draws in the world (4-6), pegboard
+        /// tools without an item, every robot model fully built (models/<type>.obj, model space, one group per mesh
+        /// object) and the rest of the scene (scene/<root>.obj, world space); mesh_keys.tsv gains min / max world scale.
         void MeshDump()
         {
             var dir = Path.Combine(outDir, "meshes");
@@ -1992,15 +2007,20 @@ namespace WorkshopWreckage
             var keys = g.db.definitions.Values.GroupBy(d => d.geometryKey).Where(k => !string.IsNullOrEmpty(k.Key)).ToList();
             var list = new System.Text.StringBuilder();
             var inv = System.Globalization.CultureInfo.InvariantCulture;
-            foreach (var k in keys)
+            var all = keys.Select(k => (k.Key, name: k.First().displayName, n: k.Count(), lo: k.Min(d => d.worldScale), hi: k.Max(d => d.worldScale))).ToList();
+            foreach (var tk in WorkshopWreckage.Pegboard.ToolFactory.Keys)
+                if (!all.Any(a => a.Key == tk)) all.Add((tk, tk, 0, 0f, 0f));
+            foreach (var k in all)
             {
-                list.Append(k.Key).Append('\t').Append(k.First().displayName).Append('\t').Append(k.Count()).Append('\n');
-                foreach (int lod in new[] { MeshLibrary.LodInspect, MeshLibrary.LodWorld })
+                list.Append(k.Key).Append('\t').Append(k.name).Append('\t').Append(k.n).Append('\t').Append(k.lo.ToString("R", inv)).Append('\t').Append(k.hi.ToString("R", inv)).Append('\n');
+                var lods = new List<int> { MeshLibrary.LodInspect, MeshLibrary.LodWorld };
+                if (MeshLibrary.Extra != null && WorkshopWreckage.Sandbox.ShapeMeshes.Has(k.Key)) lods.AddRange(new[] { 4, 5, 6 });
+                foreach (int lod in lods)
                 {
                     var e = MeshLibrary.Get(k.Key, lod);
                     if (e?.mesh == null) continue;
                     var sb = new System.Text.StringBuilder();
-                    foreach (var v in e.mesh.vertices) sb.Append("v ").Append(v.x.ToString("R", inv)).Append(' ').Append(v.y.ToString("R", inv)).Append(' ').Append(v.z.ToString("R", inv)).Append('\n');
+                    AppendVerts(sb, e.mesh, Matrix4x4.identity, inv);
                     for (int sm = 0; sm < e.mesh.subMeshCount; sm++)
                     {
                         sb.Append("g sub").Append(sm).Append("_slot").Append(e.slots[sm]).Append('\n');
@@ -2012,6 +2032,104 @@ namespace WorkshopWreckage
             }
             File.WriteAllText(Path.Combine(outDir, "mesh_keys.tsv"), list.ToString());
             Check("every item mesh dumped", keys.Count > 0, $"{keys.Count} geometry keys");
+
+            // every robot model with all its parts, in model space (built at ~1 m; the tsv gives the world scale)
+            var mdir = Path.Combine(outDir, "models");
+            Directory.CreateDirectory(mdir);
+            var mlist = new System.Text.StringBuilder();
+            var temp = new List<GameObject>();
+            void DumpModel(string name, RobotModel m, float scale)
+            {
+                mlist.Append(name).Append('\t').Append(scale.ToString("R", inv)).Append('\n');
+                File.WriteAllText(Path.Combine(mdir, name + ".obj"), ObjOf(m.transform, inv));
+            }
+            foreach (var type in new[] { "retrobot", "unibot", "spiderbot", "caterpillarbot", "hoverbot", "sorting_arm" })
+            {
+                var have = new HashSet<string>();
+                foreach (var p in g.workbench.projects.Where(p => p.type == type))
+                {
+                    have.UnionWith(p.requires.Keys); have.UnionWith(p.requires.Values.SelectMany(v => v)); have.UnionWith(p.partOrder);
+                }
+                var go = new GameObject("QA_model_" + type);
+                temp.Add(go);
+                RobotModel m = type switch
+                {
+                    "unibot" => go.AddComponent<UnibotModel>(), "spiderbot" => go.AddComponent<SpiderbotModel>(),
+                    "caterpillarbot" => go.AddComponent<CaterpillarbotModel>(), "hoverbot" => go.AddComponent<HoverbotModel>(),
+                    "sorting_arm" => go.AddComponent<SortingArmModel>(), _ => go.AddComponent<RetrobotModel>(),
+                };
+                m.Init();
+                m.Build(have);
+                var live = g.robots.Find(r => r.type == type);
+                DumpModel(type, m, live != null ? live.GetComponentInChildren<RobotModel>(true).transform.localScale.x : 1f);
+            }
+            {
+                var go = new GameObject("QA_model_radar");
+                temp.Add(go);
+                var m = go.AddComponent<PartRadarModel>();
+                m.battery = true;
+                m.Init();
+                m.Build(new HashSet<string>(PartRadarModel.Parts));
+                DumpModel("part_radar", m, 1f);
+            }
+            File.WriteAllText(Path.Combine(mdir, "models.tsv"), mlist.ToString());
+
+            // the rest of the scene (room, furniture, workbench, pegboard, live robots...), world space, per root
+            var sdir = Path.Combine(outDir, "scene");
+            Directory.CreateDirectory(sdir);
+            int roots = 0;
+            foreach (var root in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
+            {
+                if (temp.Contains(root) || !root.activeInHierarchy) continue;
+                var obj = ObjOf(root.transform, inv, true);
+                if (obj.Length == 0) continue;
+                File.WriteAllText(Path.Combine(sdir, root.name.Replace(' ', '_').Replace('/', '_') + "_" + roots++ + ".obj"), obj);
+            }
+            foreach (var go in temp) Object.Destroy(go);
+            Check("every robot model and scene root dumped", true, $"{mlist.ToString().Split('\n').Length - 1} models, {roots} scene roots");
+        }
+
+        /// <summary>QA (MeshDump): "v x y z r g b nx ny nz" per vertex (white without vertex colours), so the overlap
+        /// audit can tell faces that shade differently from coincident ones that shade the same.</summary>
+        static void AppendVerts(System.Text.StringBuilder sb, Mesh mesh, Matrix4x4 mtx, System.Globalization.CultureInfo inv)
+        {
+            var vs = mesh.vertices; var ns = mesh.normals; var cs = mesh.colors;
+            for (int i = 0; i < vs.Length; i++)
+            {
+                var v = mtx.MultiplyPoint3x4(vs[i]);
+                var n = i < ns.Length ? mtx.MultiplyVector(ns[i]).normalized : Vector3.zero;
+                var c = i < cs.Length ? cs[i] : Color.white;
+                sb.Append("v ").Append(v.x.ToString("R", inv)).Append(' ').Append(v.y.ToString("R", inv)).Append(' ').Append(v.z.ToString("R", inv))
+                  .Append(' ').Append(c.r.ToString("0.###", inv)).Append(' ').Append(c.g.ToString("0.###", inv)).Append(' ').Append(c.b.ToString("0.###", inv))
+                  .Append(' ').Append(n.x.ToString("0.####", inv)).Append(' ').Append(n.y.ToString("0.####", inv)).Append(' ').Append(n.z.ToString("0.####", inv)).Append('\n');
+            }
+        }
+
+        /// <summary>QA (MeshDump): every active mesh object under `root` as OBJ, one group per object and submesh
+        /// ("g <path>|sub<n>"), in root space (or world space).</summary>
+        static string ObjOf(Transform root, System.Globalization.CultureInfo inv, bool world = false)
+        {
+            var sb = new System.Text.StringBuilder();
+            int baseV = 0;
+            foreach (var mf in root.GetComponentsInChildren<MeshFilter>(false))
+            {
+                var mesh = mf.sharedMesh;
+                var mr = mf.GetComponent<MeshRenderer>();
+                if (mesh == null || mr == null || !mr.enabled || !mesh.isReadable) continue;
+                var mtx = world ? mf.transform.localToWorldMatrix : root.worldToLocalMatrix * mf.transform.localToWorldMatrix;
+                var path = mf.name;
+                for (var t = mf.transform.parent; t != null && t != root; t = t.parent) path = t.name + "/" + path;
+                AppendVerts(sb, mesh, mtx, inv);
+                for (int sm = 0; sm < mesh.subMeshCount; sm++)
+                {
+                    if (mesh.GetTopology(sm) != MeshTopology.Triangles) continue;
+                    sb.Append("g ").Append(path.Replace(' ', '_')).Append("|sub").Append(sm).Append('\n');
+                    var t = mesh.GetTriangles(sm);
+                    for (int i = 0; i < t.Length; i += 3) sb.Append("f ").Append(t[i] + 1 + baseV).Append(' ').Append(t[i + 1] + 1 + baseV).Append(' ').Append(t[i + 2] + 1 + baseV).Append('\n');
+                }
+                baseV += mesh.vertexCount;
+            }
+            return sb.ToString();
         }
 
         /// <summary>QA close-ups: one part of each listed geometry key laid on open floor in front of the player,
