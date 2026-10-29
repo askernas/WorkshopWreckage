@@ -2474,10 +2474,22 @@ namespace WorkshopWreckage
                 var both = fb; both.Encapsulate(g.index.WorldBounds(inst.id));
                 Aim(both.center, Dist(both.size.magnitude), -fwd);
                 yield return g.Capture(Path.Combine(dir, tag + "_c.png"), 3);
+                var refMat = full2.GetComponentInChildren<Renderer>().sharedMaterial;
                 Object.Destroy(full2.gameObject);
                 wb = g.index.WorldBounds(inst.id);
                 Aim(wb.center, Dist(wb.size.magnitude) * 1.4f, -fwd);
                 yield return g.Capture(Path.Combine(dir, tag + "_d.png"), 3);
+                // f: a fixed camera 0.35 m away and a 40 mm reference cube beside the part, so sizes compare between runs
+                var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                Object.DestroyImmediate(cube.GetComponent<Collider>());
+                cube.GetComponent<Renderer>().sharedMaterial = refMat;
+                cube.transform.localScale = Vector3.one * 0.04f;
+                cube.transform.position = new Vector3(wb.center.x, 0.02f, wb.center.z) + right * (wb.extents.x + wb.extents.z + 0.04f);
+                cube.transform.rotation = Quaternion.LookRotation(fwd);
+                yield return null;
+                Aim((wb.center + cube.transform.position) * 0.5f, 0.35f, -fwd);
+                yield return g.Capture(Path.Combine(dir, tag + "_f.png"), 3);
+                Object.Destroy(cube);
                 g.index.Remove(inst.id);
                 g.world.SetTransform(inst.id, was);
                 g.index.Insert(inst.id);
