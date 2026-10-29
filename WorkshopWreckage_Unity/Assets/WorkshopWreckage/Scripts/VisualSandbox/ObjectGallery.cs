@@ -35,7 +35,7 @@ namespace WorkshopWreckage.Sandbox
             db.order.Select(db.Get).Where(d => d != null && !string.IsNullOrEmpty(d.geometryKey)).GroupBy(d => d.geometryKey).Select(g => g.First()).ToList();
 
         /// <summary>How the part lies on the floor: long parts (rods, shafts, tools) along X, the rest as modelled.</summary>
-        static Quaternion Rest(ItemDefinition def) => def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, 90) : Quaternion.identity;
+        static Quaternion Rest(ItemDefinition def) => def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, 90) : def.restMode == RestMode.Side ? Quaternion.Euler(90, 0, 0) : Quaternion.identity;
 
         public void Build()
         {

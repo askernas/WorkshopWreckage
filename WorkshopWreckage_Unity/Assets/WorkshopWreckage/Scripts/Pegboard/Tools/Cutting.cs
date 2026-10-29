@@ -11,7 +11,8 @@ namespace WorkshopWreckage.Pegboard
             Add("hand_saw", HandSaw);
             Add("hacksaw", Hacksaw);
             Add("file", FileTool);
-            Add("wood_chisel", WoodChisel);
+            Add("wood_chisel", b => WoodChisel(b, 35));
+            foreach (int w in new[] { 6, 10, 12, 16, 20, 25 }) Add($"wood_chisel_{w}", b => WoodChisel(b, w));
             Add("cold_chisel", ColdChisel);
             Add("scraper", Scraper);
             Add("nail_punch", NailPunch);
@@ -59,12 +60,14 @@ namespace WorkshopWreckage.Pegboard
         }
 
         // wood chisel: the handle (own colour) with a steel hoop, a bevelled blade
-        static void WoodChisel(ToolMesh b)
+        /// <summary>widthMm: the blade's width at the edge (on the 514 mm chisel; 35 = the old shared model).</summary>
+        static void WoodChisel(ToolMesh b, float widthMm)
         {
+            float e = widthMm / 514f / 2, neck = Mathf.Min(0.022f, e * 0.85f + 0.006f);
             Handle(b, 0.56f, 1f, 0.043f, Own, White, false);
             b.Cyl(new Vector3(0, 0.965f, 0), new Vector3(0, 1f, 0), 0.036f, Tin, White, 12);
             b.Cone(new Vector3(0, 0.5f, 0), new Vector3(0, 0.58f, 0), 0.018f, 0.034f, Tin, White, 10);
-            b.Plate(new[] { new Vector2(-0.022f, 0.51f), new Vector2(0.022f, 0.51f), new Vector2(0.034f, 0.03f), new Vector2(0.034f, 0), new Vector2(-0.034f, 0), new Vector2(-0.034f, 0.03f) }, -0.008f, 0.006f, Tin, Chrome);
+            b.Plate(new[] { new Vector2(-neck, 0.51f), new Vector2(neck, 0.51f), new Vector2(e, 0.03f), new Vector2(e, 0), new Vector2(-e, 0), new Vector2(-e, 0.03f) }, -0.008f, 0.006f, Tin, Chrome);
             b.Hook(new Vector2(0, 0.54f), 2);
         }
 

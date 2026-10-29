@@ -225,18 +225,18 @@ namespace WorkshopWreckage
             }));
         }
 
-        /// <summary>The load rides in the front cargo box (the one the arms reach over the head): three
-        /// across, two deep, then a second layer.</summary>
+        /// <summary>One part in each cargo box: front, middle, rear (playtest 2026-10-29: "only one item in every
+        /// cargo box, so not all three in one"); a bigger load starts a second layer, front box first.</summary>
         public override (Transform parent, Vector3 local) CarrySlot(int i, int n)
         {
-            int k = i % 6, layer = i / 6;
-            return (_boxes[0], new Vector3(((k % 3) - 1) * 0.13f, 0.05f + layer * 0.06f, ((k / 3) - 0.5f) * 0.09f));
+            int layer = i / 3;
+            return (_boxes[i % 3], new Vector3(layer == 0 ? 0 : (layer % 2 * 2 - 1) * 0.05f, 0.05f + layer * 0.06f, 0));
         }
 
         // ------------------------------------------------------------ Layer B: tracks and the heavy hull
 
         float _pitch, _pitchVel, _lastV, _stowNow;
-        float _stowPitch = float.NaN;
+        readonly (float pitch, float ext)[] _stowPose = { (float.NaN, 0), (float.NaN, 0), (float.NaN, 0) };
         Quaternion _headLook = Quaternion.identity;
         RobotAnim _fa;
 
@@ -277,26 +277,54 @@ namespace WorkshopWreckage
         /// inside the front box's near wall, little enough to pass beside the (turned) head.</summary>
         const float StowRoll = 10f;
 
-        /// <summary>The loader arm's pitch (deg) that puts its gripper over the front cargo box (solved once on
-        /// the built model: the arm swings up past the vertical and back beside the head).</summary>
-        float StowPitch()
+        /// <summary>The loader arm's pitch (deg) and forearm extension (model units) that put its gripper over
+        /// cargo box `box` (solved once per box on the built model: the arm swings up past the vertical and
+        /// back beside the head; for the middle and rear boxes the telescopic forearm slides out so the gripper
+        /// comes over them as high as it does over the front box).</summary>
+        (float pitch, float ext) StowPose(int box)
         {
-            if (!float.IsNaN(_stowPitch) || !HasGrippers) return float.IsNaN(_stowPitch) ? -220f : _stowPitch;
+            box = Mathf.Clamp(box, 0, 2);
+            if (!HasGrippers) return (-220f, 0);
+            if (!float.IsNaN(_stowPose[box].pitch)) return _stowPose[box];
             SnapshotPose();
-            var target = _boxes[0].position;
-            float lo = -270f, hi = -170f;   // more negative = further back
-            for (int it = 0; it < 12; it++)
+            void At(float pitch, float e)
             {
-                float m = (lo + hi) * 0.5f;
-                PoseTelescopes(0);
-                _armR.localRotation = Quaternion.Euler(m, 0, -StowRoll);
+                PoseTelescopes(e, _armR);
+                _armR.localRotation = Quaternion.Euler(pitch, 0, -StowRoll);
                 var el = _armR.Find("Elbow"); if (el != null) el.localRotation = Quaternion.identity;
-                float ahead = Vector3.Dot(clawTipR.position - target, transform.forward);
-                if (ahead > 0) hi = m; else lo = m;
+            }
+            float Over(float e, Vector3 target)
+            {
+                float lo = -270f, hi = -170f;   // more negative = further back
+                for (int it = 0; it < 14; it++)
+                {
+                    float m = (lo + hi) * 0.5f;
+                    At(m, e);
+                    if (Vector3.Dot(clawTipR.position - target, transform.forward) > 0) hi = m; else lo = m;
+                }
+                return (lo + hi) * 0.5f;
+            }
+            var t0 = _boxes[0].position;
+            float p0 = Over(0, t0);
+            At(p0, 0);
+            float h0 = Vector3.Dot(clawTipR.position - t0, transform.up);
+            var best = (p0, 0f);
+            if (box > 0)
+            {
+                var tb = _boxes[box].position;
+                float err = float.MaxValue;
+                for (float e = 0; e <= 0.8f; e += 0.02f)
+                {
+                    float p = Over(e, tb);
+                    At(p, e);
+                    var d = clawTipR.position - tb;
+                    float er = Mathf.Abs(Vector3.Dot(d, transform.forward)) + Mathf.Abs(Vector3.Dot(d, transform.up) - h0);
+                    if (er < err) { err = er; best = (p, e); }
+                }
             }
             RestorePose();
-            _stowPitch = (lo + hi) * 0.5f;
-            return _stowPitch;
+            _stowPose[box] = best;
+            return best;
         }
 
         /// <summary>The loader arm's pitch (deg) at the top of the throw: up, just short of the vertical, the
@@ -351,10 +379,12 @@ namespace WorkshopWreckage
             FamilyClaws(a);
             if (_stowNow > 0)
             {
-                // loading or unloading the front box: the right (loader) arm alone swings the part up and back
-                // beside the head; the left arm lets go and settles at its rest
+                // unloading a cargo box: the right (loader) arm alone swings up and back beside the head, its
+                // forearm sliding out for the middle and rear boxes; the left arm settles at its rest
                 float rest = ArmPitch(0, 0, 0);
-                _armR.localRotation = Quaternion.Slerp(_armR.localRotation, Quaternion.Euler(StowPitch(), 0, -StowRoll), _stowNow);
+                var (sp, se) = StowPose(a.stowBox);
+                _armR.localRotation = Quaternion.Slerp(_armR.localRotation, Quaternion.Euler(sp, 0, -StowRoll), _stowNow);
+                PoseTelescopes(se * _stowNow, _armR);
                 _armL.localRotation = Quaternion.Slerp(_armL.localRotation, Quaternion.Euler(rest, 0, RestInward), Mathf.Clamp01(_stowNow * 2));
                 var elL = _armL.Find("Elbow"); if (elL != null) elL.localRotation = Quaternion.Euler(-34f * Mathf.Clamp01(_stowNow * 2), 0, 0);   // it keeps its ready bend
             }

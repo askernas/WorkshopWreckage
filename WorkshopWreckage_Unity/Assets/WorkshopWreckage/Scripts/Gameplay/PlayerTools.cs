@@ -154,7 +154,7 @@ namespace WorkshopWreckage
             g.world.SetState(id, ItemState.Carried, "player");
             Inv.Add(id);
             if (settleNow) g.interaction.SettleNeighbours(from, def); else _toSettle.Add((from, def));
-            g.interaction.StartFly(def, from, g.held.HandWorld(), flyTime);
+            g.interaction.StartFly(id, from, g.held.HandWorld(), flyTime);
             return true;
         }
 
@@ -171,7 +171,7 @@ namespace WorkshopWreckage
             g.world.SetState(id, ItemState.InWorld, "tray");
             g.index.Insert(id);
             _toSettle.Add((from, def));
-            g.interaction.StartFly(def, from, m, flyTime);
+            g.interaction.StartFly(id, from, m, flyTime);
         }
 
         /// <summary>How many of `ids` fit in the pockets (the rest go to the tray).</summary>

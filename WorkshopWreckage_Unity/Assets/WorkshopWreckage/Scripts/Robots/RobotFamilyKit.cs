@@ -276,12 +276,14 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Extends every telescopic forearm by e (model units, along the forearm): the first sleeve
-        /// covers the first half, the second the rest, the hand moves out by e.</summary>
-        protected void PoseTelescopes(float e)
+        /// covers the first half, the second the rest, the hand moves out by e. With `onlyUnder`, only the
+        /// forearm of that arm.</summary>
+        protected void PoseTelescopes(float e, Transform onlyUnder = null)
         {
             bool on = e > 1e-4f;
             foreach (var (hand, home, ta, tb, co) in _teles)
             {
+                if (onlyUnder != null && !hand.IsChildOf(onlyUnder)) continue;
                 if (ta.gameObject.activeSelf != on) { ta.gameObject.SetActive(on); tb.gameObject.SetActive(on); co.gameObject.SetActive(on); }
                 var down = new Vector3(0, -1, 0);
                 hand.localPosition = home + down * e;

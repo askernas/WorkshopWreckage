@@ -52,6 +52,15 @@ namespace WorkshopWreckage
         }
         public static int Respec => Json.Int(D, "respec", 12);
 
+        /// <summary>The pegboard a robot blueprint needs ("robot_pegboard"): one section complete (section id), or any
+        /// `sections` of them; (null, 0) = none.</summary>
+        public static (string section, int sections) PegboardRequirement(string id)
+        {
+            if (Json.Obj(D.GetValueOrDefault("robot_pegboard")) is not Dictionary<string, object> g || !g.TryGetValue(id, out var v)) return (null, 0);
+            if (v is string s) return (s, 0);
+            return Json.Obj(v) is Dictionary<string, object> o ? (null, Json.Int(o, "sections_completed", 0)) : (null, 0);
+        }
+
         /// <summary>A usable skill's tuning ("skill_tuning": slot key, cooldowns, per-level values), or null.</summary>
         public static Dictionary<string, object> SkillTuning(string id) => Json.Obj(Json.Obj(D.GetValueOrDefault("skill_tuning"))?.GetValueOrDefault(id));
 

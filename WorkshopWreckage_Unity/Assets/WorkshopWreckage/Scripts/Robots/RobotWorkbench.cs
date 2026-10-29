@@ -16,8 +16,10 @@ namespace WorkshopWreckage
     ///    pool (the same fit rules as ever: any head on any mobile robot, arms on their own side, the
     ///    rest only on their own type, any Sorting Arm's part on any Sorting Arm);
     ///  · once unlocked, pooled parts are installed (state Installed, owner
-    ///    "assembly:&lt;robot&gt;"), in any order except real mechanical dependencies
-    ///    (robots.json assembly.requires); each one visibly appears on the robot;
+    ///    "assembly:&lt;robot&gt;") in any order: the ghost frame on the mat holds each one in its
+    ///    place, so a head or arm can go on before the chassis is found (playtest 2026-10-28;
+    ///    robots.json assembly.requires now only orders a crafted robot's build and removing a
+    ///    fitted spare); each one visibly appears on the robot;
     ///  · when every part is installed the player activates the robot (it hops off the
     ///    bench and starts work).
     /// Extra Hoverbots and Sorting Arms (robots.json extra_units) are built from their own kits
@@ -49,7 +51,7 @@ namespace WorkshopWreckage
         }
 
         public static readonly Vector3 Bench = new(3.45f, 0.86f, 0.9f);   // six mats (the Sorting Arm is the sixth)
-        const float RobotZ = -0.04f, TrayZ = 0.31f;
+        const float RobotZ = -0.04f, TrayZ = 0.31f, BoxWall = 0.07f;
         public readonly List<Project> projects = new();
         public string selected = "retrobot";
         readonly HashSet<string> _announced = new();
@@ -147,15 +149,69 @@ namespace WorkshopWreckage
 
         /// <summary>The blueprint: player level reached (and, for a crafted robot, the
         /// previous unit of its type operational — they share one bench mat).</summary>
-        public bool Unlocked(Project p) => _debugUnlocked.Contains(p.id)
-            || _g.progression != null && _g.progression.level >= p.level && (p.after == null || Operational(P(p.after)));
+        /// The pegboard sections it needs (unlocks.json robot_pegboard) complete too. An operational robot stays
+        /// unlocked whatever the rules say now (older saves follow the new rules otherwise).
+        public bool Unlocked(Project p) => _debugUnlocked.Contains(p.id) || Operational(p)
+            || _g.progression != null && _g.progression.level >= p.level && (p.after == null || Operational(P(p.after))) && ToolsMet(p);
 
         public string LockReason(Project p)
         {
-            if (p.after != null && !Operational(P(p.after))) return $"Needs {P(p.after).name} operational first";
-            if (_g.progression == null || _g.progression.level < p.level) return $"Blueprint unlocks at level {p.level}";
-            return "";
+            var why = new List<string>();
+            if (!ToolsMet(p)) why.Add($"Requires: {ToolRequirementText(p)} ({ToolProgressText(p)})");
+            if (p.after != null && !Operational(P(p.after))) why.Add($"Needs {P(p.after).name} operational first");
+            if (_g.progression == null || _g.progression.level < p.level) why.Add($"Blueprint unlocks at level {p.level}");
+            return string.Join("  ·  ", why);
         }
+
+        // ---------------------------------------------------------------- pegboard requirements (docs/PEGBOARD.md "Sections")
+
+        readonly HashSet<string> _warnedSections = new();
+
+        /// <summary>The section this blueprint needs complete (null if none, or if the id is not on the board:
+        /// a config slip is logged once and does not lock the robot away for good).</summary>
+        string RequiredSection(Project p)
+        {
+            var (sec, _) = Unlocks.PegboardRequirement(p.id);
+            if (sec == null || _g.builder?.pegboard == null) return null;
+            if (_g.builder.pegboard.cfg.sectionById.ContainsKey(sec)) return sec;
+            if (_warnedSections.Add(p.id)) Debug.LogWarning($"[unlocks] robot_pegboard: {p.id} needs unknown pegboard section '{sec}' - ignored");
+            return null;
+        }
+
+        int RequiredSectionCount(Project p) => _g.builder?.pegboard == null ? 0 : Mathf.Min(Unlocks.PegboardRequirement(p.id).sections, _g.builder.pegboard.cfg.sections.Count);
+
+        public bool HasToolRequirement(Project p) => RequiredSection(p) != null || RequiredSectionCount(p) > 0;
+
+        /// <summary>QA only: the robot sections of the autoplay test levels and build order with the pegboard out of
+        /// the way (its own section, "pegboard", tests the requirements). Never set by the game.</summary>
+        public static bool QaIgnoreToolRequirements;
+
+        public bool ToolsMet(Project p)
+        {
+            var pb = _g.builder?.pegboard;
+            if (pb == null || QaIgnoreToolRequirements) return true;
+            if (RequiredSection(p) is string sec && !pb.SectionComplete(sec)) return false;
+            return pb.SectionsComplete >= RequiredSectionCount(p);
+        }
+
+        /// <summary>(have, need, unit) toward the pegboard requirement: tools of the section, or sections.</summary>
+        public (int have, int need, string unit) ToolProgress(Project p)
+        {
+            var pb = _g.builder?.pegboard;
+            if (pb == null) return (0, 0, "");
+            if (RequiredSection(p) is string sec) return (pb.SectionHung(sec), pb.SectionTotal(sec), "tools restored");
+            int n = RequiredSectionCount(p);
+            return (Mathf.Min(pb.SectionsComplete, n), n, "sections");
+        }
+
+        public string ToolRequirementText(Project p)
+            => RequiredSection(p) is string sec ? _g.builder.pegboard.cfg.sectionById[sec].name
+             : RequiredSectionCount(p) > 0 ? $"any {RequiredSectionCount(p)} pegboard sections complete" : "";
+
+        public string ToolProgressText(Project p) { var (h, n, u) = ToolProgress(p); return $"{h} / {n} {u}"; }
+
+        /// <summary>The robots still waiting for their pegboard requirement (for "... CONSTRUCTION UNLOCKED").</summary>
+        public List<Project> LockedByTools() => projects.Where(p => !Operational(p) && !ToolsMet(p)).ToList();
 
         /// <summary>A crafted project is on the bench once its predecessor has left the mat.</summary>
         public bool OnBench(Project p) => !Operational(p) && (p.after == null || Operational(P(p.after)));
@@ -170,10 +226,11 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- interchangeable Sorting Arm parts
 
-        /// <summary>Types whose units are three copies of one kit (the Sorting Arms, playtest 2026-10-26): any
-        /// unit's part goes on whichever unit of the type is being built, in the same place. The parts pool
-        /// between the units; how a part works does not change.</summary>
-        static readonly HashSet<string> PooledTypes = new() { "sorting_arm" };
+        /// <summary>Types whose units are copies of one kit (the Sorting Arms, playtest 2026-10-26; the Hoverbots,
+        /// playtest 2026-10-28): any unit's part goes on whichever unit of the type is being built, in the same
+        /// place. The parts pool between the units; how a part works does not change. A Hoverbot's head or arm
+        /// from another unit still shows that unit's colours (a donor, as on any chassis).</summary>
+        static readonly HashSet<string> PooledTypes = new() { "sorting_arm", "hoverbot" };
         public static bool IsPooled(Project p) => p != null && !p.crafted && PooledTypes.Contains(p.type);
 
         /// <summary>Every unit's kit of p's type (world ids).</summary>
@@ -187,6 +244,7 @@ namespace WorkshopWreckage
             var o = new List<int>();
             foreach (var gr in PoolIds(p).GroupBy(id => Robot.PartKey(_g.world.DefOf(id))))
             {
+                if (SlotOfKey(p.type, gr.Key) is ModuleSlot s && ForeignIn(p, s)) continue;   // another type's head/arm stands in
                 var on = gr.Where(id => _g.world.instances[id].state == ItemState.Installed && _g.world.instances[id].owner == owner).ToList();
                 if (on.Count > 0) { o.Add(on[0]); continue; }
                 var free = gr.Where(id => _g.world.instances[id].state != ItemState.Installed)
@@ -194,8 +252,14 @@ namespace WorkshopWreckage
                     .ThenBy(id => OriginOf(id) == p.id ? 0 : 1).ToList();
                 o.Add(free.Count > 0 ? free[0] : gr.FirstOrDefault(id => OriginOf(id) == p.id));
             }
+            foreach (var s in new[] { ModuleSlot.Head, ModuleSlot.ArmL, ModuleSlot.ArmR })
+                if (DonorIn(p, s) is int d && d >= 0 && TypeOf(OriginOf(d)) != p.type) o.Add(d);
             return o;
         }
+
+        /// <summary>That head/arm slot of a pooled unit is taken care of by something outside its type's kits:
+        /// another type's part, a spare module, or (its own module fitted elsewhere) nothing.</summary>
+        bool ForeignIn(Project p, ModuleSlot s) => DonorIn(p, s) is int d && d >= 0 && TypeOf(OriginOf(d)) != p.type || Reserved(p, s) != null || Gone(p, s);
 
         // ---------------------------------------------------------------- interchangeable heads and arms
 
@@ -275,9 +339,6 @@ namespace WorkshopWreckage
             if (!Unlocked(p)) return LockReason(p);
             if (Operational(p)) return $"{p.name} is already operational: use Modify robots";
             if (SlotFilled(p, m.slot)) return $"{p.name} already has a {RobotModules.SlotName(m.slot)}";
-            var key = MainKey(p.type, m.slot);
-            if (p.requires.TryGetValue(key, out var req) && req.Where(r => !InstalledKeys(p).Contains(r)).ToList() is var need && need.Count > 0)
-                return "Needs the " + string.Join(" and ", need) + " first";
             return _g.modules?.CanReserve(m.id, p.id) ?? "No modules";
         }
 
@@ -389,7 +450,7 @@ namespace WorkshopWreckage
             foreach (var id in Mains())
             {
                 string o = OriginOf(id);
-                if (o == p.id || _g.world.instances[id].state != ItemState.Stored) continue;
+                if (o == p.id || _g.world.instances[id].state != ItemState.Stored || IsPooled(p) && TypeOf(o) == p.type) continue;   // a pooled unit's own kits are in DeliveredIds
                 var own = P(o);
                 if (own != null && CanInstall(own, id) == "") continue;
                 if (CanInstall(p, id) == "") yield return id;
@@ -448,7 +509,7 @@ namespace WorkshopWreckage
         {
             if (Operational(p)) return Status.Operational;
             if (!Unlocked(p)) return Status.AwaitingBlueprint;
-            if (Complete(p)) return Status.ReadyForActivation;
+            if (Complete(p) && FittedIds(p).Count == 0) return Status.ReadyForActivation;
             bool installable = DeliveredIds(p).Any(id => CanInstall(p, id) == "") || DonorCandidates(p).Any();
             if (installable) return Status.ReadyToAssemble;
             return InstalledCount(p) == 0 ? Status.NotStarted : Status.PartiallyAssembled;
@@ -470,6 +531,7 @@ namespace WorkshopWreckage
             var s = StatusOf(p);
             if (s == Status.Operational) return $"{p.name} is operational.";
             if (s == Status.ReadyForActivation) return "Assembly complete — activate the robot.";
+            if (!p.crafted && FittedIds(p).Count is int nf && nf > 0 && Complete(p)) return $"Every part is fitted — apply {p.name} ([V] at the robot) to lock {nf} part{(nf == 1 ? "" : "s")} in.";
             var bits = new List<string>();
             if (!Unlocked(p)) bits.Add(LockReason(p) + ".");
             if (p.crafted)
@@ -489,7 +551,8 @@ namespace WorkshopWreckage
                     default: found++; break;
                 }
             bits.Add($"{p.name}: {inst} of {ids.Count} components installed.");
-            if (deliv > 0) bits.Add(Unlocked(p) ? $"{deliv} in the parts pool, ready to install." : $"{deliv} waiting in the parts pool.");
+            if (FittedIds(p).Count is int fit && fit > 0) bits.Add($"{fit} fitted, not committed yet.");
+            if (deliv > 0) bits.Add(Unlocked(p) ? $"{deliv} in the parts pool, ready to try on." : $"{deliv} waiting in the parts pool.");
             if (found > 0) bits.Add($"{found} discovered but not delivered.");
             if (missing > 0) bits.Add($"{missing} still missing.");
             return string.Join(" ", bits);
@@ -500,33 +563,228 @@ namespace WorkshopWreckage
         /// <summary>Empty string if the delivered part can be installed now, else why not.</summary>
         public string CanInstall(Project p, int id)
         {
+            var why = CanFit(p, id, out int swap, false);
+            return why == "" && swap >= 0 ? $"{p.name} already has a {KeyOn(p, id)} fitted" : why;
+        }
+
+        /// <summary>Empty if the part can be tried on p now, else why not. hands: straight from the player's
+        /// hands (else out of the parts pool). swap: the fitted, not yet committed part in its place, which
+        /// comes off for it (-1: none). No build order: the ghost frame holds a part until the chassis arrives.</summary>
+        public string CanFit(Project p, int id, out int swap, bool hands = true)
+        {
+            swap = -1;
             if (!Unlocked(p)) return LockReason(p);
             if (Operational(p)) return $"{p.name} is already operational";
             var i = _g.world.instances[id];
             string origin = OriginOf(id);
-            if (i.state != ItemState.Stored || i.owner != "box:" + StationOf(TypeOf(origin))) return "Bring it to the parts pool at the workbench first";
-            if (IsPooled(p) && TypeOf(origin) == p.type)
-            {
-                // any Sorting Arm's part goes on the arm being built, in the same place
-                if (InstalledKeys(p).Contains(KeyOn(p, id))) return $"{p.name} already has a {KeyOn(p, id)}";
-            }
-            else if (origin != p.id)
-            {
-                // another robot's head or arm: any chassis takes it in a free slot of its kind
-                if (MainSlotOf(id) is not ModuleSlot s || !TakesDonors(p, s)) return $"It is {RobotModules.OriginName(origin)}'s part";
-                if (SlotFilled(p, s)) return $"{p.name} already has a {RobotModules.SlotName(s)}";
-            }
-            else if (SlotOfKey(p.type, Robot.PartKey(_g.world.DefOf(id))) is ModuleSlot own && DonorOrigin(p, own) is string d)
-                return $"{p.name} has {RobotModules.OriginName(d)}'s {RobotModules.SlotName(own)} instead";
+            if (hands ? i.state != ItemState.Carried || i.owner != "player" : i.state != ItemState.Stored || i.owner != "box:" + StationOf(TypeOf(origin)))
+                return hands ? "Take it in your hands first" : "Bring it to the parts pool at the workbench first";
+            // a pooled type: any unit's part goes on the unit being built, in the same place;
+            // another robot's head or arm: any chassis takes it in a slot of its kind
+            bool ownKit = origin == p.id || IsPooled(p) && TypeOf(origin) == p.type;
+            if (!ownKit && (MainSlotOf(id) is not ModuleSlot ms || !TakesDonors(p, ms))) return $"It is {RobotModules.OriginName(origin)}'s part";
             var key = KeyOn(p, id);
-            if (p.requires.TryGetValue(key, out var req))
-            {
-                var have = InstalledKeys(p);
-                var need = req.Where(r => !have.Contains(r)).ToList();
-                if (need.Count > 0) return "Needs the " + string.Join(" and ", need) + " first";
-            }
-            return "";
+            var slot = SlotOfKey(p.type, key);
+            if (slot is ModuleSlot rs && Reserved(p, rs) is RobotModule spare) return $"{p.name} has the spare {spare.Name} fitted: take it off first";
+            int occ = InstalledIds(p).Where(x => x != id && KeyOn(p, x) == key).DefaultIfEmpty(-1).First();
+            if (occ < 0) return "";
+            if (_fitted.Contains(occ)) { swap = occ; return ""; }
+            string o = OriginOf(occ);
+            // until the robot runs, an applied head or arm can still be swapped for another robot's (playtest
+            // 2026-10-28: "i cannot take a part and build my robot with it"); the old one comes off
+            if (slot is ModuleSlot hs && MainSlotOf(id) == hs && MainSlotOf(occ) == hs && OriginOf(id) != o) { swap = occ; return ""; }
+            return slot is ModuleSlot sl && o != p.id && !(IsPooled(p) && TypeOf(o) == p.type)
+                ? $"{p.name} has {RobotModules.OriginName(o)}'s {RobotModules.SlotName(sl)} instead"
+                : $"{p.name} already has a {(slot is ModuleSlot s2 ? RobotModules.SlotName(s2) : key)}";
         }
+
+        // ---------------------------------------------------------------- hands-on fitting (playtest 2026-10-28)
+
+        /// <summary>Parts tried on a robot on the bench but not committed yet, in the order they went on: they
+        /// sit in place (Installed) and can come off or be swapped until the player commits the robot.</summary>
+        readonly List<int> _fitted = new();
+        public bool IsFitted(int id) => _fitted.Contains(id);
+        public List<int> FittedIds(Project p)
+        {
+            var owner = OwnerOf(p.id);
+            return _fitted.Where(id => _g.world.instances[id].state == ItemState.Installed && _g.world.instances[id].owner == owner).ToList();
+        }
+
+        /// <summary>Tries a part on p, from the player's hands or the parts pool: if it fits it snaps into
+        /// place (a fitted part already there comes off into the hands, or back into the pool).</summary>
+        public (bool ok, string text) Fit(Project p, int id, bool backToPool = false)
+        {
+            var i = _g.world.instances[id];
+            bool hands = i.state == ItemState.Carried && i.owner == "player";
+            var why = CanFit(p, id, out int swap, hands);
+            if (why != "") return (false, why);
+            if (hands) _g.inventory.Remove(id); else _g.storage.Remove(i.owner.Substring(4), id);
+            string back = swap >= 0 ? Detach(swap, backToPool) : null;
+            _g.world.SetState(id, ItemState.Installed, OwnerOf(p.id));
+            _fitted.Add(id);
+            var r = RobotOf(p);
+            r?.RefreshAssembly();
+            if (r != null) r.InstallPop(KeyOn(p, id));
+            Sfx.Play("servo", r != null ? r.transform.position : transform.position, -6);
+            Refresh();
+            var name = _g.world.DefOf(id).displayName;
+            return (true, $"{name} snaps onto {p.name}" + (back != null ? $"  ·  {_g.world.DefOf(swap).displayName} {back}" : "") + "  ·  [V] Apply to lock it in");
+        }
+
+        /// <summary>Takes a fitted (uncommitted) part off p into the player's hands (the pool if they are full).</summary>
+        public (bool ok, string text) TakeOff(Project p, int id, bool toPool = false)
+        {
+            if (!FittedIds(p).Contains(id)) return (false, "That part is committed");
+            string back = Detach(id, toPool);
+            RobotOf(p)?.RefreshAssembly();
+            Sfx.Play("drop_drawer", RobotOf(p)?.transform.position ?? transform.position, -6);
+            Refresh();
+            return (true, $"{_g.world.DefOf(id).displayName} off {p.name}: {back}");
+        }
+
+        string Detach(int id, bool toPool = false)
+        {
+            _fitted.Remove(id);
+            if (!toPool && _g.inventory.HasRoomFor(id))
+            {
+                _g.world.SetState(id, ItemState.Carried, "player");
+                _g.inventory.Add(id);
+                return "back in your hands";
+            }
+            _g.storage.Deposit(StationOf(TypeOf(OriginOf(id))), id, "player");
+            return toPool ? "back in the parts pool" : "back in the parts pool (your hands are full)";
+        }
+
+        /// <summary>Found parts that can go on p right now, from the player's hands and the parts pool, one of
+        /// each kind (a head or an arm once per origin robot): what the player scrolls through at the robot on
+        /// its mat (wheel / Q / E) and tries on with LMB (playtest 2026-10-28).</summary>
+        public List<int> FitChoices(Project p)
+        {
+            var list = new List<int>();
+            if (p == null || p.crafted || !Unlocked(p) || Operational(p)) return list;
+            var seen = new HashSet<string>();
+            foreach (var id in _g.inventory.items.Concat(PoolContents()))
+            {
+                var def = _g.world.DefOf(id);
+                if (!def.IsRobotPart || def.craftingPurpose == null || !def.craftingPurpose.StartsWith("robot:") || !Types.Contains(TypeOf(OriginOf(id)))) continue;
+                if (CanFit(p, id, out _, _g.world.instances[id].state == ItemState.Carried) != "") continue;
+                if (seen.Add(KeyOn(p, id) + "|" + (MainSlotOf(id) != null ? OriginOf(id) : ""))) list.Add(id);
+            }
+            return list;
+        }
+
+        /// <summary>How many of the parts p is built from have been found (anything but still missing).</summary>
+        public int FoundCount(Project p) => p.crafted ? InstalledCount(p) : NeededIds(p).Count(id => StateOf(id) != PartState.Missing);
+
+        /// <summary>The bench screen's parts page (playtest 2026-10-28): every place a part goes on p, the part on
+        /// it now (-1: none), the part needed there (for its found state) and the ring of found parts the player
+        /// steps through with the arrows (the one on it included), each fitted at once so the preview shows it.</summary>
+        public List<(string key, int on, int need, List<int> ring)> Slots(Project p)
+        {
+            var o = new List<(string, int, int, List<int>)>();
+            if (p == null || p.crafted) return o;
+            var installed = InstalledIds(p);
+            var choices = FitChoices(p);
+            foreach (var g in NeededIds(p).GroupBy(id => KeyOn(p, id)))
+            {
+                string key = g.Key;
+                int on = installed.Where(x => KeyOn(p, x) == key).DefaultIfEmpty(-1).First();
+                int need = g.OrderByDescending(id => (int)StateOf(id)).First();
+                var ring = choices.Where(c => KeyOn(p, c) == key).ToList();
+                if (on >= 0)
+                {
+                    // a plain part from another unit's kit is the same thing: only heads and arms differ
+                    if (MainSlotOf(on) == null) ring.Clear();
+                    else ring.RemoveAll(c => OriginOf(c) == OriginOf(on));
+                    ring.Add(on);
+                }
+                o.Add((key, on, need, ring.OrderBy(OriginOf).ThenBy(c => c).ToList()));
+            }
+            return o;
+        }
+
+        /// <summary>The middle of the parts pool tray (the bench screen frames it for the Part Radar).</summary>
+        public Vector3 PoolPoint => transform.TransformPoint(Batch.G(0, Bench.y + 0.03f, TrayZ));
+
+        /// <summary>Locks every fitted part of p in place (Apply). Returns how many.</summary>
+        public int Commit(Project p)
+        {
+            var ids = FittedIds(p);
+            foreach (var id in ids) _fitted.Remove(id);
+            if (ids.Count > 0)
+            {
+                var r = RobotOf(p);
+                r?.InstallPop("");
+                Sfx.Play(Complete(p) ? "complete" : "servo", r != null ? r.transform.position : transform.position, -6);
+                Refresh();
+            }
+            return ids.Count;
+        }
+
+        /// <summary>A part from the parts pool into the player's hands (to try it on).</summary>
+        public (bool ok, string text) TakeFromPool(int id)
+        {
+            var i = _g.world.instances[id];
+            if (i.state != ItemState.Stored || !i.owner.StartsWith("box:RS-") || !_g.world.DefOf(id).IsRobotPart) return (false, "");
+            if (!_g.inventory.HasRoomFor(id)) return (false, $"Your hands are full ({_g.inventory.Parts}/{_g.inventory.capacity})");
+            _g.storage.Remove(i.owner.Substring(4), id);
+            _g.world.SetState(id, ItemState.Carried, "player");
+            _g.inventory.Add(id);
+            _g.inventory.Select(i.defId);
+            Sfx.Play("pickup", transform.position, -6);
+            Refresh();
+            return (true, $"{_g.world.DefOf(id).displayName} from the parts pool  ·  {FitsText(id)}: hold it to a robot on the bench to try it on");
+        }
+
+        /// <summary>The robot part in the pool tray nearest the aim ray (-1: none within a few cm).</summary>
+        public int PoolPartAt(Vector3 o, Vector3 dir)
+        {
+            int best = -1; float bd = 0.05f;
+            foreach (var (id, t) in _poolModels)
+            {
+                if (t == null || !_g.world.DefOf(id).IsRobotPart) continue;
+                var c = t.position;
+                float along = Vector3.Dot(c - o, dir);
+                if (along < 0) continue;
+                float d = Vector3.Distance(o + dir * along, c);
+                if (d < bd) { bd = d; best = id; }
+            }
+            return best;
+        }
+        readonly List<(int id, Transform t)> _poolModels = new();
+
+        /// <summary>A model's bounds in its parent's space (the parts box), from its meshes.</summary>
+        static Bounds LocalExtent(Transform model)
+        {
+            var parent = model.parent;
+            bool any = false;
+            var b = new Bounds();
+            foreach (var mf in model.GetComponentsInChildren<MeshFilter>())
+            {
+                if (mf.sharedMesh == null) continue;
+                var m = parent.worldToLocalMatrix * mf.transform.localToWorldMatrix;
+                var mb = mf.sharedMesh.bounds;
+                for (int i = 0; i < 8; i++)
+                {
+                    var p = m.MultiplyPoint3x4(mb.center + Vector3.Scale(mb.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1)));
+                    if (!any) { b = new Bounds(p, Vector3.zero); any = true; } else b.Encapsulate(p);
+                }
+            }
+            return b;
+        }
+        /// <summary>QA: where a pool part's model lies in the tray.</summary>
+        public Vector3? PoolModelPosition(int id) => _poolModels.FirstOrDefault(m => m.id == id).t is Transform t && t != null ? t.position : null;
+
+        /// <summary>Where the aim ray meets the bench top (just above it): what the player looks at, rather than
+        /// where it enters the bench's aim box (whose top lies over the tray when looking at a robot).</summary>
+        public Vector3 BenchPoint(Vector3 o, Vector3 dir, Vector3 fallback)
+        {
+            var plane = new Plane(transform.up, transform.TransformPoint(Batch.G(0, Bench.y + 0.03f, 0)));
+            return plane.Raycast(new Ray(o, dir), out float t) && t > 0 && t < 6 ? o + dir * t : fallback;
+        }
+
+        /// <summary>Is that bench point on the parts pool tray (front edge), not a mat?</summary>
+        public bool AtPool(Vector3 world) => Batch.G(transform.InverseTransformPoint(world)).z > 0.22f;
 
         public bool Install(Project p, int id, bool animate = true)
         {
@@ -719,7 +977,7 @@ namespace WorkshopWreckage
             Refresh();
         }
 
-        public bool CanActivate(Project p) => Complete(p) && !Operational(p) && Unlocked(p) && RobotOf(p) is Robot r && r.mode == Robot.Mode.Assembling;
+        public bool CanActivate(Project p) => Complete(p) && FittedIds(p).Count == 0 && !Operational(p) && Unlocked(p) && RobotOf(p) is Robot r && r.mode == Robot.Mode.Assembling;
 
         public bool Activate(Project p)
         {
@@ -749,6 +1007,7 @@ namespace WorkshopWreckage
         {
             ["selected"] = selected,
             ["announced"] = _announced.Select(x => (object)x).ToList(),
+            ["fitted"] = _fitted.Select(x => (object)x).ToList(),
         };
 
         /// <summary>Restores the bench. Saves from before the workbench (parts sitting in the
@@ -757,11 +1016,13 @@ namespace WorkshopWreckage
         public void Load(Dictionary<string, object> save)
         {
             _announced.Clear();
+            _fitted.Clear();
             var d = Json.Obj(save?.GetValueOrDefault("workbench"));
             if (d != null)
             {
                 selected = Json.Str(d, "selected", "retrobot");
                 foreach (var x in Json.Arr(d.GetValueOrDefault("announced"))) _announced.Add(x.ToString());
+                foreach (var x in Json.Arr(d.GetValueOrDefault("fitted"))) if (int.TryParse(x.ToString(), out int fid) && fid >= 0 && fid < _g.world.instances.Count) _fitted.Add(fid);
             }
             else if (save != null)
             {
@@ -801,6 +1062,7 @@ namespace WorkshopWreckage
         public void ResetState()
         {
             _announced.Clear();
+            _fitted.Clear();
             _debugUnlocked.Clear();
             selected = "retrobot";
         }
@@ -855,14 +1117,16 @@ namespace WorkshopWreckage
             }
             var title = TextAtlas.RenderSingle("ROBOT WORKBENCH", 1024, 128, new Color(0.3f, 0.2f, 0.13f), new Color(0.82f, 0.63f, 0.32f), 72, true);
             b.Quad(new Vector3(0, 1.88f, -Bench.z / 2 + 0.045f), new Vector2(1.6f, 0.2f), EnvMaterials.Atlas(title), new Rect(0, 0, 1, 1));
-            var trayTex = TextAtlas.RenderSingle("ROBOT PARTS POOL", 512, 64, new Color(0.62f, 0.5f, 0.3f), new Color(0.18f, 0.12f, 0.07f), 40, true);
+            var trayTex = TextAtlas.RenderSingle("ROBOT PARTS BOX", 512, 64, new Color(0.62f, 0.5f, 0.3f), new Color(0.18f, 0.12f, 0.07f), 40, true);
             var trayLabel = EnvMaterials.Atlas(trayTex);
-            // the robot parts pool: one long tray along the front, every delivered part in one pile
+            // the robot parts box (playtest 2026-10-28): a deep open box along the front, every delivered part
+            // tossed in on one heap
             float tw = Bench.x - 0.1f;
             b.Box(new Vector3(0, Bench.y + 0.006f, TrayZ), new Vector3(tw, 0.012f, 0.16f), dark);
-            foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(0, Bench.y + 0.02f, TrayZ + sz * 0.08f), new Vector3(tw, 0.03f, 0.012f), steel);
-            foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(sx * tw / 2, Bench.y + 0.02f, TrayZ), new Vector3(0.012f, 0.03f, 0.16f), steel);
-            foreach (var lx in new[] { -tw / 4, tw / 4 }) b.Quad(new Vector3(lx, Bench.y + 0.022f, TrayZ + 0.087f), new Vector2(0.4f, 0.05f), trayLabel, new Rect(0, 0, 1, 1));
+            foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(0, Bench.y + BoxWall / 2, TrayZ + sz * 0.08f), new Vector3(tw, BoxWall, 0.012f), steel);
+            foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(sx * tw / 2, Bench.y + BoxWall / 2, TrayZ), new Vector3(0.012f, BoxWall, 0.16f), steel);
+            b.Box(new Vector3(0, Bench.y + BoxWall, TrayZ + 0.08f), new Vector3(tw + 0.012f, 0.008f, 0.02f), brass);   // the front lip
+            foreach (var lx in new[] { -tw / 4, tw / 4 }) b.Quad(new Vector3(lx, Bench.y + BoxWall * 0.5f, TrayZ + 0.087f), new Vector2(0.4f, 0.05f), trayLabel, new Rect(0, 0, 1, 1));
             _pool = new GameObject("PartsPool").transform;
             _pool.SetParent(transform, false);
             _pool.localPosition = Batch.G(0, Bench.y + 0.012f, TrayZ);
@@ -910,20 +1174,56 @@ namespace WorkshopWreckage
                 _labels.Set(i, code, p.name.ToUpper(), word, s != Status.AwaitingBlueprint);
                 if (_boards[i] != null) _boards[i].sharedMaterial = EnvMaterials.Blueprint(Unlocked(p) ? 1 : 2);
             }
-            // the pool: every part in one pile, grouped by what it fits (spent radar batteries are disposed of, not shown)
+            // the parts box: every part tossed onto one untidy heap, highest in the middle (spent radar batteries are
+            // disposed of, not shown). Each part lands where its id says, so the heap stays put between refreshes.
             foreach (Transform c in _pool) Destroy(c.gameObject);
-            var ids = PoolContents().Where(id => !_g.world.DefOf(id).IsRadarBattery).OrderBy(id => _g.world.DefOf(id).storageBox).ThenBy(id => id).ToList();
-            int perRow = Mathf.FloorToInt((Bench.x - 0.2f) / 0.066f);
+            _poolModels.Clear();
+            var ids = PoolContents().Where(id => !_g.world.DefOf(id).IsRadarBattery).OrderBy(id => id).ToList();
+            // the heap: a height per 4 cm along the box and per half of its depth
+            const float cell = 0.04f, inner = 0.068f;
+            float half = (Bench.x - 0.1f) / 2 - 0.02f;
+            int cells = Mathf.Max(1, Mathf.FloorToInt(2 * half / cell));
+            var heap = new float[cells, 2];
+            static float H(int id, int salt) { uint h = (uint)(id * 73856093) ^ (uint)(salt * 19349663); h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15; return (h & 0xffffff) / (float)0x1000000; }
             for (int k = 0; k < ids.Count; k++)
             {
-                var def = _g.world.DefOf(ids[k]);
+                int id = ids[k];
+                var def = _g.world.DefOf(id);
                 var mi = HeldView.MakeModel(def);
                 mi.transform.SetParent(_pool, false);
-                var rot = Quaternion.Euler(0, -23f * k, 0) * (def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, -90) : Quaternion.identity);
-                mi.transform.localRotation = rot;
+                _poolModels.Add((id, mi.transform));
                 mi.transform.localScale = Vector3.one * def.worldScale * 0.55f;
-                int col = k % perRow, row = k / perRow % 2, layer = k / (perRow * 2);
-                mi.transform.localPosition = Batch.G(-(perRow - 1) * 0.033f + col * 0.066f, 0.025f + layer * 0.03f, -0.035f + row * 0.07f);
+                // tossed in, lying any which way, but turned so it fits between the box's walls
+                // (long parts lie nearly flat: a tipped rod would stand up out of the box)
+                var lay = def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, -90) : Quaternion.identity;
+                mi.transform.localRotation = lay;
+                float tip = 25f * Mathf.Clamp(0.06f / Mathf.Max(0.001f, LocalExtent(mi.transform).size.magnitude), 0.15f, 1f);
+                var tilt = Quaternion.Euler((H(id, 1) * 2 - 1) * tip, 0, (H(id, 3) * 2 - 1) * tip) * lay;
+                // the first of a few turns that fits between the walls, or else the narrowest one
+                float yaw0 = H(id, 2) * 360f, best = 0, bestZ = float.MaxValue;
+                foreach (float dy in new[] { 0f, 90f, 45f, 135f, 20f, 160f, 70f, 110f })
+                {
+                    mi.transform.localRotation = Quaternion.Euler(0, yaw0 + dy, 0) * tilt;
+                    float wz = LocalExtent(mi.transform).size.z;
+                    if (wz < bestZ) { bestZ = wz; best = dy; }
+                    if (wz <= 2 * inner) break;
+                }
+                mi.transform.localRotation = Quaternion.Euler(0, yaw0 + best, 0) * tilt;
+                var ext = LocalExtent(mi.transform);
+                // where it lands: around the middle (three throws averaged), inside the walls, on top of what is there
+                float u = (H(id, 4) + H(id, 5)) / 2f;
+                float hx = ext.extents.x, hz = Mathf.Min(ext.extents.z, inner);
+                float x = Mathf.Clamp((u - 0.5f) * 2.2f * half, -half + hx, half - hx);
+                float z = Mathf.Clamp((H(id, 6) - 0.5f) * 2 * inner, -inner + hz, inner - hz);
+                int c0 = Mathf.Clamp(Mathf.FloorToInt((x - hx + half) / cell), 0, cells - 1), c1 = Mathf.Clamp(Mathf.FloorToInt((x + hx + half) / cell), 0, cells - 1);
+                int r0 = z - hz < 0 ? 0 : 1, r1 = z + hz < 0 ? 0 : 1;
+                float floor = 0;
+                for (int c = c0; c <= c1; c++) for (int r = r0; r <= r1; r++) floor = Mathf.Max(floor, heap[c, r]);
+                // settles a little into the gaps of what is under it
+                float bottom = floor * 0.7f;
+                mi.transform.localPosition = new Vector3(x - ext.center.x, bottom - ext.min.y, z - ext.center.z);   // the box's own space (as LocalExtent)
+                float top = bottom + ext.size.y;
+                for (int c = c0; c <= c1; c++) for (int r = r0; r <= r1; r++) heap[c, r] = Mathf.Max(heap[c, r], top);
             }
             _labels.Redraw();
             Changed?.Invoke();

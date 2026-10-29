@@ -48,6 +48,7 @@ namespace WorkshopWreckage
             outDir = dir;
             Directory.CreateDirectory(outDir);
             GameEvents.Raised += e => _events.Add(e);   // every gameplay event of the run (roadmap 3A checks)
+            RobotWorkbench.QaIgnoreToolRequirements = true;   // robot sections test levels and order; "pegboard" tests the tool board's requirements
             var ic = g.interaction;
             var w = g.world;
             g.SetState("menu");
@@ -72,9 +73,45 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "meshdump")
+            {
+                MeshDump();   // QA: every item mesh as OBJ (geometry audit, playtest 2026-10-28)
+                Finish();
+                yield break;
+            }
+            if (section == "partshots")
+            {
+                yield return PartShots();   // QA: close-ups of single parts (geometry checks)
+                Finish();
+                yield break;
+            }
+            if (section == "flight")
+            {
+                yield return FlightChecks();   // QA: a part in the air looks as it does on the ground; the Unibot tyre
+                Finish();
+                yield break;
+            }
+            if (section == "ghost")
+            {
+                yield return GhostChecks();   // QA: heads and arms go on the bench ghost before the chassis is found
+                Finish();
+                yield break;
+            }
             if (section == "camshake")
             {
                 yield return CamShake(g.args.GetValueOrDefault("apslot", "slot1"));   // QA: the view holds still while the player stands still
+                Finish();
+                yield break;
+            }
+            if (section == "benchshots")
+            {
+                yield return BenchShots(g.args.GetValueOrDefault("apslot", "slot1"));   // QA: the bench screen's two pages on a save
+                Finish();
+                yield break;
+            }
+            if (section == "pickslot")
+            {
+                yield return PickSlot(g.args.GetValueOrDefault("apslot", "slot1"));   // QA: the part picker at each mat of a player's save
                 Finish();
                 yield break;
             }
@@ -169,6 +206,30 @@ namespace WorkshopWreckage
             if (section == "pegboard")
             {
                 yield return PegboardChecks();   // QA: the tool pegboard (docs/PEGBOARD.md): hang, refuse, no XP, save/load, full board
+                Finish();
+                yield break;
+            }
+            if (section == "pegguard")
+            {
+                yield return PegGuardChecks();   // QA: a board tool in a robot's hands, in a wrong box or on the board without its holder
+                Finish();
+                yield break;
+            }
+            if (section == "saves")
+            {
+                yield return SaveChecks();   // QA: save and load (playtest 2026-10-28: a refused save lost an evening's progress)
+                Finish();
+                yield break;
+            }
+            if (section == "armwatch")
+            {
+                yield return ArmWatch(g.args.GetValueOrDefault("apslot", "slot1"));   // QA: why mounted Sorting Arms leave staged parts (playtest 2026-10-29)
+                Finish();
+                yield break;
+            }
+            if (section == "pegmigrate")
+            {
+                yield return PegMigrateChecks(g.args.GetValueOrDefault("apslot", "premig_slot1"));   // QA: a save from before the pegboard sections loads under the new rules
                 Finish();
                 yield break;
             }
@@ -631,6 +692,9 @@ namespace WorkshopWreckage
             if (rp != null)
             {
                 bool keep = Interaction.Afterglow;
+                // a skill (playtest 2026-10-28): without it, nothing blinks even with the setting on
+                bool hadSkill = g.progression.Has("part_afterglow");
+                if (hadSkill) g.progression.RespecAll();
                 IEnumerator AimAway(bool on)
                 {
                     Interaction.Afterglow = on;
@@ -644,6 +708,12 @@ namespace WorkshopWreckage
                     g.interaction.UpdateTarget();
                 }
                 yield return AimAway(true);
+                bool noSkillNone = g.interaction.afterglowId < 0;
+                var glow = g.progression.skills.FirstOrDefault(s => s.id == "part_afterglow");
+                LevelTo(Mathf.Max(2, glow?.unlockLevel ?? 2));
+                g.progression.skillPoints = Mathf.Max(g.progression.skillPoints, glow?.cost ?? 1);
+                bool bought = g.UnlockSkill("part_afterglow");
+                yield return AimAway(true);
                 bool started = g.interaction.afterglowId == rp.id;
                 var fromPos = rp.Position + new Vector3(0.6f, 0.75f, 0.5f).normalized * 0.9f;
                 LookFrom(fromPos, rp.Position + Vector3.Cross(Vector3.up, rp.Position - fromPos).normalized * 0.35f + Vector3.up * 0.1f);   // watch it beside the crosshair
@@ -656,8 +726,9 @@ namespace WorkshopWreckage
                 yield return AimAway(false);
                 bool offNone = g.interaction.afterglowId < 0;
                 Interaction.Afterglow = keep;
-                Check("with the afterglow on, a robot part blinks once after the crosshair leaves it, and stops; with it off, nothing (screenshot 36)",
-                      started && ended && offNone, $"{g.world.DefOf(rp.id).displayName}: started {started}, still unaimed while watched {aimedOff}, ended {ended}, off: none {offNone}");
+                Check("the afterglow is a skill (Part Afterglow): without it nothing blinks; bought, a robot part blinks once after the crosshair leaves it, and stops; with the setting off, nothing (screenshot 36)",
+                      noSkillNone && bought && started && ended && offNone,
+                      $"{g.world.DefOf(rp.id).displayName}: before the skill none {noSkillNone}, bought {bought} (cost {glow?.cost}, level {glow?.unlockLevel}), started {started}, still unaimed while watched {aimedOff}, ended {ended}, off: none {offNone}");
             }
             else Check("with the afterglow on, a robot part blinks once after the crosshair leaves it", false, "no robot part lying in the world");
             g.interaction.enabledInput = false;
@@ -1616,10 +1687,13 @@ namespace WorkshopWreckage
             // Robot Part Sense (playtest 2026-10-26): the nearest robot part glows faintly for 5 s, then 90 s recharge
             {
                 g.tools.ResetState();
+                var higher = new[] { "part_sense_2", "part_sense_3", "part_sense_4", "part_sense_5" }.Where(pr.unlocked.Contains).ToList();
+                foreach (var s in higher) pr.unlocked.Remove(s);   // rank I, which this check is about
+                int rank = g.tools.Level("part_sense");
                 int sensed = g.tools.PartSense();
                 int sid = g.tools.senseId;
                 var pme = g.player.transform.position;
-                var nearest = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsRobotPart && !g.robotReserved.Contains(i.id))
+                var nearest = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsRobotComponent && !g.robotReserved.Contains(i.id))
                     .OrderBy(i => (i.Position - pme).sqrMagnitude).FirstOrDefault();
                 float cdS = g.tools.CooldownLeft("part_sense");
                 if (sid >= 0)
@@ -1631,8 +1705,10 @@ namespace WorkshopWreckage
                 float t0 = Time.time;
                 while (Time.time - t0 < 5.3f) yield return null;
                 Check("Robot Part Sense (key 5): the nearest robot part glows for 5 s, then the skill recharges 90 s (screenshot 38)",
-                      sensed == 1 && nearest != null && sid == nearest.id && g.tools.senseId < 0 && Mathf.Abs(cdS - 90) < 0.5f && g.tools.Slot("part_sense") == 5,
-                      $"glowing {(sid >= 0 ? g.world.DefOf(sid).displayName : "none")} (nearest {nearest?.id}), after 5 s {g.tools.senseId}, cooldown {cdS:0.0} s");
+                      rank == 1 && sensed == 1 && nearest != null && sid == nearest.id && g.tools.senseId < 0 && Mathf.Abs(cdS - 90) < 0.5f && g.tools.Slot("part_sense") == 5,
+                      $"rank {rank}; glowing {(sid >= 0 ? g.world.DefOf(sid).displayName : "none")} (nearest {nearest?.id}), after 5 s {g.tools.senseId}, cooldown {cdS:0.0} s");
+                foreach (var s in higher) pr.unlocked.Add(s);
+                g.tools.ResetState();
             }
             Check("the glove has ten levels (I-X, level X: 10 parts, 30 s); a save with the retired filter skills refunds their points",
                   g.tools.MagnetLevel == 10 && PlayerTools.Tuned("magnetic_glove", "pull_items", 10, 0) == 10 && g.tools.CooldownOf("magnetic_glove") == 30 && pr.skillPoints == pts + 2 && !pr.unlocked.Contains("filter_material"),
@@ -1713,6 +1789,265 @@ namespace WorkshopWreckage
             Time.timeScale = 1;
             Check("robots empty the sorting tray first, one walking robot at a time", put > 0 && inTray >= put && g.TrayCount <= inTray - 3 && atTray <= 1,
                   $"{put} put in, {inTray} in tray, {g.TrayCount} left; at most {atTray} walking robot(s) at the tray");
+        }
+
+        /// <summary>Playtest 2026-10-28, hands-on building through the player's own controls: a part held to a robot on
+        /// the bench snaps on (in any order: the chassis can come last), a part can be taken out of the pool tray, a
+        /// fitted part can be swapped or taken off until the robot is committed, and only a committed robot activates.
+        /// The Hoverbots pool their kits (any unit's lower shell goes on any Hoverbot).</summary>
+        IEnumerator GhostChecks()
+        {
+            var wb = g.workbench;
+            var ic = g.interaction;
+            IEnumerator AimAtRobot(RobotWorkbench.Project p)
+            {
+                var (spot, _) = wb.MatSpot(p.mat);
+                var stand = spot + wb.Front * 0.75f;
+                LookFrom(new Vector3(stand.x, PlayerController.Eye, stand.z), spot + Vector3.up * 0.05f);   // standing at the mat
+                yield return Frames(2);
+                ic.UpdateTarget();
+            }
+            IEnumerator TryOn(RobotWorkbench.Project p, int id)
+            {
+                if (g.world.instances[id].state == ItemState.Stored) wb.TakeFromPool(id); else Take(id);
+                g.inventory.Select(g.world.instances[id].defId);
+                Report(wb.Fit(p, id));   // workbench mode (the bench screen's arrows)
+                yield return Frames(2);
+            }
+            void Report((bool ok, string text) r) { if (!r.ok) Debug.Log("[ghost] " + r.text); }
+            string Key(int id) => Robot.PartKey(g.world.DefOf(id));
+            foreach (var (unit, chassis) in new[] { ("retrobot", new[] { "torso" }), ("hoverbot", new[] { "lower saucer shell", "upper saucer shell" }) })
+            {
+                var p = wb.P(unit);
+                var rb = g.robots.Find(r => r.id == unit);
+                LevelTo(p.level);
+                var parts = wb.PartIds(p);
+                var early = parts.Where(id => !chassis.Contains(Key(id)) && p.requires.TryGetValue(Key(id), out var req) && req.Any(chassis.Contains)).Take(3).ToList();
+                int v0 = SolidVerts(rb);
+                yield return AimAtRobot(p);
+                bool aimed = ic.targetType == "station" && !wb.AtPool(ic.targetPoint) && wb.ActiveOnMat(ic.MatAt(ic.targetPoint)) == p;
+                foreach (var id in early) yield return TryOn(p, id);
+                int v1 = SolidVerts(rb);
+                var keys = early.Select(Key).ToList();
+                Check($"{p.name}: {string.Join(", ", keys)} held to the robot snap onto the ghost before the {string.Join(" and ", chassis)}",
+                      aimed && early.Count > 0 && early.All(wb.IsFitted) && keys.All(wb.InstalledKeys(p).Contains) && !chassis.Any(wb.InstalledKeys(p).Contains) && v1 > v0,
+                      $"aim {ic.targetType}, {early.Count(wb.IsFitted)}/{early.Count} fitted, solid geometry {v0} -> {v1} vertices");
+                var (spot, _) = wb.MatSpot(p.mat);
+                LookFrom(spot + wb.Front * 0.6f + Vector3.up * 0.35f + Vector3.Cross(Vector3.up, wb.Front) * 0.2f, spot + Vector3.up * 0.14f);
+                yield return g.Capture(Path.Combine(outDir, $"ghost_{unit}_before_chassis.png"), 4);
+
+                // a fitted part comes off again (into the hands), and goes back on
+                var off = wb.TakeOff(p, early[0]);
+                yield return Frames(2);
+                Check($"{p.name}: a fitted part comes off into the hands until committed", off.ok && !wb.IsFitted(early[0]) && g.inventory.Has(early[0]) && !wb.InstalledKeys(p).Contains(keys[0]), off.text);
+                yield return TryOn(p, early[0]);
+
+                // the chassis: delivered to the pool, taken out of the tray by aiming at it, then tried on
+                var shells = parts.Where(id => chassis.Contains(Key(id))).ToList();
+                if (unit == "hoverbot")
+                {
+                    // the Hoverbots pool their kits: Hoverbot #2's lower shell goes on the first Hoverbot
+                    var other = wb.PartIds(wb.P("hoverbot_2")).First(id => Key(id) == chassis[0]);
+                    shells[shells.FindIndex(id => Key(id) == chassis[0])] = other;
+                }
+                foreach (var id in shells) { Take(id); ic.DepositStation(id); }
+                yield return Frames(2);
+                var pos = wb.PoolModelPosition(shells[0]);
+                if (pos is Vector3 pp) { var stand = pp + wb.Front * 0.5f; LookFrom(new Vector3(stand.x, PlayerController.Eye, stand.z), pp); }   // standing at the tray
+                yield return Frames(2);
+                ic.UpdateTarget();
+                int aimedPart = ic.targetPoolPart;
+                Check($"{p.name}: the {Key(shells[0])} lies in the parts box where the crosshair finds it", pos != null && aimedPart == shells[0],
+                      $"aimed at {(aimedPart >= 0 ? g.world.DefOf(aimedPart).displayName : "nothing")}; target {ic.targetType}, at pool {wb.AtPool(ic.targetPoint)}, bench-local {Batch.G(wb.transform.InverseTransformPoint(ic.targetPoint))}, model {pos}");
+                foreach (var id in shells) yield return TryOn(p, id);
+                Check($"{p.name}: the {string.Join(" and ", chassis)} still goes on afterwards" + (unit == "hoverbot" ? " (one of them Hoverbot #2's)" : ""),
+                      shells.All(wb.IsFitted) && chassis.All(wb.InstalledKeys(p).Contains) && SolidVerts(rb) > v1, wb.Summary(p));
+                yield return g.Capture(Path.Combine(outDir, $"ghost_{unit}_chassis_added.png"), 4);
+                Check($"{p.name}: each robot part is in exactly one place", PartsIntact(out var d), d);
+            }
+
+            // swap: another head tried on in place of a fitted one; the first comes back into the hands
+            {
+                var p = wb.P("hoverbot");
+                int head = wb.InstalledIds(p).First(id => Robot.PartKey(g.world.DefOf(id)) == "head");
+                int head2 = wb.PartIds(wb.P("hoverbot_2")).First(id => Robot.PartKey(g.world.DefOf(id)) == "head");
+                yield return TryOn(p, head2);
+                Check("Hoverbot: Hoverbot #2's head swaps in for the fitted head, which comes back into the hands",
+                      wb.IsFitted(head2) && !wb.IsFitted(head) && g.inventory.Has(head) && wb.InstalledIds(p).Count(id => Robot.PartKey(g.world.DefOf(id)) == "head") == 1,
+                      $"{wb.DonorOrigin(p, ModuleSlot.Head) ?? "own"} head on");
+            }
+
+            // the part picker (playtest 2026-10-28): at the robot, the wheel / Q / E scroll through the found parts
+            // that fit it (pool and hands), LMB tries the shown one on, V applies
+            {
+                var p = wb.P("unibot");
+                LevelTo(p.level);
+                foreach (var id in g.inventory.items.Where(x => g.world.DefOf(x).IsRobotPart).ToList()) ic.DepositStation(id);
+                var kit = wb.PartIds(p).Where(id => g.world.instances[id].state != ItemState.Installed).Take(3).ToList();
+                foreach (var id in kit) { Take(id); ic.DepositStation(id); }
+                // LMB on the bench (carrying a part) opens workbench mode on its blueprints; the part is in the box
+                int carried = wb.PartIds(p).First(id => g.world.instances[id].state != ItemState.Installed && !kit.Contains(id));
+                Take(carried);
+                yield return AimAtRobot(p);
+                bool aimed = ic.targetType == "station";
+                ic.Primary();
+                yield return Frames(4);
+                bool opened = g.state == "workbench" && !g.hud.WorkbenchOnParts && !g.inventory.Has(carried) && g.world.instances[carried].state == ItemState.Stored;
+                yield return g.Capture(Path.Combine(outDir, "ghost_bench_opened.png"), 2);
+                Check("Unibot: LMB on the Robot Workbench opens workbench mode (blueprints); the carried part goes in the parts box; no picker outside it",
+                      aimed && opened && !ic.PickerActive, $"aim {ic.targetType}, state {g.state}, on parts {g.hud.WorkbenchOnParts}, part {g.world.instances[carried].state}");
+                g.hud.WorkbenchChoose(p.id);
+                yield return Frames(2);
+                var slot = wb.Slots(p).First(x => x.ring.Count > 0 && x.on < 0);
+                int second = slot.ring[0];
+                wb.Fit(p, second, true);
+                g.SetState("play");
+                yield return Frames(2);
+                bool fitted = wb.IsFitted(second) && !g.inventory.Has(second);
+                Check("Unibot: on the parts page a found part from the box is fitted", fitted, $"{slot.key}: {g.world.DefOf(second).displayName}");
+                wb.Commit(p);   // the bench screen's Apply
+                yield return Frames(2);
+                Check("Unibot: Apply locks the fitted part in", fitted && !wb.IsFitted(second) && wb.InstalledIds(p).Contains(second) && wb.FittedIds(p).Count == 0, wb.Summary(p));
+                Check("each robot part is in exactly one place (picker)", PartsIntact(out var d), d);
+            }
+
+            // commit: complete the Retrobot by hand; it only activates once committed, then nothing comes off
+            {
+                var p = wb.P("retrobot");
+                foreach (var id in wb.PartIds(p).Where(id => g.world.instances[id].state != ItemState.Installed).ToList()) yield return TryOn(p, id);
+                bool blocked = wb.Complete(p) && !wb.CanActivate(p) && wb.StatusOf(p) != RobotWorkbench.Status.ReadyForActivation;
+                int n = wb.Commit(p);
+                var last = wb.InstalledIds(p)[0];
+                Check("Retrobot: every part fitted, it activates only once committed; committed parts stay on",
+                      blocked && n == wb.Required(p) && wb.CanActivate(p) && !wb.TakeOff(p, last).ok && wb.FittedIds(p).Count == 0,
+                      $"{n} committed, {wb.Summary(p)}");
+            }
+
+            // fitted parts survive save / load (and stay loose)
+            {
+                var p = wb.P("hoverbot");
+                var before = string.Join(",", wb.FittedIds(p));
+                g.SaveGame("autotest_fit");
+                g.StartWorld(g.world.seed, null);
+                g.LoadGame("autotest_fit");
+                g.player.enabled = false;
+                yield return Frames(4);
+                Check("fitted (uncommitted) parts are kept through save / load", before != "" && string.Join(",", wb.FittedIds(p)) == before, before);
+            }
+        }
+
+        /// <summary>Playtest 2026-10-28: a part picked up, dropped or put in the tray is drawn in the air by the world
+        /// renderer (its world mesh, skin and wear), not by a stand-in with the old look; the Unibot tyre is round.</summary>
+        IEnumerator FlightChecks()
+        {
+            var ic = g.interaction;
+            var r = g.renderer;
+            var tire = g.world.instances.FirstOrDefault(i => g.world.DefOf(i.id).geometryKey == "robot:tire");
+            if (tire != null)
+            {
+                var m = r.WorldMeshFor(tire.id);
+                // laid on open floor beside where it lies, tilted a little, to see it whole
+                var def = g.world.DefOf(tire.id);
+                var pos = new Vector3(tire.Position.x + 1.2f, 0, tire.Position.z + 1.2f);
+                g.index.Remove(tire.id);
+                g.world.SetTransform(tire.id, Matrix4x4.TRS(pos + Vector3.up * (MeshLibrary.UnitBounds(def.geometryKey).extents.y * def.worldScale + 0.002f), Quaternion.Euler(0, 0, 0), Vector3.one * def.worldScale));
+                g.index.Insert(tire.id);
+                g.renderer.Refresh(tire.id);
+                LookFrom(new Vector3(pos.x + 0.55f, PlayerController.Eye, pos.z + 0.4f), pos);   // from standing height (lower puts the body under the floor)
+                yield return g.Capture(Path.Combine(outDir, "flight_unibot_tire.png"), 4);
+                Check("the Unibot tyre is a round rubber tyre (built like the robot's, not the 7-sided export)", m.vertexCount > 1000, $"{m.name}: {m.vertexCount} vertices, {tire.state} at {tire.Position}");
+            }
+            else Check("the Unibot tyre is a round rubber tyre", false, "no Unibot tyre in the world");
+            var eye = g.player.transform.position;
+            var part = g.world.instances.Where(i => i.state == ItemState.InWorld && ItemSkins.Applies(g.world.DefOf(i.id)) && !g.world.DefOf(i.id).IsRobotPart)
+                .OrderBy(i => (i.Position - eye).sqrMagnitude).First();
+            int id = part.id;
+            ic.Pickup(id, true);
+            yield return null;
+            bool upFlying = r.IsFlying(id);
+            float t0 = Time.time;
+            while (Time.time - t0 < 0.4f) yield return null;
+            bool upDone = !r.IsFlying(id) && g.inventory.Has(id);
+            g.inventory.Select(part.defId);
+            ic.DropInTray(id, false);
+            yield return null;
+            bool trayFlying = r.IsFlying(id) && r.IsHidden(id);
+            var mid = g.held.HandWorld().GetColumn(3);
+            LookFrom((Vector3)mid + Vector3.up * 0.25f - g.player.transform.forward * 0.35f, ic.TrayMatrix(g.world.DefOf(id)).GetColumn(3));
+            yield return g.Capture(Path.Combine(outDir, "flight_mid_air.png"), 1);
+            t0 = Time.time;
+            while (Time.time - t0 < 0.5f) yield return null;
+            bool trayDone = !r.IsFlying(id) && !r.IsHidden(id) && g.world.instances[id].state == ItemState.InWorld;
+            Check($"a {g.world.DefOf(id).displayName} is drawn by the world renderer while it flies (picked up, put in the tray), then lies there normally",
+                  upFlying && upDone && trayFlying && trayDone, $"pickup: flying {upFlying}, done {upDone}; tray: flying (hidden) {trayFlying}, done {trayDone}");
+
+        }
+
+        /// <summary>QA: writes every item geometry key's meshes (both LODs) to outDir/meshes/<key>__lod<n>.obj, one
+        /// group per submesh, with the material slot in the group name; also a key list with one example item.</summary>
+        void MeshDump()
+        {
+            var dir = Path.Combine(outDir, "meshes");
+            Directory.CreateDirectory(dir);
+            var keys = g.db.definitions.Values.GroupBy(d => d.geometryKey).Where(k => !string.IsNullOrEmpty(k.Key)).ToList();
+            var list = new System.Text.StringBuilder();
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            foreach (var k in keys)
+            {
+                list.Append(k.Key).Append('\t').Append(k.First().displayName).Append('\t').Append(k.Count()).Append('\n');
+                foreach (int lod in new[] { MeshLibrary.LodInspect, MeshLibrary.LodWorld })
+                {
+                    var e = MeshLibrary.Get(k.Key, lod);
+                    if (e?.mesh == null) continue;
+                    var sb = new System.Text.StringBuilder();
+                    foreach (var v in e.mesh.vertices) sb.Append("v ").Append(v.x.ToString("R", inv)).Append(' ').Append(v.y.ToString("R", inv)).Append(' ').Append(v.z.ToString("R", inv)).Append('\n');
+                    for (int sm = 0; sm < e.mesh.subMeshCount; sm++)
+                    {
+                        sb.Append("g sub").Append(sm).Append("_slot").Append(e.slots[sm]).Append('\n');
+                        var t = e.mesh.GetTriangles(sm);
+                        for (int i = 0; i < t.Length; i += 3) sb.Append("f ").Append(t[i] + 1).Append(' ').Append(t[i + 1] + 1).Append(' ').Append(t[i + 2] + 1).Append('\n');
+                    }
+                    File.WriteAllText(Path.Combine(dir, k.Key.Replace(":", "_") + "__lod" + lod + ".obj"), sb.ToString());
+                }
+            }
+            File.WriteAllText(Path.Combine(outDir, "mesh_keys.tsv"), list.ToString());
+            Check("every item mesh dumped", keys.Count > 0, $"{keys.Count} geometry keys");
+        }
+
+        /// <summary>QA close-ups: one part of each listed geometry key laid on open floor in front of the player,
+        /// photographed from two sides (partshot_<key>_a/b.png). Keys from --apkeys=a,b (default: the limb housing).</summary>
+        IEnumerator PartShots()
+        {
+            var keys = (g.args.TryGetValue("apkeys", out var ks) ? ks : "mach:limb_housing").Split(',');
+            foreach (var key in keys)
+            {
+                // a painted one first (bare metal glares in the close-up)
+                var inst = g.world.instances.Where(i => g.world.DefOf(i.id).geometryKey == key && i.state == ItemState.InWorld)
+                    .OrderBy(i => g.world.DefOf(i.id).material == "painted" ? 0 : 1).FirstOrDefault();
+                if (inst == null) { Check($"a {key} lies in the world", false, "none found"); continue; }
+                var def = g.world.DefOf(inst.id);
+                // in the hands and turned in the inspect view (F): large, centred, slowly rotating
+                string tag = key.Replace(":", "_");
+                float size = MeshLibrary.UnitBounds(def.geometryKey).size.magnitude * def.worldScale;
+                g.index.Remove(inst.id);
+                g.world.SetState(inst.id, ItemState.Carried, "player");
+                g.inventory.Add(inst.id);
+                g.inventory.Select(inst.defId);
+                g.interaction.UpdateTarget();
+                g.hud.SetHudVisible(false);
+                g.interaction.BeginInspect();
+                yield return Frames(25);
+                yield return g.Capture(Path.Combine(outDir, $"partshot_{tag}_a.png"), 1);
+                yield return Frames(70);
+                yield return g.Capture(Path.Combine(outDir, $"partshot_{tag}_b.png"), 1);
+                g.interaction.EndInspect();
+                g.hud.SetHudVisible(true);
+                // back where it lay
+                g.inventory.Remove(inst.id);
+                g.world.SetState(inst.id, ItemState.InWorld, "world");
+                g.index.Insert(inst.id);
+                Check($"close-ups of {def.displayName} ({key})", true, $"{MeshLibrary.Get(key, MeshLibrary.LodWorld).mesh.vertexCount} vertices, {size:0.00} m");
+            }
         }
 
         /// <summary>Puts a part into the player's hands, wherever it lies (test setup).</summary>
@@ -1816,6 +2151,23 @@ namespace WorkshopWreckage
                   && tools.All(i => i.state == ItemState.InWorld && i.zone == -1) && defs.All(d => g.db.stations.ContainsKey(d.storageBox) && d.storageBox == "PB-" + d.PegSlot) && pb.Hung == 0,
                   $"{tools.Count} tools, {pb?.Total} slots, {pb?.Hung} hung at the start");
 
+            RobotWorkbench.QaIgnoreToolRequirements = false;
+            var cfg = pb.cfg;
+            var layout = pb.LayoutProblems();
+            Check($"all {cfg.tools.Count} catalogue tools in 6 sections: every slot in one, laid out with no overlaps, inside its section and under the signs",
+                  pb.Total == cfg.tools.Count && cfg.sections.Count == 6 && cfg.sections.Sum(s => s.slots.Count) == pb.Total && cfg.errors.Count == 0 && layout.Count == 0,
+                  $"{pb.Total} tools; {string.Join(", ", cfg.sections.Select(s => $"{s.id} {s.slots.Count}"))}; {cfg.errors.Count} config errors; layout: {string.Join("; ", layout.Take(4))}");
+            Check("no twins: every board tool has a name of its own", defs.Select(d => d.displayName).Distinct().Count() == defs.Count,
+                  string.Join(", ", defs.GroupBy(d => d.displayName).Where(gr => gr.Count() > 1).Select(gr => gr.Key)));
+            Check("the safety net finds nothing wrong in a new world", g.PegboardGuard(false).Count == 0, string.Join("; ", g.PegboardGuard(false).Take(4)));
+            var newFloat = tools.Where(i => i.state == ItemState.InWorld && !g.piles.Contact(i.id).supported).ToList();
+            Check("a new world: every board tool lying about rests on something (none floats)", newFloat.Count == 0,
+                  string.Join(", ", newFloat.Take(5).Select(i => $"{g.world.DefOf(i.id).displayName} at {i.Position.y:0.000} m")));
+            yield return Frames(2);
+            Check("each section's sign shows its count: \"0 / 20 TOOLS RESTORED\" over Spanners & Wrenches",
+                  pb.SignText("spanners") == "0 / 20 TOOLS RESTORED" && cfg.sections.All(s => pb.SignText(s.id) == $"0 / {s.slots.Count} TOOLS RESTORED"), pb.SignText("spanners") ?? "(none)");
+            int Tool(string slot) => g.world.instances.First(i => g.world.DefOf(i.id).IsPegboardTool && g.world.DefOf(i.id).PegSlot == slot).id;
+
             ItemInstance a = tools[0], b = tools[1];
             var bAt = pb.SlotCentre(g.world.DefOf(b.id).PegSlot);
             var c = tools.Skip(2).First(i => Vector3.Distance(pb.SlotCentre(g.world.DefOf(i.id).PegSlot), bAt) > 0.6f);   // far from b's own slot (its aim assist)
@@ -1867,21 +2219,498 @@ namespace WorkshopWreckage
                   pb.Hung == 1 && pb.IsOccupied(g.world.DefOf(a.id).PegSlot) && a.state == ItemState.Stored && g.inventory.Has(b.id) && g.progression.xp == xp0,
                   $"hung {pb.Hung}, a {a.state}, b carried {g.inventory.Has(b.id)}, xp {g.progression.xp}");
 
-            // every tool hung: the board is complete (100 %), still no XP
-            int refused = 0;
-            foreach (var i in g.world.instances.Where(i => g.world.DefOf(i.id).IsPegboardTool && i.state != ItemState.Stored).ToList())
+            // a set: its pieces can be found and carried first, but go up only once their holder is mounted
+            if (g.inventory.Has(b.id)) it.HangTool(b.id);
+            int so1 = Tool("SO01"), sk1 = Tool("SK01"), hk8 = Tool("HK08");
+            Take(so1);
+            yield return AimAtSlot("SO01");
+            info = it.Describe();
+            bool socketRefused = !it.HangTool(so1);
+            Check("a socket is refused until its holder is up: \"Mount the metric socket holder first.\"",
+                  socketRefused && info.tone == -1 && info.hint.Contains("Mount the metric socket holder first.") && g.inventory.Has(so1) && !pb.IsOccupied("SO01"),
+                  $"hint '{info.hint}', refused {socketRefused}, still carried {g.inventory.Has(so1)}");
+            Take(sk1);
+            bool holderUp = it.HangTool(sk1), socketUp = it.HangTool(so1);
+            Take(hk8);
+            bool keyRefused = !it.HangTool(hk8);
+            Check("with the holder mounted the socket goes on its own place on it; a hex key still waits for its own holder",
+                  holderUp && socketUp && pb.IsOccupied("SK01") && pb.IsOccupied("SO01") && keyRefused && g.inventory.Has(hk8), $"holder {holderUp}, socket {socketUp}, key refused {keyRefused}");
+            if (g.inventory.Has(hk8)) { g.inventory.Remove(hk8); g.world.SetState(hk8, ItemState.InWorld, "world"); }
+            var near = pb.SlotCentre("SK01");
+            LookFrom(near - pb.transform.forward * 0.55f + Vector3.down * 0.05f, near);
+            yield return Frames(3);
+            yield return g.Capture(Path.Combine(outDir, "peg_socket_holder.png"), 1);
+
+            // the split deep socket rail and bit set (2026-10-28): a holder each, every piece its own tool and place
+            var deepSet = cfg.slotById["SK03"].children; var bitSet = cfg.slotById["SK08"].children;
+            string Key(string slot) => cfg.toolById[cfg.slotById[slot].tool].GeometryKey;
+            int Verts(string slot) => WorkshopWreckage.Pegboard.ToolFactory.Build(Key(slot), MeshLibrary.LodWorld).mesh.vertexCount;
+            float Tall(string slot) { var ub = MeshLibrary.UnitBounds(Key(slot)).size; return ub.y / Mathf.Max(ub.x, ub.z); }
+            var tipVerts = new[] { "BT02", "BT05", "BT08", "BT11", "BT15" }.Select(Verts).ToList();   // PH2, PZ2, SL5.5, T15, H4
+            Check("the deep socket rail is a holder + 10 deep sockets (10-19 mm) and the bit set a holder + 16 screwdriver bits (PH, PZ, slotted, Torx, hex), each with its own model; deep sockets keep their long shape",
+                  deepSet.Count == 10 && bitSet.Count == 16 && deepSet.Concat(bitSet).Select(Key).Distinct().Count() == 26
+                  && tipVerts.Distinct().Count() == tipVerts.Count && deepSet.All(sl => Tall(sl) > 2.2f) && Tall("SO01") < 1.9f,
+                  $"tip vertices {string.Join("/", tipVerts)}; deep height/width {Tall("DS01"):0.00}..{Tall("DS10"):0.00}, standard {Tall("SO01"):0.00}");
+            int ds3 = Tool("DS03"), ds7 = Tool("DS07"), sk3 = Tool("SK03"), bt5 = Tool("BT05"), sk8 = Tool("SK08");
+            Take(ds3);
+            yield return AimAtSlot("DS03");
+            var deepHint = it.Describe().hint;
+            bool deepRefused = !it.HangTool(ds3);
+            Take(bt5);
+            yield return AimAtSlot("BT05");
+            var bitHint = it.Describe().hint;
+            bool bitRefused = !it.HangTool(bt5);
+            Take(sk3); Take(sk8);
+            bool holdersUp = it.HangTool(sk3) && it.HangTool(sk8);
+            bool piecesUp = it.HangTool(bt5) && it.HangTool(ds7) && it.HangTool(ds3);   // in any order
+            Check("deep sockets and bits wait for their own holder (\"Mount the deep socket holder first.\" / \"... screwdriver bit holder first.\"), then go on their places one at a time",
+                  deepRefused && bitRefused && deepHint.Contains("Mount the deep socket holder first.") && bitHint.Contains("Mount the screwdriver bit holder first.") && holdersUp && piecesUp
+                  && pb.IsOccupied("DS03") && pb.IsOccupied("DS07") && pb.IsOccupied("BT05") && !pb.IsOccupied("DS01") && !pb.IsOccupied("BT01"),
+                  $"hints '{deepHint}' / '{bitHint}'; holders {holdersUp}, pieces {piecesUp}");
+            int world0 = g.world.Count, hung0 = pb.Hung;
+            g.piles.Finish();
+            g.SaveGame("autotest_peg_sets");
+            g.LoadGame("autotest_peg_sets");
+            g.player.enabled = false;
+            yield return Frames(3);
+            pb = g.builder.pegboard;
+            Check("a partly filled deep socket holder and bit holder survive save and load: the same pieces on the same places, nothing duplicated",
+                  pb.Hung == hung0 && g.world.Count == world0 && new[] { "SK03", "DS03", "DS07", "SK08", "BT05" }.All(pb.IsOccupied)
+                  && deepSet.Concat(bitSet).Count(pb.IsOccupied) == 3 && g.PegboardGuard(false).Count == 0,
+                  $"hung {hung0} -> {pb.Hung}, world {world0} -> {g.world.Count}, pieces up {deepSet.Concat(bitSet).Count(pb.IsOccupied)}");
+            // the small pieces lie on open floor and can be aimed at and picked up like any part
+            var feet = g.player.transform.position;
+            // an open floor spot near the player: nothing overhead (no bench or shelf over it)
+            var spot = feet;
+            for (int k = 0; k < 64; k++)
             {
-                if (!g.inventory.Has(i.id) && !it.Pickup(i.id, false)) { refused++; continue; }
+                float ang = k * 47f * Mathf.Deg2Rad, rad = 0.8f + (k % 8) * 0.3f;
+                var cand = g.SafeDropPoint(feet + new Vector3(Mathf.Cos(ang), 0, Mathf.Sin(ang)) * rad, feet);
+                if (cand.y < 0.05f && !Physics.Raycast(cand + Vector3.up * 0.03f, Vector3.up, 2.5f)) { spot = cand; break; }
+            }
+            int aimed = 0, picked = 0;
+            bool input0 = it.enabledInput;
+            it.enabledInput = true;   // automated runs hide the hover each frame; aiming needs it
+            var sizes = new List<string>();
+            foreach (var slot in new[] { "DS01", "BT01", "BT07", "BT10", "BT15", "HK01" })
+            {
+                int id = Tool(slot);
+                var def = g.world.DefOf(id);
+                if (g.inventory.Has(id)) g.inventory.Remove(id);
+                var ub = MeshLibrary.UnitBounds(def.geometryKey).size * def.worldScale;
+                g.index.Remove(id);
+                g.world.SetTransform(id, Matrix4x4.TRS(spot + Vector3.up * (ub.z / 2 + 0.002f), Quaternion.Euler(90, 0, 0), Vector3.one * def.worldScale));
+                g.world.SetState(id, ItemState.InWorld, "world");
+                g.index.Insert(id);
+                LookFrom(spot + Vector3.up * 0.65f + (feet - spot).normalized * 0.3f, spot);
+                yield return Frames(2);
+                it.UpdateTarget();
+                if (it.targetType == "item" && it.targetItem == id) aimed++;
+                string targetWas = $"{it.targetType} {it.targetItem}/{id} at {spot.x:0.00},{spot.y:0.00},{spot.z:0.00}";
+                if (slot == "DS01") yield return g.Capture(Path.Combine(outDir, "peg_small_aim.png"), 1);
+                if (it.Pickup(id, false) && g.inventory.Has(id)) picked++;
+                sizes.Add($"{def.displayName} {Mathf.Max(ub.x, ub.y, ub.z) * 100:0.0} cm (aim {targetWas})");
+            }
+            it.enabledInput = input0;
+            Check("the smallest set pieces (deep socket, PH, slotted, Torx and hex bits, the 1.5 mm key) lying on the floor are targeted and picked up",
+                  aimed == 6 && picked == 6, $"aimed {aimed}/6, picked {picked}/6; {string.Join(", ", sizes)}");
+
+            // sections open robot blueprints (unlocks.json robot_pegboard)
+            var wb = g.workbench;
+            var spider = wb.P("spiderbot"); var arm1 = wb.P("sorting_arm"); var h3 = wb.P("hoverbot_3");
+            LevelTo(Mathf.Max(spider.level, arm1.level));
+            var expect = new Dictionary<string, string> { ["sorting_arm"] = "pliers", ["spiderbot"] = "spanners", ["hoverbot"] = "precision", ["sorting_arm_2"] = "screwdrivers", ["sorting_arm_3"] = "hammers", ["hoverbot_2"] = "sockets" };
+            Check("blueprint table: Sorting Arm #1 ← Pliers, Spiderbot ← Spanners, Hoverbot #1 ← Precision, Arm #2 ← Screwdrivers, Arm #3 ← Hammers, Hoverbot #2 ← Sockets, Hoverbot #3 ← any 5; Retrobot, Unibot, Caterpillarbot need none",
+                  expect.All(kv => Unlocks.PegboardRequirement(kv.Key).section == kv.Value) && Unlocks.PegboardRequirement("hoverbot_3").sections == 5
+                  && new[] { "retrobot", "unibot", "caterpillarbot" }.All(id => !wb.HasToolRequirement(wb.P(id))), "");
+            Check("Spiderbot stays locked until Spanners & Wrenches is complete; the bench says why and how far",
+                  !wb.Unlocked(spider) && wb.LockReason(spider).Contains("Requires: Spanners & Wrenches") && wb.LockReason(spider).Contains($"{pb.SectionHung("spanners")} / 20 tools restored")
+                  && wb.ToolProgressText(h3) == $"{pb.SectionsComplete} / 5 sections", $"'{wb.LockReason(spider)}'; Hoverbot #3: {wb.ToolProgressText(h3)}");
+            g.OpenWorkbench("spiderbot");
+            yield return Frames(4);
+            yield return g.Capture(Path.Combine(outDir, "peg_bench_spider_locked.png"), 2);
+            g.SetState("play");
+            g.player.enabled = false;
+
+            int toasts0 = g.hud.toastLog.Count;
+            foreach (var slot in cfg.sectionById["pliers"].slots.Where(s => !pb.IsOccupied(s)))
+            {
+                int id = Tool(slot);
+                Take(id);
+                it.HangTool(id);
+            }
+            yield return Frames(2);
+            var said = g.hud.toastLog.Skip(toasts0).ToList();
+            Check("completing Pliers & Clamps: its sign reads COMPLETE, the log says so and SORTING ARM CONSTRUCTION UNLOCKED; the arm's blueprint opens",
+                  pb.SectionComplete("pliers") && pb.SignText("pliers").StartsWith("COMPLETE") && said.Any(t => t.Contains("PLIERS & CLAMPS COMPLETE!"))
+                  && said.Any(t => t.Contains(arm1.name.ToUpperInvariant() + " CONSTRUCTION UNLOCKED")) && wb.Unlocked(arm1) && !wb.Unlocked(spider)
+                  && wb.ToolProgressText(h3) == "1 / 5 sections", $"sign '{pb.SignText("pliers")}'; said: {string.Join(" | ", said)}; Hoverbot #3 {wb.ToolProgressText(h3)}");
+            var signAt = pb.transform.TransformPoint(new Vector3((cfg.sectionById["pliers"].x0 + cfg.sectionById["pliers"].x1) / 2, pb.cfg.PanelCentre.y + 0.3f, pb.cfg.PanelFront));
+            LookFrom(signAt - pb.transform.forward * 1.3f, signAt);
+            yield return Frames(3);
+            yield return g.Capture(Path.Combine(outDir, "peg_pliers_complete.png"), 1);
+
+            // every tool hung: the board is complete (100 %), still no XP; holders go up before their pieces
+            int refused = 0;
+            toasts0 = g.hud.toastLog.Count;
+            foreach (var i in g.world.instances.Where(i => g.world.DefOf(i.id).IsPegboardTool && i.state != ItemState.Stored)
+                                               .OrderBy(i => cfg.slotById[g.world.DefOf(i.id).PegSlot].IsChild ? 1 : 0).ToList())
+            {
+                if (!g.inventory.Has(i.id)) Take(i.id);
                 if (!it.HangTool(i.id)) refused++;
             }
             yield return Frames(3);
+            said = g.hud.toastLog.Skip(toasts0).ToList();
             Check("every tool hangs in its own slot: the board shows all of them, none missing, 100 %, no XP",
-                  refused == 0 && pb.Missing == 0 && pb.Percent >= 99.99f && g.progression.xp == xp0 && g.progression.level == lv0,
+                  refused == 0 && pb.Missing == 0 && pb.Percent >= 99.99f && g.progression.xp == xp0,
                   $"{pb.Hung}/{pb.Total} hung, {refused} refused, xp {g.progression.xp}");
+            Check("the full board: TOOL WALL COMPLETE! with its line, every section complete, every robot's tool requirement met (no reward)",
+                  said.Any(t => t.Contains("TOOL WALL COMPLETE!") && t.Contains("The inventor would almost be impressed.")) && pb.SectionsComplete == 6 && wb.projects.All(wb.ToolsMet)
+                  && g.progression.xp == xp0, string.Join(" | ", said));
+            foreach (var (holder, shot) in new[] { ("SK01", "peg_socket_holder_full.png"), ("HX01", "peg_hex_holder_full.png"), ("SK03", "peg_deep_holder_full.png"), ("SK08", "peg_bit_holder_full.png") })
+            {
+                var at = pb.SlotCentre(holder);
+                LookFrom(at - pb.transform.forward * 0.42f + Vector3.down * 0.03f, at);
+                yield return Frames(3);
+                yield return g.Capture(Path.Combine(outDir, shot), 1);
+            }
+            Check("Sorting Arm #2, Sorting Arm #3 and Hoverbot #2 say their tools are ready and what else they wait for",
+                  new[] { "sorting_arm_2", "sorting_arm_3", "hoverbot_2" }.All(id => said.Any(t => t.StartsWith(wb.P(id).name.ToUpperInvariant() + ": TOOLS READY") || t.StartsWith(wb.P(id).name.ToUpperInvariant() + " CONSTRUCTION UNLOCKED"))),
+                  string.Join(" | ", said.Where(t => t.Contains("TOOLS READY") || t.Contains("UNLOCKED"))));
+            g.piles.Finish();
+            g.SaveGame("autotest_peg");
+            int toasts1 = g.hud.toastLog.Count;
+            g.LoadGame("autotest_peg");
+            g.player.enabled = false;
+            yield return Frames(3);
+            pb = g.builder.pegboard;
+            Check("a full board with its holders survives save and load, with no celebration on loading",
+                  pb.Missing == 0 && pb.SectionsComplete == 6 && !g.hud.toastLog.Skip(toasts1).Any(t => t.Contains("COMPLETE")) && g.PegboardGuard(false).Count == 0,
+                  $"{pb.Hung}/{pb.Total}, {pb.SectionsComplete} sections");
             var mid = pb.transform.TransformPoint(new Vector3(0, pb.cfg.PanelCentre.y, pb.cfg.PanelFront));
             LookFrom(mid - pb.transform.forward * 3.2f, mid);
             yield return Frames(3);
             yield return g.Capture(Path.Combine(outDir, "peg_full.png"), 1);
+        }
+
+        /// <summary>The pegboard safety net end to end: a save in which Retrobot holds a board tool, another tool lies
+        /// in an ordinary box and a socket hangs without its holder. After loading each lies loose in the sorting tray
+        /// (not deposited into it: the tray's store refuses tools), exactly once, no robot holds or takes it, and the
+        /// player picks it up and hangs it (the socket once its holder is up).</summary>
+        IEnumerator PegGuardChecks()
+        {
+            RobotWorkbench.QaIgnoreToolRequirements = false;
+            g.player.enabled = false;
+            var wb = g.workbench;
+            var rp = wb.P("retrobot");
+            wb.ForceInstall(rp);
+            if (!wb.Activate(rp)) wb.DebugUnlock(rp);
+            float t0 = Time.realtimeSinceStartup;
+            while (!g.retrobot.Operational && Time.realtimeSinceStartup - t0 < 15) yield return null;
+            var pb = g.builder.pegboard;
+            ItemInstance Loose(System.Func<ItemDefinition, bool> f) => g.world.instances.First(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsPegboardTool && f(g.world.DefOf(i.id)));
+            bool Plain(ItemDefinition d) => !pb.cfg.slotById[d.PegSlot].IsChild && pb.cfg.slotById[d.PegSlot].children.Count == 0;   // not a set's holder or piece
+            var held = Loose(Plain);
+            var boxed = Loose(d => Plain(d) && d.id != held.defId);
+            var piece = Loose(d => pb.cfg.slotById[d.PegSlot].IsChild && pb.cfg.slotById[d.PegSlot].parent == "SK01");
+            string box = g.db.boxes.Keys.First(k => !k.StartsWith("PB-"));
+            foreach (var x in new[] { held, boxed, piece }) g.index.Remove(x.id);
+            g.world.SetState(held.id, ItemState.Carried, g.retrobot.Owner);
+            g.storage.contents.TryAdd(box, new List<int>());
+            g.storage.contents[box].Add(boxed.id);
+            g.world.SetState(boxed.id, ItemState.Stored, "box:" + box);
+            string pdest = "PB-" + g.world.DefOf(piece.id).PegSlot;
+            g.storage.contents.TryAdd(pdest, new List<int>());
+            g.storage.contents[pdest].Add(piece.id);
+            g.world.SetState(piece.id, ItemState.Stored, "box:" + pdest);
+            int count0 = g.world.Count;
+            foreach (var r in g.robots) r.enabled = false;
+            g.SaveGame("autotest_guard");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_guard");
+            foreach (var r in g.robots) r.enabled = false;
+            yield return Frames(5);
+            pb = g.builder.pegboard;
+            var ids = new[] { held.id, boxed.id, piece.id };
+            var inst = ids.Select(id => g.world.instances[id]).ToList();
+            var retro = g.retrobot;
+            Check("a tool a robot held, one in an ordinary box and a socket on the board without its holder all lie loose in the sorting tray after loading",
+                  inst.All(i => i.state == ItemState.InWorld && i.owner == "tray" && g.InTray(i.Position)) && !retro.carried.Any(ids.Contains)
+                  && !g.storage.Stored(box).Contains(boxed.id) && !g.storage.Stored(pdest).Contains(piece.id) && !pb.IsOccupied(g.world.DefOf(piece.id).PegSlot),
+                  string.Join("; ", inst.Select(i => $"{g.world.DefOf(i.id).displayName}: {i.state} {i.owner} in tray {g.InTray(i.Position)}")) + $"; Retrobot holds {retro.carried.Count}, operational {retro.Operational}");
+            var defs = g.db.order.Select(g.db.Get).Where(d => d.IsPegboardTool).ToList();
+            Check("every board tool still exists exactly once, nothing added or lost, and the safety net is clean now",
+                  defs.Count == pb.cfg.tools.Count && defs.All(d => g.world.IdsOf(d.id).Count() == 1) && g.world.Count == count0 && g.PegboardGuard(false).Count == 0,
+                  $"{defs.Count(d => g.world.IdsOf(d.id).Count() == 1)}/{defs.Count} once, world {count0} -> {g.world.Count}; {string.Join("; ", g.PegboardGuard(false).Take(3))}");
+            // the robots work on (sped up) with the tools in the tray: none takes one (tools are player-only)
+            int ev0 = _events.Count;
+            foreach (var r in g.robots) { r.enabled = true; r.SetBattery(1); }
+            Time.timeScale = 4;
+            float g0 = Time.time; t0 = Time.realtimeSinceStartup;
+            while (Time.time - g0 < 40 && Time.realtimeSinceStartup - t0 < 40) yield return null;
+            Time.timeScale = 1;
+            foreach (var r in g.robots) r.enabled = false;
+            var robotTouched = _events.Skip(ev0).Where(e => e.kind is GameEventKind.PartPickedUp or GameEventKind.PartSorted && e.actor.StartsWith("robot") && e.partDef >= 0 && g.db.Get(e.partDef).IsPegboardTool).ToList();
+            Check("no robot picks a tool out of the sorting tray (the robots worked 40 s with them lying there)",
+                  robotTouched.Count == 0 && inst.All(i => i.state == ItemState.InWorld && g.InTray(i.Position)),
+                  $"{_events.Skip(ev0).Count(e => e.kind == GameEventKind.PartPickedUp && e.actor.StartsWith("robot"))} robot pick-ups meanwhile, {robotTouched.Count} of a tool; {string.Join(", ", inst.Select(i => i.state + " " + i.owner))}");
+            // the player takes them out of the tray and hangs them
+            EmptyHands();
+            bool picked = ids.All(id => g.interaction.Pickup(id, false));
+            bool hungHeld = g.interaction.HangTool(held.id), hungBoxed = g.interaction.HangTool(boxed.id);
+            bool pieceRefused = !g.interaction.HangTool(piece.id);
+            int holder = g.world.instances.First(i => g.world.DefOf(i.id).IsPegboardTool && g.world.DefOf(i.id).PegSlot == "SK01").id;
+            Take(holder);
+            bool holderUp = g.interaction.HangTool(holder);
+            bool hungPiece = g.interaction.HangTool(piece.id);
+            Check("the player picks each one up from the tray and hangs it (the socket once its holder is up)",
+                  picked && hungHeld && hungBoxed && pieceRefused && holderUp && hungPiece && pb.Hung == 4 && g.PegboardGuard(false).Count == 0,
+                  $"picked {picked}, hung {hungHeld}/{hungBoxed}, socket refused first {pieceRefused}, holder {holderUp}, socket {hungPiece}; board {pb.Hung}");
+            File.Delete(SaveSystem.PathOf("autotest_guard"));
+        }
+
+        /// <summary>A save from before the sections and split sets (copied into the saves folder as premig_*): it loads
+        /// under the new rules with nothing lost or doubled. An old set that was hung stays up as its holder with the
+        /// pieces new and loose; one that was not is the holder, its pieces loose. Robots that ran keep running.</summary>
+        /// <summary>Save and load (playtest 2026-10-28: saving over a converted save was refused as "a different
+        /// workshop", and the next load lost the evening's progress). Converted save saved over and loaded; a round
+        /// trip that changes nothing; the backup when a file is damaged; a failed write that is told and leaves
+        /// nothing behind; named saves, overwrite and delete through the menus; the autosave before a load.</summary>
+        IEnumerator SaveChecks()
+        {
+            void Clean()
+            {
+                foreach (var pat in new[] { "autotest_sv_*", "autotest_save_*", "autotest_autosave*" })
+                    foreach (var f in Directory.GetFiles(SaveSystem.Dir, pat)) File.Delete(f);
+                if (Directory.Exists(SaveSystem.TrashDir))
+                    foreach (var f in Directory.GetFiles(SaveSystem.TrashDir, "*autotest_*")) File.Delete(f);
+            }
+            Clean();
+            // 1. the playtest: an older catalog's save loads (converted), the player plays on and saves over it
+            File.Copy(SaveSystem.PathOf("premig_slot1"), SaveSystem.PathOf("autotest_sv_conv"), true);
+            g.LoadGame("autotest_sv_conv");
+            g.player.enabled = false;
+            yield return Frames(3);
+            bool converted = g.migrationReport != "";
+            int level0 = g.progression.level, sorted0 = g.progress.sortedTotal;
+            var part = g.world.instances.First(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsPegboardTool && !g.world.DefOf(i.id).IsRobotPart).id;
+            Take(part);
+            g.playTime += 600;
+            double play1 = g.playTime;
+            var t0 = Time.realtimeSinceStartup;
+            bool saved = g.SaveGame("autotest_sv_conv");
+            float saveMs = (Time.realtimeSinceStartup - t0) * 1000;
+            g.LoadGame("autotest_sv_conv");
+            yield return Frames(3);
+            Check("a save from an older parts catalog, loaded (converted), played on and saved over, loads again with the progress since (playtest 2026-10-28: that save was refused as \"a different workshop\")",
+                  converted && saved && g.migrationReport == "" && g.inventory.Has(part) && g.progression.level == level0 && g.progress.sortedTotal == sorted0 && System.Math.Abs(g.playTime - play1) < 5,
+                  $"converted {converted}, saved {saved} in {saveMs:0} ms, converted again {g.migrationReport != ""}, part in hand {g.inventory.Has(part)}, level {level0} -> {g.progression.level}, sorted {sorted0} -> {g.progress.sortedTotal}, play {play1 / 60:0} -> {g.playTime / 60:0} min");
+
+            // 2. a save and its load change nothing
+            g.piles.Finish();
+            var before = SaveSystem.Serialize(g);
+            g.SaveGame("autotest_sv_rt", "Round trip");
+            g.LoadGame("autotest_sv_rt");
+            yield return Frames(3);
+            var after = SaveSystem.Serialize(g);
+            var diffs = new List<string>();
+            foreach (var k in before.Keys.Where(k => k != "saved_at" && k != "play_time_s"))
+            {
+                if (k == "items")
+                {
+                    var a = Json.Arr(before[k]); var b = Json.Arr(after[k]);
+                    int bad = 0; float worst = 0;
+                    for (int r = 0; r < Mathf.Min(a.Count, b.Count); r++)
+                    {
+                        var ea = (List<object>)a[r]; var eb = (List<object>)b[r];
+                        if (ea.Count != eb.Count || !ea.Take(3).SequenceEqual(eb.Take(3))) { bad++; continue; }
+                        for (int q = 3; q < ea.Count; q++) worst = Mathf.Max(worst, Mathf.Abs((float)((double)ea[q] - (double)eb[q])));
+                    }
+                    if (a.Count != b.Count || bad > 0 || worst > 0.001f) diffs.Add($"items ({a.Count} vs {b.Count}, {bad} state/owner, worst place {worst * 1000:0.0} mm)");
+                }
+                else if (!after.ContainsKey(k) || Json.Write(before[k]) != Json.Write(after[k])) diffs.Add(k);
+            }
+            Check("a save and its load change nothing: every part's state, owner and place, storage, inventory, robots, workbench, skills, progress",
+                  diffs.Count == 0 && g.currentSave == "autotest_sv_rt" && g.currentSaveName == "Round trip", diffs.Count == 0 ? $"{before.Count} sections equal" : "differs: " + string.Join(", ", diffs));
+
+            // 3. the old file stays as a backup, and a damaged file loads from it
+            g.SaveGame("autotest_sv_rt");
+            var path = SaveSystem.PathOf("autotest_sv_rt");
+            bool bak = File.Exists(path + ".bak") && !File.Exists(path + ".tmp");
+            var full = File.ReadAllText(path);
+            File.WriteAllText(path, full.Substring(0, full.Length / 2));   // as if the game crashed halfway through writing
+            var info = SaveSystem.Info("autotest_sv_rt");
+            int toasts = g.hud.toastLog.Count;
+            g.LoadGame("autotest_sv_rt");
+            yield return Frames(3);
+            bool told = g.hud.toastLog.Skip(toasts).Any(x => x.Contains("was damaged"));
+            Check("each save keeps the one before as a backup; a damaged save file loads its backup and says so",
+                  bak && info != null && info.fromBackup && g.inventory.Has(part) && told,
+                  $"backup {bak}, listed as from backup {info?.fromBackup}, part in hand {g.inventory.Has(part)}, told {told}");
+
+            // 4. a save that can't be written is told, and leaves nothing half-written
+            Directory.CreateDirectory(SaveSystem.PathOf("autotest_sv_fail"));   // a folder where the file should go
+            toasts = g.hud.toastLog.Count;
+            bool failed = !g.SaveGame("autotest_sv_fail", "Fail");
+            bool failTold = g.hud.toastLog.Skip(toasts).Any(x => x.Contains("NOT saved"));
+            bool noTmp = !File.Exists(SaveSystem.PathOf("autotest_sv_fail") + ".tmp");
+            Directory.Delete(SaveSystem.PathOf("autotest_sv_fail"));
+            Check("a save that can't be written fails out loud (\"SAVE FAILED ... NOT saved\") and leaves no half-written file", failed && failTold && noTmp,
+                  $"failed {failed}, told {failTold}, no .tmp {noTmp}; error '{SaveSystem.LastError}'");
+
+            // 5. the menus: a named save, the same name again (asks, then overwrites), load and delete
+            g.SetState("paused");
+            g.hud.OpenSub("save");
+            yield return Frames(2);
+            g.hud.QaSaveName("Friday evening");
+            bool clicked = g.hud.QaClick("Save as new");
+            yield return Frames(2);
+            var named = SaveSystem.List(true).FirstOrDefault(x => x.name == "Friday evening");
+            yield return g.Capture(Path.Combine(outDir, "saves_save_screen.png"), 2);
+            g.hud.QaSaveName("Friday evening");
+            bool asked = g.hud.QaClick("Save as new") && SaveSystem.List(true).Count(x => x.name == "Friday evening") == 1;
+            bool again = g.hud.QaClick("Overwrite 'Friday evening'");
+            int copies = SaveSystem.List(true).Count(x => x.name == "Friday evening");
+            Check("Save: a typed name makes a new named save, listed under its name; saving the same name again asks once, then updates that save (no second copy)",
+                  clicked && named != null && named.slot.StartsWith("autotest_save_") && asked && again && copies == 1 && g.currentSave == named?.slot,
+                  $"clicked {clicked}, listed {named?.slot}, asked {asked}, overwritten {again}, copies {copies}, this game's save {g.currentSave}");
+            g.hud.OpenSub("load");
+            yield return Frames(2);
+            var row = named == null ? null : g.hud.QaRowText(named.slot);
+            yield return g.Capture(Path.Combine(outDir, "saves_load_screen.png"), 2);
+            bool armed = named != null && g.hud.QaClick("Delete", named.slot) && File.Exists(SaveSystem.PathOf(named.slot));
+            bool deleted = named != null && g.hud.QaClick("Confirm?", named.slot);
+            yield return Frames(2);
+            bool gone = named != null && !File.Exists(SaveSystem.PathOf(named.slot)) && SaveSystem.List(true).All(x => x.slot != named.slot)
+                        && Directory.GetFiles(SaveSystem.TrashDir, "*" + named.slot + ".json").Length == 1;
+            Check("Load: the save is listed with its name and details; Delete asks once, then moves it to saves/deleted and off the list",
+                  row != null && row.Contains("Friday evening") && row.Contains("level") && armed && deleted && gone && g.currentSave == null,
+                  $"row '{row?.Replace("\n", " / ")}', asked {armed}, deleted {deleted}, gone {gone}");
+            bool loadedByMenu = g.hud.QaClick("Load", "autotest_sv_conv");
+            yield return Frames(3);
+            g.player.enabled = false;
+            Check("Load: a click on a save's Load button loads it", loadedByMenu && g.state == "play" && g.currentSave == "autotest_sv_conv" && g.inventory.Has(part),
+                  $"clicked {loadedByMenu}, state {g.state}, save {g.currentSave}");
+
+            // 6. the autosave: before another save loads, what is unsaved is kept
+            g.autosaveInTests = true;
+            g.playTime += 120;
+            double play2 = g.playTime;
+            g.LoadGame("autotest_sv_rt");
+            yield return Frames(3);
+            g.autosaveInTests = false;
+            var auto = SaveSystem.Info(g.AutosaveSlot);
+            Check("loading another save first keeps this game's unsaved play in the autosave", auto != null && auto.Ok && System.Math.Abs(auto.playTime - play2) < 3 && auto.name == "Autosave",
+                  $"autosave {(auto == null ? "none" : $"{auto.playTime / 60:0.0} min, '{auto.name}'")}, expected {play2 / 60:0.0} min");
+            Clean();
+        }
+
+        /// <summary>QA diagnostics (playtest 2026-10-29: "the robot arms stop working after a while, it seems they
+        /// are only delivering the items that were present when they were mounted"): loads a save and lets it
+        /// play for --apminutes (default 5); every 15 s, for each mounted arm, what it is doing and, for every
+        /// part lying near its unit's staging spots, why it would or would not take it.</summary>
+        IEnumerator ArmWatch(string slot)
+        {
+            g.LoadGame(slot);
+            g.player.enabled = false;
+            float minutes = float.Parse(g.args.GetValueOrDefault("apminutes", "5"), System.Globalization.CultureInfo.InvariantCulture);
+            var t0 = Time.time;
+            while (Time.time - t0 < minutes * 60)
+            {
+                foreach (var r in g.robots.Where(r => r.arm != null))
+                {
+                    var a = r.arm;
+                    if (a.place != SortingArm.Place.Mounted) { Debug.Log($"[armwatch] {Time.time - t0:0}s {r.displayName}: {a.place}"); continue; }
+                    var why = new Dictionary<string, int>();
+                    foreach (var i in g.world.instances)
+                    {
+                        if (i.state != ItemState.InWorld) continue;
+                        var box = g.world.DefOf(i.id).storageBox;
+                        if (box == null || !a.Served.Contains(box)) continue;
+                        var spot = r.StagingSpot(box);
+                        if (!spot.HasValue || (i.owner != "stage:" + box && Vector3.ProjectOnPlane(i.Position - spot.Value, Vector3.up).magnitude > 1.2f)) continue;
+                        var w = a.WhyNot(i.id);
+                        if (w == "") w = "takeable";
+                        else if (Time.time - t0 < 1) Debug.Log($"[armwatch]   #{i.id} {g.world.DefOf(i.id).displayName} for {box} (owner {i.owner}): {w}");
+                        if (w.Contains("(")) w = w.Substring(0, w.IndexOf('(')).Trim().TrimEnd(':');
+                        why[w] = why.GetValueOrDefault(w) + 1;
+                    }
+                    Debug.Log($"[armwatch] {Time.time - t0:0}s {r.displayName} on {a.socket.Label}: working {a.Working}, mode {r.mode}, paused {r.paused}, busy {a.BusyQA}, held {a.heldId}, delivered {r.delivered}, idle '{a.idleReason}' | "
+                              + (why.Count == 0 ? "no parts near its staging spots" : string.Join(", ", why.Select(kv => $"{kv.Key}: {kv.Value}"))));
+                }
+                yield return new WaitForSeconds(15);
+            }
+        }
+
+        IEnumerator PegMigrateChecks(string slot)
+        {
+            RobotWorkbench.QaIgnoreToolRequirements = false;
+            var save = SaveSystem.Read(slot);
+            var hungBefore = Json.Obj(save?.GetValueOrDefault("storage"))?.Where(kv => kv.Key.StartsWith("PB-") && Json.Arr(kv.Value).Count > 0).Select(kv => kv.Key).ToList() ?? new List<string>();
+            var opBefore = Json.Obj(save?.GetValueOrDefault("robots"))?.Where(kv => Json.Bool(Json.Obj(kv.Value), "operational")).Select(kv => kv.Key).ToList() ?? new List<string>();
+            int partsBefore = Json.Int(save, "item_count", -1);
+            // robot parts by where they are (state and owner), discoveries and announced blueprints, from the save itself
+            var rows = Json.Arr(save?.GetValueOrDefault("items")).Select(r => (List<object>)r).ToList();
+            var rowDefs = Json.Arr(save?.GetValueOrDefault("item_defs")).Select(x => (int)(double)x).ToList();
+            string Where(int state, string owner) => (ItemState)state == ItemState.InWorld ? "loose" : $"{(ItemState)state} {owner}";
+            var partsWhereBefore = rows.Where(r => g.db.Get(rowDefs[(int)(double)r[0]])?.IsRobotPart == true)
+                .GroupBy(r => Where((int)(double)r[1], r[2].ToString())).ToDictionary(gr => gr.Key, gr => gr.Count());
+            var discBefore = Json.Arr(Json.Obj(save?.GetValueOrDefault("progress"))?.GetValueOrDefault("discovered")).Select(x => (int)(double)x).Where(d => g.db.Get(d) != null).ToHashSet();
+            var announcedBefore = Json.Arr(Json.Obj(save?.GetValueOrDefault("workbench"))?.GetValueOrDefault("announced")).Select(x => x.ToString()).ToList();
+            g.LoadGame(slot);
+            g.player.enabled = false;
+            yield return Frames(10);
+            var pb = g.builder.pegboard;
+            var tools = g.world.instances.Where(i => g.world.DefOf(i.id).IsPegboardTool).ToList();
+            var defs = g.db.order.Select(g.db.Get).Where(d => d.IsPegboardTool).ToList();
+            Check($"'{slot}' loads: every one of the {pb.cfg.tools.Count} catalogue board tools exists exactly once",
+                  save != null && defs.Count == pb.cfg.tools.Count && tools.Count == pb.cfg.tools.Count && defs.All(d => g.world.IdsOf(d.id).Count() == 1), $"{defs.Count} definitions, {tools.Count} tools");
+            var stillHung = hungBefore.Where(box => g.storage.Stored(box).Count == 1).ToList();
+            Check("every tool that was on the board is still on it (an old set as its holder)", stillHung.Count == hungBefore.Count && pb.Hung == hungBefore.Count,
+                  $"{hungBefore.Count} hung before, {stillHung.Count} still, board {pb.Hung}; holders: SK01 {pb.IsOccupied("SK01")} HX01 {pb.IsOccupied("HX01")} SK03 {pb.IsOccupied("SK03")} SK08 {pb.IsOccupied("SK08")}");
+            var pieces = tools.Where(i => pb.cfg.slotById[g.world.DefOf(i.id).PegSlot].IsChild).ToList();
+            var unreachable = g.UnreachableParts().Select(u => u.id).ToHashSet();
+            Check($"the new set pieces ({pb.cfg.slots.Count(s => s.IsChild)}: sockets, deep sockets, bits, hex keys) lie loose in the world, reachable, not restored",
+                  pieces.Count == pb.cfg.slots.Count(s => s.IsChild) && pieces.All(i => i.state == ItemState.InWorld && !unreachable.Contains(i.id)) && !pieces.Any(i => pb.IsOccupied(g.world.DefOf(i.id).PegSlot)),
+                  $"{pieces.Count} pieces: {string.Join(", ", pieces.GroupBy(i => i.state).Select(gr => $"{gr.Count()} {gr.Key}"))}, {pieces.Count(i => unreachable.Contains(i.id))} unreachable");
+            // the added pieces were never settled (generated spots): they fall into place after loading (playtest 2026-10-28)
+            float fallT = 0;
+            for (; fallT < 15 && g.piles.Settling; fallT += Time.deltaTime) yield return null;
+            var looseTools = tools.Where(i => i.state == ItemState.InWorld).ToList();
+            var floating = looseTools.Where(i => !g.piles.Contact(i.id).supported).ToList();
+            Check($"every loose board tool rests on the floor, a deck or other parts after loading (none floats); the {g.migrationAdded.Count} added parts fell into place",
+                  g.migrationAdded.Count > 0 && floating.Count == 0 && !g.piles.Settling,
+                  $"{looseTools.Count} loose tools, {floating.Count} floating ({string.Join(", ", floating.Take(5).Select(i => $"{g.world.DefOf(i.id).displayName} at {i.Position.y:0.000} m"))}); settled after {fallT:0.0} s; {g.piles.lastInfo}");
+            unreachable = g.UnreachableParts().Select(u => u.id).ToHashSet();
+            Check("no board tool is lost (unreachable) or in a wrong place; the safety net finds nothing", tools.All(i => !unreachable.Contains(i.id)) && g.PegboardGuard(false).Count == 0,
+                  string.Join("; ", g.PegboardGuard(false).Take(4)));
+            var opAfter = g.robots.Where(r => r.Operational).Select(r => r.id).ToList();
+            Check("robots that were operational stay operational, whatever the new blueprint rules say", opBefore.All(opAfter.Contains),
+                  $"before: {string.Join(", ", opBefore)}; after: {string.Join(", ", opAfter)}");
+            var wb = g.workbench;
+            Check("blueprints follow the new rules: a robot needing an incomplete section is locked unless it is already built",
+                  wb.projects.All(p => wb.Operational(p) || wb.ToolsMet(p) || !wb.Unlocked(p)),
+                  string.Join("; ", wb.projects.Select(p => $"{p.id} {(wb.Unlocked(p) ? "open" : "locked")}{(wb.Operational(p) ? " (built)" : "")}")));
+            var partsWhereAfter = g.world.instances.Where(i => g.world.DefOf(i.id).IsRobotPart)
+                .GroupBy(i => Where((int)i.state, i.owner)).ToDictionary(gr => gr.Key, gr => gr.Count());
+            Check("robot parts are where they were: installed on the same robots, in the same pool and stations, carried by the same hands, the rest loose",
+                  partsWhereBefore.Count > 0 && partsWhereBefore.Count == partsWhereAfter.Count && partsWhereBefore.All(kv => partsWhereAfter.GetValueOrDefault(kv.Key) == kv.Value),
+                  string.Join("; ", partsWhereBefore.Keys.Union(partsWhereAfter.Keys).OrderBy(k => k).Select(k => $"{k}: {partsWhereBefore.GetValueOrDefault(k)} -> {partsWhereAfter.GetValueOrDefault(k)}")));
+            Check("discoveries and announced blueprints are kept",
+                  discBefore.IsSubsetOf(g.progress.discovered) && announcedBefore.All(a => wb.ToDict()["announced"] is List<object> l && l.Contains(a)),
+                  $"discovered {discBefore.Count} -> {g.progress.discovered.Count}; announced before: {string.Join(",", announcedBefore)}");
+            var locked = wb.projects.Where(p => !p.crafted && !wb.Unlocked(p)).ToList();
+            var refused = locked.Select(p => (p, why: wb.PartIds(p).Select(id => wb.CanInstall(p, id)).FirstOrDefault() ?? "")).ToList();
+            Check("a locked robot can't be built: the bench refuses its parts with the reason, and it can't be activated",
+                  locked.Count > 0 && refused.All(x => x.why.Contains("Requires") || x.why.Contains("operational first") || x.why.Contains("level")) && locked.All(p => !wb.CanActivate(p)),
+                  string.Join("; ", refused.Take(4).Select(x => $"{x.p.id}: \"{x.why}\"")));
+            var placed = pieces.OrderBy(i => g.world.DefOf(i.id).PegSlot).Select(i => $"{g.world.DefOf(i.id).PegSlot} {i.Position.x:0.0000},{i.Position.y:0.0000},{i.Position.z:0.0000}").ToList();
+            File.WriteAllLines(Path.Combine(outDir, "pegmigrate_pieces.txt"), placed);
+            Debug.Log($"[pegmigrate] {slot}: {partsBefore} saved parts; hung {hungBefore.Count}; operational {string.Join(",", opAfter)}; pieces {string.Join(" | ", placed)}");
+            var mid = pb.transform.TransformPoint(new Vector3(0, pb.cfg.PanelCentre.y, pb.cfg.PanelFront));
+            LookFrom(mid - pb.transform.forward * 3.2f, mid);
+            yield return Frames(3);
+            yield return g.Capture(Path.Combine(outDir, "pegmigrate_board.png"), 1);
         }
 
         IEnumerator RadarPlanChecks()
@@ -1992,10 +2821,10 @@ namespace WorkshopWreckage
             GameSettings.Shadows = 0; GameSettings.Changed(g);
             Check("settings: one changed value makes it Custom; shadows off", GameSettings.Preset == GameSettings.Custom && b.shadowLights.All(l => l.shadows == LightShadows.None), GameSettings.PresetNames[GameSettings.Preset]);
             GameSettings.Brightness = 0.5f; GameSettings.Changed(g);
-            bool bright = Mathf.Approximately(b.colorAdjust.postExposure.value, WorkshopBuilder.Exposure + 0.5f);
+            bool bright = Mathf.Approximately(b.colorAdjust.postExposure.value, WorkshopBuilder.Exposure + 0.5f + GameLook.ExposureOffset);
             GameSettings.ResetDefaults(g);
             bool high = GameSettings.Preset == 2 && urp.renderScale == 1 && urp.msaaSampleCount == 2 && urp.mainLightShadowmapResolution == 4096 && !b.grain.active && b.shafts.All(s => s.activeSelf)
-                        && b.shadowLights.All(l => l.shadows == LightShadows.Soft) && Mathf.Approximately(b.colorAdjust.postExposure.value, WorkshopBuilder.Exposure) && Mathf.Approximately(g.player.cam.fieldOfView, 72);
+                        && b.shadowLights.All(l => l.shadows == LightShadows.Soft) && Mathf.Approximately(b.colorAdjust.postExposure.value, WorkshopBuilder.Exposure + GameLook.ExposureOffset) && Mathf.Approximately(g.player.cam.fieldOfView, 72);
             Check("settings: brightness moves the exposure; defaults put the designed look back", bright && high, $"bright {bright}, high {high}");
             float w0 = Sfx.masterVolume, r0 = Sfx.robotVolume, u0 = Sfx.uiVolume;
             Sfx.masterVolume = 0.9f; Sfx.robotVolume = 0.3f; Sfx.uiVolume = 0.6f;   // distinct values (a muted run has them all at 0)
@@ -2101,26 +2930,27 @@ namespace WorkshopWreckage
                 if (!unloading && cat.carried.Count > load.Count)
                 {
                     load = cat.carried.ToList();
-                    // other parts for the same place it could still take, while it is loading
+                    // other parts for the same area it could still take, while it is loading
                     var box = g.world.DefOf(load[0]).storageBox;
-                    leftAtDeparture = g.world.instances.Count(i => i.state == ItemState.InWorld && g.db.Get(i.defId).storageBox == box && cat.CanPick(i.id) && !g.Covered(i.id));
+                    leftAtDeparture = g.world.instances.Count(i => i.state == ItemState.InWorld && cat.SameArea(box, g.db.Get(i.defId).storageBox) && cat.CanPick(i.id) && !g.Covered(i.id));
                 }
                 else if (!unloading && load.Count > 0 && cat.carried.Count < load.Count)
                 {
                     unloading = true;
-                    runs.Add((load.Count, load.Select(id => g.world.DefOf(id).storageBox).Distinct().Count(), leftAtDeparture));
-                    Debug.Log($"[catertest] run {runs.Count}: {load.Count} part(s) for {string.Join(", ", load.Select(id => g.world.DefOf(id).storageBox).Distinct())}; {leftAtDeparture} more for that place were left");
+                    var first = g.world.DefOf(load[0]).storageBox;
+                    runs.Add((load.Count, load.Count(id => !cat.SameArea(first, g.world.DefOf(id).storageBox)), leftAtDeparture));
+                    Debug.Log($"[catertest] run {runs.Count}: {load.Count} part(s) for {string.Join(", ", load.Select(id => g.world.DefOf(id).storageBox).Distinct())}; {leftAtDeparture} more for that area were left");
                 }
                 else if (unloading && cat.carried.Count == 0) { unloading = false; load.Clear(); }
                 yield return null;
             }
             Time.timeScale = 1f;
             int cap = cat.Capacity;
-            Check("Caterpillarbot: every delivery run carries parts for one destination only", runs.Count >= 3 && runs.All(r => r.boxes == 1),
-                  string.Join("; ", runs.Select(r => $"{r.n} part(s), {r.boxes} place(s)")));
-            Check("Caterpillarbot: it fills its boxes before it drives off (short only when nothing more for that place was left)",
-                  runs.Count >= 3 && runs.All(r => r.n >= cap || r.left == 0) && runs.Count(r => r.n >= 2) * 2 >= runs.Count,
-                  string.Join("; ", runs.Select(r => $"{r.n}/{cap} on board, {r.left} left for that place")));
+            Check("Caterpillarbot: every delivery run carries parts for one area only (the same storage unit, or destinations side by side)", runs.Count >= 3 && runs.All(r => r.boxes == 0),
+                  string.Join("; ", runs.Select(r => $"{r.n} part(s), {r.boxes} outside the area")));
+            Check("Caterpillarbot: it fills all its boxes before it drives off (playtest 2026-10-28: \"still only taking one item at the time\"; short only when nothing more for that area was left)",
+                  runs.Count >= 3 && runs.All(r => r.n >= cap || r.left == 0) && runs.Count(r => r.n >= cap) * 2 > runs.Count,
+                  string.Join("; ", runs.Select(r => $"{r.n}/{cap} on board, {r.left} left for that area")));
         }
 
         IEnumerator TrayChecks()
@@ -2203,6 +3033,7 @@ namespace WorkshopWreckage
                 foreach (var kv in bad.Take(5)) Debug.Log($"[loadkeep] {g.world.DefOf(kv.Key).displayName} #{kv.Key}: {kv.Value.s} {kv.Value.p} -> {now[kv.Key].s} {now[kv.Key].p}");
                 return bad.Count == 0 ? "" : $"{bad.Count} part(s) changed";
             }
+            g.piles.Finish();   // SaveGame lands parts still falling from the new world first; compare with what it saves
             var before = Snap();
             g.SaveGame("autotest_keep");
             g.StartWorld(g.world.seed, null);
@@ -2268,6 +3099,79 @@ namespace WorkshopWreckage
             }
             Debug.Log($"[camshake] on parts at {spot} (debris {g.debris.Under(spot, 0.16f) * 100:0.0} cm): eye range {(hi - lo) * 1000:0.0} mm, largest frame step {step * 1000:0.0} mm");
             Check("standing on loose parts with uneven frames: the eye holds still (under 3 mm)", hi - lo < 0.003f, $"eye range {(hi - lo) * 1000:0.0} mm, largest step {step * 1000:0.0} mm");
+        }
+
+        /// <summary>QA (playtest 2026-10-28): loads a player's save and, at every mat of the bench, reports what the
+        /// part picker offers (and why not), with a screenshot of each.</summary>
+        IEnumerator PickSlot(string slot)
+        {
+            g.LoadGame(slot);
+            g.player.enabled = false;
+            yield return Frames(30);
+            var wb = g.workbench;
+            var ic = g.interaction;
+            var pool = wb.PoolContents();
+            Debug.Log($"[pickslot] pool {pool.Count}: {string.Join(", ", pool.Select(i => g.world.DefOf(i).displayName))}; hands: {string.Join(", ", g.inventory.items.Select(i => g.world.DefOf(i).displayName))}");
+            foreach (int mat in wb.projects.Select(p => p.mat).Distinct().OrderBy(m => m))
+            {
+                var p = wb.ActiveOnMat(mat);
+                var (spot, _) = wb.MatSpot(mat);
+                var stand = spot + wb.Front * 0.75f;
+                LookFrom(new Vector3(stand.x, PlayerController.Eye, stand.z), spot + Vector3.up * 0.05f);
+                yield return Frames(2);
+                ic.UpdateTarget();
+                var info = ic.Describe();
+                var why = pool.Where(id => g.world.DefOf(id).craftingPurpose?.StartsWith("robot:") == true)
+                    .Select(id => $"{g.world.DefOf(id).displayName}: {(wb.CanFit(p, id, out _, false) is string w && w != "" ? w : "fits")}").Take(12);
+                Debug.Log($"[pickslot] mat {mat} {p.name}: aim {ic.targetType}, unlocked {wb.Unlocked(p)} ({wb.LockReason(p)}), operational {wb.Operational(p)}, picker {ic.PickerActive} ({ic.fitChoices.Count}); hud '{info.title}' / '{info.sub}' / '{info.hint}'; {string.Join(" | ", why)}");
+                yield return g.Capture(Path.Combine(outDir, $"pickslot_{p.id}.png"), 2);
+            }
+            Check("picker report written (see [pickslot] in the log)", true, slot);
+        }
+
+        /// <summary>QA (playtest 2026-10-28): the bench screen on a player's save: the blueprints (a robot, the
+        /// Part Radar), then a robot's parts page, stepping a place to another found part (▶).</summary>
+        IEnumerator BenchShots(string slot)
+        {
+            g.LoadGame(slot);
+            g.player.enabled = false;
+            yield return Frames(30);
+            var wb = g.workbench;
+            var p = wb.projects.Where(q => !wb.Operational(q) && wb.Unlocked(q) && !q.crafted)
+                .OrderByDescending(q => wb.Slots(q).Count(x => x.ring.Count > (x.on >= 0 ? 1 : 0))).First();
+            // the parts box on the bench, from where the player stands
+            var pp = wb.PoolPoint;
+            LookFrom(pp + wb.Front * 0.55f + Vector3.up * 0.6f, pp);
+            yield return Frames(4);
+            yield return g.Capture(Path.Combine(outDir, "bench_0_box.png"), 3);
+            g.OpenWorkbench(p.id);
+            yield return Frames(6);
+            bool list = !g.hud.WorkbenchOnParts;
+            yield return g.Capture(Path.Combine(outDir, "bench_1_blueprints.png"), 3);
+            g.hud.WorkbenchChoose(p.id);
+            yield return Frames(6);
+            yield return g.Capture(Path.Combine(outDir, "bench_2_parts.png"), 3);
+            var slots = wb.Slots(p);
+            var step = slots.FirstOrDefault(x => x.ring.Count > (x.on >= 0 ? 1 : 0));
+            string before = step.on >= 0 ? g.world.DefOf(step.on).displayName : "-", after = "-";
+            bool changed = false;
+            if (step.ring != null)
+            {
+                int n = step.ring.Count, idx = step.ring.IndexOf(step.on);
+                int target = step.on >= 0 ? step.ring[(idx + 1) % n] : step.ring[0];
+                var (ok, text) = wb.Fit(p, target, true);
+                yield return Frames(6);
+                var now = wb.Slots(p).First(x => x.key == step.key);
+                after = now.on >= 0 ? g.world.DefOf(now.on).displayName : "-";
+                changed = ok && now.on == target && (step.on < 0 || g.world.instances[step.on].state == ItemState.Stored);
+                Debug.Log($"[benchshots] {p.name} {step.key}: {before} -> {after}  ({text})");
+                yield return g.Capture(Path.Combine(outDir, "bench_3_stepped.png"), 3);
+            }
+            Debug.Log($"[benchshots] radar: plans {g.radar.HasPlans}, missing {string.Join(", ", g.radar.MissingNames())}  ->  '{g.radar.WhyNotBuilt()}'");
+            Debug.Log($"[benchshots] {p.name}: {string.Join(" | ", slots.Select(x => $"{x.key}: on {(x.on >= 0 ? g.world.DefOf(x.on).displayName : "-")}, {x.ring.Count} in ring"))}");
+            Check("the bench opens on its blueprints; Build shows the parts; ▶ fits the next found part at once (the old one back in the pool)",
+                  PartsIntact(out var d) && list && changed, $"{p.name}, {step.key}: {before} → {after}; {d}");
+            g.SetState("play");
         }
 
         IEnumerator LoadSlotChecks(string slot)
@@ -3216,7 +4120,7 @@ namespace WorkshopWreckage
 
             // a player-only part right in front of Retrobot: it is never picked up, Retrobot sorts on
             var retro = g.retrobot;
-            var big = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && !g.world.DefOf(i.id).robotCarry && !i.owner.StartsWith("stage:")
+            var big = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.robotReserved.Contains(i.id) && !g.world.DefOf(i.id).robotCarry && !g.world.DefOf(i.id).IsPegboardTool && !i.owner.StartsWith("stage:")
                                                   && ItemDatabase.Extents(g.world.DefOf(i.id))[0] <= retro.MaxItemSize)   // small enough for its claws: only the 80 % rule stops it
                 .OrderBy(i => (i.Position - retro.transform.position).sqrMagnitude).FirstOrDefault();
             if (big != null && retro.Active)
@@ -3364,7 +4268,7 @@ namespace WorkshopWreckage
 
         string Snapshot()
         {
-            var parts = g.world.instances.Where(i => i.state != ItemState.InWorld || i.moved)
+            var parts = g.world.instances
                 .Select(i => $"{i.id}:{(int)i.state}:{i.owner}:{i.Position.x:0.000},{i.Position.y:0.000},{i.Position.z:0.000}");
             return string.Join("|", parts) + $"#{g.progress.sortedTotal}#{string.Join(",", g.inventory.items)}#{g.progress.discovered.Count}";
         }

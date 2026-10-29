@@ -11,6 +11,7 @@ namespace WorkshopWreckage
     public class PileSurface
     {
         const float MaxSlope = 0.7f, Repose = 0.95f;
+        const float ToolSlope = 0.45f;   // long, flat tools lie nearly level on a pile (about 24 degrees at most), never propped up
         public readonly Rect rect;
         public readonly float baseY, cell;
         readonly int w, h;
@@ -93,6 +94,12 @@ namespace WorkshopWreckage
         {
             at = SettlePoint(at, Mathf.Max(half.x, half.z) * 0.8f);
             if (Sample(at) > maxY) return null;
+            if (def.restMode == RestMode.Side)   // local Z up: placed as a flat part of height half.z, then turned onto that face
+            {
+                var m = PlaceFlat(new Vector3(half.x, half.z, half.y), at, yaw, scale, maxY, ToolSlope);
+                // mostly the front (-Z, the side that faces the room on the board) up, now and then the back
+                return m == null ? null : m.Value * Matrix4x4.Rotate(Quaternion.Euler(roll < Mathf.PI * 1.5f ? 90 : -90, 0, 0));
+            }
             return def.restMode == RestMode.Long ? PlaceLong(half, at, yaw, roll, scale, maxY) : PlaceFlat(half, at, yaw, scale, maxY);
         }
 
@@ -139,7 +146,7 @@ namespace WorkshopWreckage
             return Shared.Matrix(bx * scale, axis * scale, bz * scale, center);
         }
 
-        Matrix4x4? PlaceFlat(Vector3 half, Vector2 at, float yaw, float scale, float maxY)
+        Matrix4x4? PlaceFlat(Vector3 half, Vector2 at, float yaw, float scale, float maxY, float maxSlope = MaxSlope)
         {
             float R = Mathf.Max(half.x, half.z), T = half.y;
             if (!IsFree(at, R)) return null;
@@ -151,8 +158,10 @@ namespace WorkshopWreckage
                 offs[k] = k == 0 ? Vector2.zero : new Vector2(Mathf.Cos(Mathf.PI * 2 * (k - 1) / 8), Mathf.Sin(Mathf.PI * 2 * (k - 1) / 8)) * rr;
                 hs[k] = Sample(at + offs[k]);
             }
-            float gx = Mathf.Clamp((hs[1] - hs[5]) / (2 * rr), -MaxSlope, MaxSlope);
-            float gz = Mathf.Clamp((hs[3] - hs[7]) / (2 * rr), -MaxSlope, MaxSlope);
+            float gx = Mathf.Clamp((hs[1] - hs[5]) / (2 * rr), -maxSlope, maxSlope);
+            float gz = Mathf.Clamp((hs[3] - hs[7]) / (2 * rr), -maxSlope, maxSlope);
+            float gm = Mathf.Sqrt(gx * gx + gz * gz);
+            if (maxSlope < MaxSlope && gm > maxSlope) { gx *= maxSlope / gm; gz *= maxSlope / gm; }   // tools: the whole tilt, not each axis
             float c = float.NegativeInfinity;
             for (int k = 0; k < 9; k++) c = Mathf.Max(c, hs[k] - gx * offs[k].x - gz * offs[k].y);
             var normal = new Vector3(-gx, 1, -gz).normalized;
@@ -311,6 +320,9 @@ namespace WorkshopWreckage
             PlaceToolItems(world, robotIds.Where(id => world.DefOf(id).IsToolItem).ToList(), surfaces, layout, floorPile, seed);
             PlaceToolItems(world, pegIds, surfaces, layout, floorPile, seed, "pegboard:");
             foreach (var id in pegIds) world.instances[id].zone = -1;   // the board's tools earn no zone-restored XP
+            // the tools lie on their widest face: their local Z (the thinnest axis) within 30 degrees of vertical
+            int flat = pegIds.Count(id => Mathf.Abs(((Vector3)world.instances[id].transform.GetColumn(2)).normalized.y) > 0.86f);
+            Debug.Log($"[worldgen] pegboard tools lying on their widest face: {flat}/{pegIds.Count}");
             lastGenerationMs = sw.Elapsed.TotalMilliseconds;
             return errors.Count == 0 ? world : null;
         }

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -46,6 +47,14 @@ namespace WorkshopWreckage.Pegboard
         public bool IsOccupied(string slot) => _installed.ContainsKey(slot);
         public IEnumerable<string> Occupied => _installed.Keys;
 
+        // sections (docs/PEGBOARD.md "Sections"): counts come from the slots, never from fixed numbers
+        public int SectionTotal(string section) => cfg.sectionById.TryGetValue(section, out var s) ? s.slots.Count : 0;
+        public int SectionHung(string section) => cfg.sectionById.TryGetValue(section, out var s) ? s.slots.Count(_installed.ContainsKey) : 0;
+        public bool SectionComplete(string section) => SectionTotal(section) > 0 && SectionHung(section) == SectionTotal(section);
+        public int SectionsComplete => cfg.sections.Count(s => SectionComplete(s.id));
+        /// <summary>A child slot whose holder is not on the board yet: its tool can't go up (the holder first).</summary>
+        public bool WaitsForHolder(string slot) => cfg.slotById.TryGetValue(slot, out var s) && s.IsChild && !IsOccupied(s.parent);
+
         /// <summary>World matrix of a tool hung in a slot (scale included).</summary>
         public Matrix4x4 SlotWorld(string slot) => transform.localToWorldMatrix * _slotLocal[slot];
         public Vector3 SlotCentre(string slot) => SlotWorld(slot).GetColumn(3);
@@ -84,14 +93,24 @@ namespace WorkshopWreckage.Pegboard
             if (!_slotLocal.ContainsKey(slot)) return;
             _installed[slot] = def;
             _dirty = true;
+            if (cfg.SectionOf(slot) is PegboardConfig.BoardSection sec) _signDirty.Add(sec.id);
+        }
+
+        /// <summary>The section's sign pops once (a section just completed, or the whole board).</summary>
+        public void Celebrate(string section)
+        {
+            if (section == null) foreach (var s in cfg.sections) _pop[s.id] = Time.time;
+            else _pop[section] = Time.time;
         }
 
         public void Remove(string slot)
         {
-            if (_installed.Remove(slot)) _dirty = true;
+            if (!_installed.Remove(slot)) return;
+            _dirty = true;
+            if (cfg.SectionOf(slot) is PegboardConfig.BoardSection sec) _signDirty.Add(sec.id);
         }
 
-        public void Clear() { _installed.Clear(); _dirty = true; }
+        public void Clear() { _installed.Clear(); _dirty = true; foreach (var s in cfg.sections) _signDirty.Add(s.id); }
 
         /// <summary>QA / preview: hang a deterministic fraction of the tools (0..1), the rest left empty.</summary>
         public void PreviewFill(float frac)
@@ -101,12 +120,13 @@ namespace WorkshopWreckage.Pegboard
             var order = new List<PegboardConfig.Slot>(cfg.slots);
             order.Sort((a, b) => Hash(a.id).CompareTo(Hash(b.id)));
             int n = Mathf.RoundToInt(Mathf.Clamp01(frac) * order.Count);
-            for (int i = 0; i < n; i++)
+            void Hang(PegboardConfig.Slot s)
             {
-                var t = cfg.toolById[order[i].tool];
-                var def = ItemDefinition.FromDict(cfg.ItemDict(t), 1, errors);
-                if (def != null) Install(order[i].id, def);
+                if (s.IsChild && !IsOccupied(s.parent)) Hang(cfg.slotById[s.parent]);   // a piece needs its holder
+                var def = ItemDefinition.FromDict(cfg.ItemDict(cfg.toolById[s.tool]), 1, errors);
+                if (def != null) Install(s.id, def);
             }
+            for (int i = 0; i < n; i++) Hang(order[i]);
             foreach (var e in errors) Debug.LogWarning("[pegboard] " + e);
         }
 
@@ -139,6 +159,7 @@ namespace WorkshopWreckage.Pegboard
 
         void Update()
         {
+            UpdateSigns();
             if (_highlightRenderer != null && _highlightMat != null)
             {
                 float hz = cfg.F("highlight", "pulse_hz", 1.6f), k = cfg.F("highlight", "intensity", 0.55f);
@@ -172,7 +193,9 @@ namespace WorkshopWreckage.Pegboard
             LightBars(geo);
             Hooks(geo);
             Racks(geo);
+            SectionFrames(geo);
             geo.Build(transform, "Pegboard", true, layer);
+            BuildSigns();
             _toolsRoot = new GameObject("HungTools") { layer = layer }.transform;
             _toolsRoot.SetParent(transform, false);
             _highlightRoot = new GameObject("Highlight") { layer = layer }.transform;
@@ -187,12 +210,13 @@ namespace WorkshopWreckage.Pegboard
             var (ox, oy) = PegboardMaterials.HoleOrigin(cfg);
             var pc = cfg.PanelCentre;
             float left = pc.x - cfg.PanelW / 2, bottom = pc.y - cfg.PanelH / 2;
-            foreach (var s in cfg.slots)
+            // holders and single tools first (snapped to the holes), then each set's pieces on their holder's places
+            foreach (var s in cfg.slots.Where(x => !x.IsChild).Concat(cfg.slots.Where(x => x.IsChild)))
             {
                 var t = cfg.toolById[s.tool];
-                var m = cfg.SlotMatrix(s, t.size);
+                var m = s.IsChild ? cfg.ChildMatrix(s, _slotLocal[s.parent]) : cfg.SlotMatrix(s, t.size);
                 var hooks = ToolFactory.Hooks(t.GeometryKey);
-                if (hooks.Count > 0)
+                if (hooks.Count > 0 && !s.IsChild)
                 {
                     var h = m.MultiplyPoint3x4(hooks[0].at);
                     float hx = left + ox + Mathf.Round((h.x - left - ox) / pitch) * pitch;
@@ -237,7 +261,7 @@ namespace WorkshopWreckage.Pegboard
             var m = _slotLocal[slot];
             var src = e.mesh.vertices;
             var verts = new List<Vector3>(src.Length);
-            float z = cfg.PanelFront - lift;
+            float z = (cfg.slotById[slot].IsChild ? _slotBounds[slot].max.z : cfg.PanelFront) - lift;
             foreach (var p in src) { var q = m.MultiplyPoint3x4(p); verts.Add(new Vector3(q.x, q.y, z)); }
             var tris = new List<int>();
             for (int sm = 0; sm < e.mesh.subMeshCount; sm++)
@@ -478,12 +502,13 @@ namespace WorkshopWreckage.Pegboard
             foreach (var o in Json.Arr(cfg.raw.GetValueOrDefault("racks"))) foreach (var s in Json.Arr(Json.Obj(o).GetValueOrDefault("slots"))) inRack.Add(s as string);
             foreach (var s in cfg.slots)
             {
-                if (inRack.Contains(s.id)) continue;
+                if (inRack.Contains(s.id) || s.IsChild) continue;   // a set's pieces hang on their holder, not on pegs
                 var t = cfg.toolById[s.tool];
                 var m = _slotLocal[s.id];
                 float toolFront = _slotBounds[s.id].min.z;
                 foreach (var (at, kind) in ToolFactory.Hooks(t.GeometryKey))
                 {
+                    if (kind == ToolFactory.AnchorKind) continue;   // a holder's places for its pieces
                     var p = m.MultiplyPoint3x4(at);
                     var a = new Vector3(p.x, p.y, cfg.PanelBack);
                     float zEnd = toolFront - (kind == 2 ? 0.006f : 0.012f);
@@ -539,6 +564,185 @@ namespace WorkshopWreckage.Pegboard
                 }
             }
         }
+
+        // ------------------------------------------------------------------ sections: signs and dividers
+
+        /// <summary>Height of the sign strip along the top of the panel (no tool goes there).</summary>
+        public float SignStrip => cfg.F("section_signs", "strip", 0.1f);
+
+        /// <summary>Thin painted steel dividers down the panel between neighbouring sections, and a ledge under each
+        /// sign: the sections read as areas of their own.</summary>
+        void SectionFrames(PegMesh g)
+        {
+            if (cfg.sections.Count == 0) return;
+            var pc = cfg.PanelCentre;
+            float top = pc.y + cfg.PanelH / 2, bottom = pc.y - cfg.PanelH / 2, z = cfg.PanelFront;
+            float w = cfg.F("section_signs", "divider_width", 0.012f);
+            var xs = new SortedSet<float>();
+            foreach (var s in cfg.sections) { xs.Add(s.x0); xs.Add(s.x1); }
+            foreach (float x in xs)
+            {
+                if (x <= pc.x - cfg.PanelW / 2 + 0.01f || x >= pc.x + cfg.PanelW / 2 - 0.01f) continue;   // the frame is the outer edge
+                g.Box(mats.rack, new Vector3(x, (top + bottom) / 2, z - 0.004f), new Vector3(w, top - bottom, 0.008f), 0, false);
+                g.Bolt(mats.bolt, new Vector3(x, top - 0.03f, z - 0.009f), 0.006f);
+                g.Bolt(mats.bolt, new Vector3(x, bottom + 0.03f, z - 0.009f), 0.006f);
+            }
+            foreach (var s in cfg.sections)
+            {
+                float y = top - SignStrip;
+                g.Box(mats.rack, new Vector3((s.x0 + s.x1) / 2, y, z - 0.006f), new Vector3(s.x1 - s.x0 - w, 0.008f, 0.012f), 0, false);   // the ledge
+                var (c, size) = SignRect(s);
+                g.Box(mats.frameDark, new Vector3(c.x, c.y, z - 0.005f), new Vector3(size.x + 0.02f, size.y + 0.016f, 0.01f), 0, false);   // the plaque's backing
+                foreach (float sx in new[] { -1f, 1f }) g.Bolt(mats.bolt, new Vector3(c.x + sx * (size.x / 2 + 0.004f), c.y, z - 0.011f), 0.005f);
+            }
+        }
+
+        (Vector2 centre, Vector2 size) SignRect(PegboardConfig.BoardSection s)
+        {
+            var pc = cfg.PanelCentre;
+            float top = pc.y + cfg.PanelH / 2, w = Mathf.Min(s.x1 - s.x0 - 0.07f, cfg.F("section_signs", "max_width", 0.8f)), h = SignStrip - 0.03f;
+            return (new Vector2((s.x0 + s.x1) / 2, top - SignStrip / 2 - 0.004f), new Vector2(w, h));
+        }
+
+        class Sign { public Transform root; public MeshRenderer name, count; public string text; }
+        readonly Dictionary<string, Sign> _signs = new();
+        readonly HashSet<string> _signDirty = new();
+        readonly Dictionary<string, float> _pop = new();
+
+        /// <summary>A workshop sign per section: the section's name, and under it how many of its tools are back
+        /// ("7 / 10 TOOLS RESTORED", "COMPLETE" in green once every one is).</summary>
+        void BuildSigns()
+        {
+            foreach (var sg in _signs.Values) { DestroyTex(sg.name); DestroyTex(sg.count); }
+            _signs.Clear();
+            foreach (var s in cfg.sections)
+            {
+                var (c, size) = SignRect(s);
+                var root = new GameObject("Sign_" + s.id) { layer = layer }.transform;
+                root.SetParent(transform, false);
+                root.localPosition = new Vector3(c.x, c.y, cfg.PanelFront - 0.0105f);
+                var ink = cfg.C("section_signs", "ink", new Color(0.93f, 0.86f, 0.7f));
+                var bg = cfg.C("section_signs", "plate", new Color(0.16f, 0.12f, 0.09f));
+                var sg = new Sign { root = root };
+                sg.name = SignQuad(root, "name", new Vector3(0, size.y * 0.2f, 0), new Vector2(size.x, size.y * 0.6f),
+                    TextAtlas.RenderSingle(s.name.ToUpperInvariant(), 1024, Mathf.RoundToInt(1024 * size.y * 0.6f / size.x), bg, ink, 46, true));
+                sg.count = SignQuad(root, "count", new Vector3(0, -size.y * 0.3f, 0), new Vector2(size.x, size.y * 0.4f), null);
+                _signs[s.id] = sg;
+                _signDirty.Add(s.id);
+            }
+        }
+
+        MeshRenderer SignQuad(Transform root, string name, Vector3 at, Vector2 size, Texture tex)
+        {
+            var go = new GameObject(name) { layer = layer };
+            go.transform.SetParent(root, false);
+            go.transform.localPosition = at;
+            var mesh = new Mesh { name = "peg_sign" };
+            float hx = size.x / 2, hy = size.y / 2;
+            mesh.SetVertices(new[] { new Vector3(-hx, -hy, 0), new Vector3(hx, -hy, 0), new Vector3(hx, hy, 0), new Vector3(-hx, hy, 0) });
+            mesh.SetNormals(new[] { Vector3.back, Vector3.back, Vector3.back, Vector3.back });
+            mesh.SetUVs(0, new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) });
+            mesh.SetTriangles(new[] { 0, 2, 1, 0, 3, 2 }, 0);
+            mesh.RecalculateBounds();
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var r = go.AddComponent<MeshRenderer>();
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            if (tex != null) r.sharedMaterial = EnvMaterials.Atlas(tex);
+            return r;
+        }
+
+        static void DestroyTex(MeshRenderer r)
+        {
+            if (r == null || r.sharedMaterial == null) return;
+            var t = r.sharedMaterial.GetTexture("_MainTex");
+            if (t is RenderTexture rt) rt.Release();
+            if (t != null) Destroy(t);
+            Destroy(r.sharedMaterial);
+        }
+
+        void UpdateSigns()
+        {
+            foreach (var id in _signDirty)
+            {
+                if (!_signs.TryGetValue(id, out var sg)) continue;
+                int hung = SectionHung(id), total = SectionTotal(id);
+                bool done = hung == total && total > 0;
+                string text = done ? cfg.S("section_signs", "complete_text", "COMPLETE  ·  {total} TOOLS").Replace("{total}", total.ToString())
+                                   : cfg.S("section_signs", "count_text", "{hung} / {total} TOOLS RESTORED").Replace("{hung}", hung.ToString()).Replace("{total}", total.ToString());
+                if (text == sg.text) continue;
+                sg.text = text;
+                DestroyTex(sg.count);
+                var ink = done ? cfg.C("section_signs", "complete_ink", new Color(0.55f, 0.95f, 0.45f)) : cfg.C("section_signs", "count_ink", new Color(0.82f, 0.7f, 0.5f));
+                var bg = cfg.C("section_signs", "plate", new Color(0.16f, 0.12f, 0.09f));
+                var size = sg.count.GetComponent<MeshFilter>().sharedMesh.bounds.size;
+                sg.count.sharedMaterial = EnvMaterials.Atlas(TextAtlas.RenderSingle(text, 1024, Mathf.RoundToInt(1024 * size.y / size.x), bg, ink, 34, true));
+            }
+            _signDirty.Clear();
+            // the celebration: the sign swells and settles (0.8 s), nothing more
+            foreach (var kv in _signs)
+            {
+                float k = _pop.TryGetValue(kv.Key, out var t0) ? (Time.time - t0) / 0.8f : 1;
+                kv.Value.root.localScale = Vector3.one * (k < 1 ? 1 + 0.12f * Mathf.Sin(k * Mathf.PI) : 1);
+            }
+        }
+
+        /// <summary>QA / layout: problems with where the slots are: two tools' outlines overlapping (a holder and its
+        /// own pieces excepted), a tool off the panel, in the sign strip, or outside its section.</summary>
+        public List<string> LayoutProblems(float tolerance = 0.004f)
+        {
+            var o = new List<string>();
+            var pc = cfg.PanelCentre;
+            float l = pc.x - cfg.PanelW / 2, r = pc.x + cfg.PanelW / 2, b = pc.y - cfg.PanelH / 2, t = pc.y + cfg.PanelH / 2 - (cfg.sections.Count > 0 ? SignStrip : 0);
+            var ids = cfg.slots.Select(s => s.id).ToList();
+            for (int i = 0; i < ids.Count; i++)
+            {
+                var a = _slotBounds[ids[i]];
+                if (a.min.x < l - tolerance || a.max.x > r + tolerance || a.min.y < b - tolerance || a.max.y > t + tolerance)
+                    o.Add($"{ids[i]} leaves the panel or reaches into the signs ({a.min.x:0.000}..{a.max.x:0.000}, {a.min.y:0.000}..{a.max.y:0.000})");
+                if (cfg.SectionOf(ids[i]) is PegboardConfig.BoardSection sec && (a.min.x < sec.x0 - tolerance || a.max.x > sec.x1 + tolerance))
+                    o.Add($"{ids[i]} reaches out of its section {sec.id} ({a.min.x:0.000}..{a.max.x:0.000} vs {sec.x0}..{sec.x1})");
+                for (int j = i + 1; j < ids.Count; j++)
+                {
+                    var si = cfg.slotById[ids[i]]; var sj = cfg.slotById[ids[j]];
+                    if (si.parent == sj.id || sj.parent == si.id) continue;
+                    var c = _slotBounds[ids[j]];
+                    float ox = Mathf.Min(a.max.x, c.max.x) - Mathf.Max(a.min.x, c.min.x), oy = Mathf.Min(a.max.y, c.max.y) - Mathf.Max(a.min.y, c.min.y);
+                    if (ox > tolerance && oy > tolerance) o.Add($"{ids[i]} and {ids[j]} overlap ({ox * 100:0.0} x {oy * 100:0.0} cm)");
+                }
+            }
+            return o;
+        }
+
+        /// <summary>--pegdump: every slot's outline on the board and every model's unit bounds and hooks (JSON), for
+        /// laying the board out (tools/peg_layout.py).</summary>
+        public string LayoutDump()
+        {
+            var slotsOut = new Dictionary<string, object>();
+            foreach (var s in cfg.slots)
+            {
+                var bb = _slotBounds[s.id];
+                slotsOut[s.id] = new List<object> { (double)bb.min.x, (double)bb.min.y, (double)bb.max.x, (double)bb.max.y, (double)(_slotLocal[s.id].GetColumn(3).x), (double)(_slotLocal[s.id].GetColumn(3).y) };
+            }
+            var models = new Dictionary<string, object>();
+            foreach (var key in ToolFactory.Keys)
+            {
+                var ub = MeshLibrary.UnitBounds(key);
+                models[key] = new Dictionary<string, object>
+                {
+                    ["c"] = new List<object> { (double)ub.center.x, (double)ub.center.y, (double)ub.center.z },
+                    ["e"] = new List<object> { (double)ub.extents.x, (double)ub.extents.y, (double)ub.extents.z },
+                    ["hooks"] = ToolFactory.Hooks(key).Select(h => (object)new List<object> { (double)h.at.x, (double)h.at.y, (double)h.at.z, (double)h.kind }).ToList(),
+                };
+            }
+            return Json.Write(new Dictionary<string, object>
+            {
+                ["small_scale"] = (double)cfg.smallScale, ["panel"] = new List<object> { (double)cfg.PanelW, (double)cfg.PanelH, (double)cfg.PanelCentre.y, (double)SignStrip },
+                ["slots"] = slotsOut, ["models"] = models, ["problems"] = LayoutProblems().Select(x => (object)x).ToList(), ["errors"] = cfg.errors.Select(x => (object)x).ToList(),
+            });
+        }
+
+        /// <summary>QA: the text on a section's count line as last drawn.</summary>
+        public string SignText(string section) => _signs.TryGetValue(section, out var s) ? s.text : null;
 
         // ------------------------------------------------------------------ hung tools
 

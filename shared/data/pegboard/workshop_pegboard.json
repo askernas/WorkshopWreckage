@@ -122,23 +122,85 @@
    ]
   }
  ],
- "delivery": {
-  "robots": [
-   "spiderbot",
-   "hoverbot"
-  ],
-  "spots": 6,
-  "area": [
-   -2.7,
-   -1.5
-  ],
-  "spacing": 0.24,
-  "fallback": "skip"
+ "sections": [
+  {
+   "id": "spanners",
+   "name": "Spanners & Wrenches",
+   "x": [
+    -2.89,
+    -1.442
+   ]
+  },
+  {
+   "id": "screwdrivers",
+   "name": "Screwdrivers",
+   "x": [
+    -1.442,
+    -0.743
+   ]
+  },
+  {
+   "id": "pliers",
+   "name": "Pliers & Clamps",
+   "x": [
+    -0.743,
+    0.157
+   ]
+  },
+  {
+   "id": "hammers",
+   "name": "Hammers, Chisels & Saws",
+   "x": [
+    0.157,
+    1.543
+   ]
+  },
+  {
+   "id": "precision",
+   "name": "Precision & Measuring",
+   "x": [
+    1.543,
+    2.102
+   ]
+  },
+  {
+   "id": "sockets",
+   "name": "Sockets & Keys",
+   "x": [
+    2.102,
+    2.89
+   ]
+  }
+ ],
+ "sections_note": "Coherent areas of the board, left to right: a sign over each (name, tools restored), a divider between them. Counts come from the slots in tool_slots.json. Robot blueprints that need a section: shared/data/unlocks.json robot_pegboard.",
+ "section_signs": {
+  "strip": 0.1,
+  "max_width": 0.8,
+  "divider_width": 0.012,
+  "plate": "#2a1f17",
+  "ink": "#efdcb4",
+  "count_ink": "#d2b380",
+  "complete_ink": "#8cf072",
+  "count_text": "{hung} / {total} TOOLS RESTORED",
+  "complete_text": "COMPLETE  ·  {total} TOOLS",
+  "complete_toast": "{section} COMPLETE!",
+  "full_title": "TOOL WALL COMPLETE!",
+  "full_text": "Every tool back where it belongs. The inventor would almost be impressed."
+ },
+ "small_tools": {
+  "scale": 1.5,
+  "options": {
+   "A": 1.0,
+   "B": 1.5,
+   "C": 2.0
+  },
+  "note": "Size factor of the split sets (socket and hex key holders and their pieces) over their real size. A = real size, B = 1.5x, C = 2x (tested 2026-10-28, see docs/PEGBOARD.md); --smallscale=<f> overrides it for a test run."
  },
  "completion": {
   "counts_toward_restored": true,
   "xp": false,
-  "levels": false
+  "levels": false,
+  "note": "Hanging tools never gives XP or levels. Completing a section can unlock robot blueprints (unlocks.json robot_pegboard); the full board is its own celebration, no reward."
  },
  "racks_note": "a rack is a steel strip with one hole per tool, built along the hook points of its slots (the tools stand in it)"
 }

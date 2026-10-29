@@ -19,6 +19,13 @@ namespace WorkshopWreckage
         RenderTexture _previewRT;
         string _robotSel;
         float _wbRefreshT, _robotRefreshT;
+        // the bench screen (playtest 2026-10-28): first the blueprints (pick one: its stats and how many of its
+        // parts are found), then the chosen one's parts, stepped through per place with the preview updating
+        bool _wbParts, _wbRadarSel;
+        RectTransform _wbPartsRow, _wbSlotRow, _wbSlotsA, _wbSlotsB;
+
+        /// <summary>The bench screen opens on its blueprints.</summary>
+        public void WorkbenchFromStart() { _wbParts = false; _wbRadarSel = false; }
 
         static string Hex(Color c) => "#" + ColorUtility.ToHtmlStringRGB(c);
         static string Cap(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s.Substring(1);
@@ -62,13 +69,17 @@ namespace WorkshopWreckage
             _wbPreview = pv.GetComponent<RawImage>();
             var right = Col(mid, 1010);
             _wbHeader = Block(right, 18, 120);
-            var parts = Row(right, 310, 12);
-            _wbPartsA = Block(Col(parts, 500), 16, 310);
-            _wbPartsB = Block(Col(parts, 500), 16, 310);
+            _wbPartsRow = Row(right, 310, 12);
+            _wbPartsA = Block(Col(_wbPartsRow, 500), 16, 310);
+            _wbPartsB = Block(Col(_wbPartsRow, 500), 16, 310);
+            _wbSlotRow = Row(right, 356, 12);
+            _wbSlotsA = Col(_wbSlotRow, 500);
+            _wbSlotsB = Col(_wbSlotRow, 500);
+            foreach (var c in new[] { _wbSlotsA, _wbSlotsB }) c.GetComponent<VerticalLayoutGroup>().spacing = 3;
             _wbActions = Row(wb, 46, 10);
             _wbSpares = Row(wb, 36, 8);   // modules taken off built robots, for this assembly
             _wbRadar = Row(wb, 36, 10);   // the Part Radar: its parts in the pool, the plans, Build
-            Para(wb, "Robot parts are delivered by hand: carry them here and click the bench.  [F] at the bench: pick the robot up and turn it in your hands.", 14, Muted, 22);
+            Para(wb, "Robot parts are delivered by hand: click the bench and what you carry goes into the parts box.  Pick a blueprint, then Build to step through the found parts for each place (◀ ▶) and Apply them.", 14, Muted, 22);
 
             var rs = Screen("robots", 1500);
             Title(rs, "ROBOT MANAGEMENT", 34);
@@ -105,7 +116,39 @@ namespace WorkshopWreckage
         }
 
         /// <summary>QA: the workbench screen's buttons now on screen (unchanged ones must survive a refresh).</summary>
-        public List<GameObject> WorkbenchButtons() => _wbTabs.Cast<Transform>().Concat(_wbActions.Cast<Transform>()).Concat(_wbSpares.Cast<Transform>()).Where(t => t.gameObject.activeSelf).Select(t => t.gameObject).ToList();
+        public List<GameObject> WorkbenchButtons() => _wbTabs.Cast<Transform>().Concat(_wbActions.Cast<Transform>()).Concat(_wbSpares.Cast<Transform>())
+            .Concat(_wbSlotsA.Cast<Transform>()).Concat(_wbSlotsB.Cast<Transform>()).Where(t => t.gameObject.activeSelf).Select(t => t.gameObject).ToList();
+
+        /// <summary>QA: the bench screen's page and the arrows of a place on the parts page.</summary>
+        public bool WorkbenchOnParts => _wbParts;
+        public void WorkbenchChoose(string projectId) { _g.workbench.selected = projectId; _wbRadarSel = false; _wbParts = true; RefreshWorkbench(); }
+
+        /// <summary>A robot type's numbers and character from robots.json, for its blueprint.</summary>
+        static (string stats, string traits) BlueprintText(RobotWorkbench.Project p)
+        {
+            if (!Robot.AllConfig().TryGetValue(p.type, out var o) || Json.Obj(o) is not Dictionary<string, object> c) return ("", "");
+            var lim = Json.Obj(c.GetValueOrDefault("limits"));
+            string Up(string k, double v, double scale, string unit) => Json.Num(lim, k) > v + 1e-6 ? $"  <color={Hex(Muted)}>(upgradable to {Json.Num(lim, k) * scale:0.##}{unit})</color>" : "";
+            var lines = new List<string>();
+            string loco = Json.Str(c, "locomotion");
+            double walk = Json.Num(c, "walk_speed"), cap = Json.Num(c, "capacity", 1), reach = Json.Num(c, "reach_height"), bat = Json.Num(c, "battery_minutes");
+            if (loco != "fixed")
+            {
+                lines.Add($"<b>Moves</b>  {Cap(loco)}{(Json.Bool(c, "can_fly") ? ", flies" : "")}{(Json.Bool(c, "can_climb") ? ", climbs" : "")}  ·  {walk:0.0#} m/s" + Up("walk_speed", walk, 1, " m/s"));
+                lines.Add($"<b>Carries</b>  {cap:0} part{(cap == 1 ? "" : "s")} at a time" + Up("capacity", cap, 1, ""));
+                lines.Add($"<b>Reaches</b>  {reach * 100:0} cm high" + Up("reach_height", reach, 100, " cm"));
+                lines.Add($"<b>Largest part</b>  {Json.Num(c, "max_item_size") * 100:0} cm");
+            }
+            if (bat > 0) lines.Add($"<b>Battery</b>  {bat:0.#} min, recharges in {Json.Num(c, "charge_minutes") * 60:0} s");
+            IEnumerable<string> L(string k) => c.GetValueOrDefault(k) is List<object> l ? l.Select(x => x.ToString()) : c.GetValueOrDefault(k) is string t ? new[] { t } : Enumerable.Empty<string>();
+            var traits = new List<string>();
+            var good = L("strengths").ToList();
+            if (good.Count > 0) { traits.Add("<b>Strengths</b>"); traits.AddRange(good.Select(x => $"<color={Hex(GoodC)}>+</color> {x}")); }
+            var bad = L("limitations").ToList();
+            if (bad.Count > 0) { traits.Add("<b>Limitations</b>"); traits.AddRange(bad.Select(x => $"<color={Hex(BadC)}>−</color> {x}")); }
+            if (Json.Str(c, "personality") is string pers && pers != "") traits.Add($"<i><color={Hex(Muted)}>{pers}</color></i>");
+            return (string.Join("\n", lines), string.Join("\n", traits));
+        }
 
         /// <summary>The Part Radar line on the bench screen: which of its parts are in the pool, the plans, and Build.</summary>
         void RefreshRadarRow()
@@ -142,110 +185,240 @@ namespace WorkshopWreckage
             var wb = _g.workbench;
             if (wb == null || _g.world == null) return;
             var p = wb.P(wb.selected) ?? wb.projects[0];
+            var radar = _g.radar;
+            if (radar == null) _wbRadarSel = false;
+            if (_wbRadarSel) _wbParts = false;
             PreviewCamera(true);
-            // frame the robot on its mat, from the front and a little above
+            // frame the robot on its mat (the parts pool for the Part Radar), from the front and a little above
             var (spot, _) = wb.MatSpot(p.mat);
             var front = wb.Front;
             var r = wb.RobotOf(p);
-            var at = (r != null && r.gameObject.activeSelf && r.mode == Robot.Mode.Assembling ? r.transform.position : spot) + Vector3.up * 0.13f;
+            var at = _wbRadarSel ? wb.PoolPoint : (r != null && r.gameObject.activeSelf && r.mode == Robot.Mode.Assembling ? r.transform.position : spot) + Vector3.up * 0.13f;
             _previewCam.transform.position = at + front * 0.95f + Vector3.up * 0.3f + Vector3.Cross(Vector3.up, front) * 0.25f;
             _previewCam.transform.LookAt(at);
 
-            ClearChildren(_wbTabs);
-            foreach (var q in wb.projects.Where(q => q.after == null || wb.Operational(wb.P(q.after)) || wb.Operational(q)))
-            {
-                var s = wb.StatusOf(q);
-                string mark = s == RobotWorkbench.Status.Operational ? "  ✓" : s == RobotWorkbench.Status.AwaitingBlueprint ? $"  (lv {q.level})" : $"  {wb.InstalledCount(q)}/{wb.Required(q)}";
-                var b = MakeButton(_wbTabs, (q == p ? "▶ " : "") + q.name + mark, () => { wb.selected = q.id; RefreshWorkbench(); });
-                b.GetComponent<LayoutElement>().preferredWidth = 200;
-                b.GetComponentInChildren<Text>().fontSize = 17;
-            }
-
             var st = wb.StatusOf(p);
             int lvl = _g.progression.level;
-            string bp = wb.Unlocked(p) ? $"Blueprint: <color={Hex(GoodC)}>unlocked</color> (level {p.level})  ·  you are level {lvl}"
-                                       : $"Blueprint: <color={Hex(BadC)}>locked</color> — {wb.LockReason(p)}  ·  you are level {lvl}";
-            float pct = wb.Completion(p);
-            int bars = Mathf.RoundToInt(pct * 24);
-            _wbHeader.text = $"<size=26><b><color={Hex(Brass)}>{p.name}</color></b></size>    <color={Hex(st == RobotWorkbench.Status.Operational || st == RobotWorkbench.Status.ReadyForActivation ? GoodC : Cream)}>{RobotWorkbench.StatusText(st)}</color>\n"
-                + bp + "\n"
-                + $"Assembly  <color={Hex(GoodC)}>{new string('■', bars)}</color><color=#5a4a38>{new string('■', 24 - bars)}</color>  {pct * 100:0}%  ({wb.InstalledCount(p)} / {wb.Required(p)})\n"
-                + $"<color={Hex(Muted)}>{wb.Summary(p)}</color>";
+            string bp;
+            if (wb.Unlocked(p)) bp = $"Blueprint: <color={Hex(GoodC)}>unlocked</color> (level {p.level})  ·  you are level {lvl}";
+            else if (!wb.ToolsMet(p))
+            {
+                // "SPIDERBOT — LOCKED / Requires: Spanners & Wrenches / Progress 14 / 20 tools restored" (docs/PEGBOARD.md "Sections")
+                bp = $"<color={Hex(BadC)}><b>{p.name.ToUpperInvariant()} — LOCKED</b></color>    Requires: <color={Hex(Brass)}>{wb.ToolRequirementText(p)}</color>"
+                   + $"    Progress <color={Hex(Cream)}>{wb.ToolProgressText(p)}</color>";
+                if (p.after != null && !wb.Operational(wb.P(p.after))) bp += $"  ·  needs {wb.P(p.after).name} operational";
+            }
+            else bp = $"Blueprint: <color={Hex(BadC)}>locked</color> — {wb.LockReason(p)}  ·  you are level {lvl}";
+            bp += "\n" + StageLine(wb, p);
+            string Bar(float f) { int n = Mathf.RoundToInt(f * 24); return $"<color={Hex(GoodC)}>{new string('■', n)}</color><color=#5a4a38>{new string('■', 24 - n)}</color>"; }
+            string statusLine = $"<size=26><b><color={Hex(Brass)}>{p.name}</color></b></size>    <color={Hex(st == RobotWorkbench.Status.Operational || st == RobotWorkbench.Status.ReadyForActivation ? GoodC : Cream)}>{RobotWorkbench.StatusText(st)}</color>";
 
-            var lines = new List<string>();
+            ClearChildren(_wbTabs);
+            ClearChildren(_wbActions);
+            ClearChildren(_wbSpares);
+            ClearChildren(_wbSlotsA);
+            ClearChildren(_wbSlotsB);
+            ClearChildren(_wbRadar);
+            _wbRadar.gameObject.SetActive(false);
+            Button Act(string text, float width, System.Action cb)
+            {
+                var b = MakeButton(_wbActions, text, cb);
+                b.GetComponent<LayoutElement>().preferredWidth = width;
+                return b;
+            }
+
+            if (!_wbParts)
+            {
+                // ---- page 1: the blueprints
+                foreach (var q in wb.projects.Where(q => q.after == null || wb.Operational(wb.P(q.after)) || wb.Operational(q)))
+                {
+                    var s = wb.StatusOf(q);
+                    string mark = s == RobotWorkbench.Status.Operational ? "  ✓" : s == RobotWorkbench.Status.AwaitingBlueprint ? $"  (lv {q.level})" : $"  {wb.FoundCount(q)}/{wb.Required(q)}";
+                    var b = MakeButton(_wbTabs, (q == p && !_wbRadarSel ? "▶ " : "") + q.name + mark, () => { wb.selected = q.id; _wbRadarSel = false; RefreshWorkbench(); });
+                    b.GetComponent<LayoutElement>().preferredWidth = 196;
+                    b.GetComponentInChildren<Text>().fontSize = 16;
+                }
+                int radarFound = radar == null ? 0 : PartRadarModel.Parts.Length - radar.MissingNames().Count;
+                if (radar != null)
+                {
+                    var b = MakeButton(_wbTabs, (_wbRadarSel ? "▶ " : "") + "Part Radar" + (radar.assembled ? "  ✓" : $"  {radarFound}/{PartRadarModel.Parts.Length}"), () => { _wbRadarSel = true; RefreshWorkbench(); });
+                    b.GetComponent<LayoutElement>().preferredWidth = 196;
+                    b.GetComponentInChildren<Text>().fontSize = 16;
+                }
+                _wbPartsRow.gameObject.SetActive(true);
+                _wbSlotRow.gameObject.SetActive(false);
+                _wbHeader.GetComponent<LayoutElement>().preferredHeight = 120;
+
+                if (_wbRadarSel)
+                {
+                    var missing = radar.MissingNames();
+                    _wbHeader.text = $"<size=26><b><color={Hex(Brass)}>Part Radar</color></b></size>    {(radar.assembled ? $"<color={Hex(GoodC)}>built</color>" : "not built")}\n"
+                        + (radar.HasPlans ? $"Plans: <color={Hex(GoodC)}>bought</color>" : $"Plans: <color={Hex(BadC)}>not bought</color> <color={Hex(Muted)}>(2 skill points, [K])</color>") + "\n"
+                        + $"Found  {Bar((float)radarFound / PartRadarModel.Parts.Length)}  {radarFound} / {PartRadarModel.Parts.Length} parts in the pool";
+                    _wbPartsA.text = "<b>A hand-held part finder</b>\n[Y] take it out, pulse it and the nearest parts of the kind you chose light up.\nRuns on batteries found in the workshop.";
+                    _wbPartsB.text = missing.Count == 0 ? $"<color={Hex(GoodC)}>All its parts are in the pool.</color>" : $"<b>Still missing</b>\n<color={Hex(Muted)}>{string.Join("\n", missing)}</color>";
+                    if (!radar.assembled)
+                    {
+                        var bb = Act("Build the Part Radar", 300, () =>
+                        {
+                            bool ok = radar.TryAssemble();
+                            OnFeedback(ok ? "PART RADAR ASSEMBLED  ·  [Y] take it out" : radar.WhyNotBuilt(), ok);
+                            RefreshWorkbench();
+                        });
+                        bb.interactable = radar.WhyNotBuilt() == "";
+                        // say why it can't be built yet, right under what it needs (playtest 2026-10-28)
+                        if (!bb.interactable) _wbPartsB.text += $"\n\n<color={Hex(BadC)}>{radar.WhyNotBuilt()}</color>";
+                    }
+                }
+                else
+                {
+                    int found = wb.FoundCount(p), need = wb.Required(p);
+                    _wbHeader.text = statusLine + "\n" + bp + "\n"
+                        + $"Found  {Bar(need == 0 ? 0 : (float)found / need)}  {found} / {need} parts" + (wb.InstalledCount(p) > 0 ? $"  <color={Hex(Muted)}>· {wb.InstalledCount(p)} on the robot</color>" : "");
+                    var (stats, traits) = BlueprintText(p);
+                    _wbPartsA.text = stats;
+                    _wbPartsB.text = traits;
+                    bool canBuild = wb.Unlocked(p) && !wb.Operational(p);
+                    var cb2 = Act(wb.Operational(p) ? $"{p.name} is built" : !wb.Unlocked(p) ? "Blueprint locked" : $"Build {p.name}  ▶", 320, () => { _wbParts = true; RefreshWorkbench(); });
+                    cb2.interactable = canBuild;
+                    if (wb.RobotOf(p) is Robot armBot && armBot.arm != null && armBot.Operational && armBot.arm.place != SortingArm.Place.Carried)
+                    {
+                        // the finished arm: into the player's hands (also the way to recover a mounted one)
+                        var arm = armBot.arm;
+                        Act(arm.place == SortingArm.Place.Floor ? $"Pick up {p.name}" : $"Fetch {p.name} from {arm.socket?.id}", 320, () => { if (arm.PickUp()) _g.SetState("play"); });
+                    }
+                    if (Unlocks.DebugMode && !wb.Operational(p))
+                    {
+                        var db = Act("DEBUG: unlock now", 240, () =>
+                        {
+                            string msg = wb.DebugUnlock(p);
+                            if (wb.RobotOf(p) is Robot rr && rr.mode == Robot.Mode.Activating) { _g.SetState("play"); Toast(msg, true); }
+                            else { OnFeedback(msg, wb.Complete(p)); RefreshWorkbench(); }
+                        });
+                        db.GetComponentInChildren<Text>().color = new Color(1f, 0.55f, 0.35f);
+                    }
+                }
+                if (_g.modules != null && RobotModules.Chassis.Any(_g.modules.Built)) Act("Modify robots", 240, () => ShowScreenRaw("modify"));
+                Act("Close", 200, () => _g.SetState("play"));
+                _wbSpares.gameObject.SetActive(false);
+                return;
+            }
+
+            // ---- page 2: the chosen blueprint's parts
+            var back = MakeButton(_wbTabs, "◀  Blueprints", () => { _wbParts = false; RefreshWorkbench(); });
+            back.GetComponent<LayoutElement>().preferredWidth = 220;
+            back.GetComponentInChildren<Text>().fontSize = 17;
+            int fitted = wb.FittedIds(p).Count;
+            _wbHeader.GetComponent<LayoutElement>().preferredHeight = p.crafted ? 120 : 76;
+            _wbHeader.text = statusLine + "\n"
+                + $"Assembly  {Bar(wb.Completion(p))}  {wb.Completion(p) * 100:0}%  ({wb.InstalledCount(p)} / {wb.Required(p)})" + (fitted > 0 ? $"  <color={Hex(Brass)}>· {fitted} tried on, not applied</color>" : "") + "\n"
+                + $"<color={Hex(Muted)}>◀ ▶ change the part in a place — it goes on at once, so you see it.  ✕ takes a tried-on part off.  Apply locks them in.</color>";
+
             if (p.crafted)
             {
+                _wbPartsRow.gameObject.SetActive(true);
+                _wbSlotRow.gameObject.SetActive(false);
                 var miss = wb.MaterialsMissing(p);
-                lines.Add($"<b>Recipe</b> <color={Hex(Muted)}>(any part of the category; built in parts count as accounted for in their sets)</color>");
+                var lines = new List<string> { $"<b>Recipe</b> <color={Hex(Muted)}>(any part of the category; built in parts count as accounted for in their sets)</color>" };
                 foreach (var kv in p.materials)
                 {
                     int carried = _g.inventory.items.Count(i => _g.world.DefOf(i).CategoryName == kv.Key && !_g.world.DefOf(i).IsRobotPart);
                     int done = kv.Value - miss[kv.Key];
                     lines.Add($"{kv.Key}:  <color={Hex(done >= kv.Value ? GoodC : Cream)}>{done} / {kv.Value} built in</color>" + (carried > 0 && done < kv.Value ? $"   <color={Hex(Brass)}>you carry {carried}</color>" : ""));
                 }
+                int half = (lines.Count + 1) / 2;
+                _wbPartsA.text = string.Join("\n", lines.Take(half));
+                _wbPartsB.text = string.Join("\n", lines.Skip(half));
             }
             else
             {
-                var have = wb.InstalledKeys(p);
-                foreach (var id in wb.NeededIds(p))
+                _wbPartsRow.gameObject.SetActive(false);
+                _wbSlotRow.gameObject.SetActive(true);
+                var slots = wb.Slots(p);
+                int perCol = (slots.Count + 1) / 2;
+                for (int k = 0; k < slots.Count; k++)
                 {
-                    var key = wb.KeyOn(p, id) + (wb.OriginOf(id) != p.id && !RobotWorkbench.IsPooled(p) ? $" ({RobotModules.OriginName(wb.OriginOf(id))}'s)" : "");
-                    var ps = wb.StateOf(id);
-                    string why = ps == RobotWorkbench.PartState.Delivered ? wb.CanInstall(p, id) : "";
-                    string txt = ps switch
+                    var (key, on, need, ring) = slots[k];
+                    var row = Row(k < perCol ? _wbSlotsA : _wbSlotsB, 22, 4);
+                    string what;
+                    if (on >= 0)
                     {
-                        RobotWorkbench.PartState.Installed => $"<color={Hex(GoodC)}>installed</color>",
-                        RobotWorkbench.PartState.Delivered => $"<color={Hex(Brass)}>in the parts pool</color>" + (why != "" ? $" <color={Hex(Muted)}>— {why.ToLower()}</color>" : " — <b>ready to install</b>"),
-                        RobotWorkbench.PartState.Carried => $"<color={Hex(Cream)}>in your hands — deliver it</color>",
-                        RobotWorkbench.PartState.Discovered => "<color=#d98a4a>discovered, still in the workshop</color>",
-                        _ => $"<color=#8a7a6a>missing — not found yet</color>",
+                        string nm = _g.world.DefOf(on).displayName;
+                        what = wb.IsFitted(on) ? $"<color={Hex(Brass)}>{nm}</color>  <color={Hex(Muted)}>tried on</color>" : $"{nm}  <color={Hex(GoodC)}>✓</color>";
+                    }
+                    else what = ring.Count > 0 ? $"<color={Hex(Brass)}>{ring.Count} found — ▶ to fit</color>" : wb.StateOf(need) switch
+                    {
+                        RobotWorkbench.PartState.Discovered => "<color=#d98a4a>found, still lying in the workshop</color>",
+                        RobotWorkbench.PartState.Carried => "in your hands",
+                        RobotWorkbench.PartState.Delivered => $"<color={Hex(Muted)}>in the pool{(wb.CanInstall(p, need) is string w && w != "" ? " — " + w.ToLower() : "")}</color>",
+                        _ => $"<color={Hex(Muted)}>not found yet</color>",
                     };
-                    lines.Add($"{Cap(key)}:  {txt}");
+                    var label = Para(row, $"<b>{Cap(key)}</b>  {what}", 15, Cream, 22);
+                    label.alignment = TextAnchor.MiddleLeft;
+                    label.horizontalOverflow = HorizontalWrapMode.Overflow;
+                    label.GetComponent<LayoutElement>().preferredWidth = 392;
+                    int idx = ring.IndexOf(on), n = ring.Count;
+                    bool steps = n > (on >= 0 ? 1 : 0);
+                    void Arrow(string glyph, int target)
+                    {
+                        var b = MakeButton(row, glyph, () =>
+                        {
+                            var (ok, text) = wb.Fit(p, target, true);
+                            OnFeedback(text, ok);
+                            RefreshWorkbench();
+                        });
+                        b.GetComponent<LayoutElement>().preferredWidth = 30;
+                        b.GetComponent<LayoutElement>().preferredHeight = 22;
+                        b.GetComponentInChildren<Text>().fontSize = 15;
+                    }
+                    if (steps)
+                    {
+                        Arrow("◀", on >= 0 ? ring[(idx - 1 + n) % n] : ring[n - 1]);
+                        Arrow("▶", on >= 0 ? ring[(idx + 1) % n] : ring[0]);
+                    }
+                    if (on >= 0 && wb.IsFitted(on))
+                    {
+                        int part = on;
+                        var x = MakeButton(row, "✕", () =>
+                        {
+                            var (ok, text) = wb.TakeOff(p, part, true);
+                            OnFeedback(text, ok);
+                            RefreshWorkbench();
+                        });
+                        x.GetComponent<LayoutElement>().preferredWidth = 30;
+                        x.GetComponent<LayoutElement>().preferredHeight = 22;
+                        x.GetComponentInChildren<Text>().fontSize = 15;
+                    }
                 }
-                foreach (var m in wb.ReservedOn(p))
-                    lines.Add($"{Cap(RobotModules.SlotName(m.slot))} ({RobotModules.OriginName(m.origin)}'s):  <color={Hex(GoodC)}>fitted from the spare modules</color>");
             }
-            int half = (lines.Count + 1) / 2;
-            _wbPartsA.text = string.Join("\n", lines.Take(half));
-            _wbPartsB.text = string.Join("\n", lines.Skip(half));
 
-            ClearChildren(_wbActions);
-            int installable = p.crafted ? 0 : wb.InstallableCount(p);
-            var ib = MakeButton(_wbActions, installable > 0 ? $"Build from the parts pool ({installable})" : "Build from the parts pool", () =>
+            var ib = Act(fitted > 0 ? $"Apply {fitted} tried-on part{(fitted == 1 ? "" : "s")}" : "Apply (nothing tried on)", 340, () =>
             {
-                int n = wb.InstallAll(p);
-                OnFeedback(n > 0 ? $"Installed {n} part{(n == 1 ? "" : "s")} on {p.name}" : wb.Summary(p), n > 0);
+                int n = wb.Commit(p);
+                OnFeedback(n > 0 ? $"{p.name}: {n} part{(n == 1 ? "" : "s")} applied ({wb.InstalledCount(p)}/{wb.Required(p)})" : wb.Summary(p), n > 0);
                 RefreshWorkbench();
             });
-            ib.interactable = installable > 0;
+            ib.interactable = fitted > 0;
             if (p.crafted)
             {
                 // the confirmed build: recipe materials out of completed destinations' stock
                 int stock = wb.StockFor(p).Count;
-                var sb = MakeButton(_wbActions, stock > 0 ? $"Build from stock ({stock})" : "Build from stock (none)", () =>
+                var sb = Act(stock > 0 ? $"Build from stock ({stock})" : "Build from stock (none)", 300, () =>
                 {
                     int n = wb.BuildFromStock(p);
                     OnFeedback(n > 0 ? $"{n} part{(n == 1 ? "" : "s")} from completed destinations built into {p.name} ({wb.InstalledCount(p)}/{wb.Required(p)}) — their level points stay" : wb.Summary(p), n > 0);
                     RefreshWorkbench();
                 });
                 sb.interactable = stock > 0;
-                sb.GetComponent<LayoutElement>().preferredWidth = 300;
             }
-            RefreshRadarRow();
-            // a head or arm stripped off a built robot (Modify robots → Take off) goes on here too
-            ClearChildren(_wbSpares);
-            // the shared pool: any robot's head or arm in it can go on this one instead (the player's choice)
-            foreach (var id in wb.PoolDonors(p).Take(6).ToList())
+            var ab = Act($"Activate {p.name}", 300, () =>
             {
-                var part = id;
-                var fb = MakeButton(_wbSpares, $"From the pool: {RobotModules.OriginName(wb.OriginOf(part))}'s {RobotModules.SlotName(wb.MainSlotOf(part).Value)}", () =>
-                {
-                    bool ok = wb.Install(p, part);
-                    OnFeedback(ok ? $"{_g.world.DefOf(part).displayName} fitted to {p.name} ({wb.InstalledCount(p)}/{wb.Required(p)})" : wb.CanInstall(p, part), ok);
-                    RefreshWorkbench();
-                });
-                fb.GetComponent<LayoutElement>().preferredWidth = 300;
-            }
+                if (wb.Activate(p)) { _g.SetState("play"); Toast($"{p.name} is starting up…", true); }
+            });
+            ab.interactable = wb.CanActivate(p);
+            Act("Close", 200, () => _g.SetState("play"));
+
+            // a head or arm stripped off a built robot (Modify robots → Take off) goes on here too
             if (!p.crafted && _g.modules != null)
             {
                 foreach (var m in _g.modules.Spares.Where(m => wb.CanFitSpare(p, m) == "").ToList())
@@ -276,39 +449,18 @@ namespace WorkshopWreckage
                 }
             }
             _wbSpares.gameObject.SetActive(_wbSpares.childCount > 0);
-            ib.GetComponent<LayoutElement>().preferredWidth = 360;
-            var ab = MakeButton(_wbActions, $"Activate {p.name}", () =>
-            {
-                if (wb.Activate(p)) { _g.SetState("play"); Toast($"{p.name} is starting up…", true); }
-            });
-            ab.interactable = wb.CanActivate(p);
-            ab.GetComponent<LayoutElement>().preferredWidth = 300;
-            if (wb.RobotOf(p) is Robot armBot && armBot.arm != null && armBot.Operational && armBot.arm.place != SortingArm.Place.Carried)
-            {
-                // the finished arm: into the player's hands (also the way to recover a mounted one)
-                var arm = armBot.arm;
-                string label = arm.place == SortingArm.Place.Floor ? $"Pick up {p.name}" : $"Fetch {p.name} from {arm.socket?.id}";
-                var carry = MakeButton(_wbActions, label, () => { if (arm.PickUp()) _g.SetState("play"); });
-                carry.GetComponent<LayoutElement>().preferredWidth = 320;
-            }
-            if (Unlocks.DebugMode && !wb.Operational(p))
-            {
-                var db = MakeButton(_wbActions, "DEBUG: unlock now", () =>
-                {
-                    string msg = wb.DebugUnlock(p);
-                    if (wb.RobotOf(p) is Robot r && r.mode == Robot.Mode.Activating) { _g.SetState("play"); Toast(msg, true); }
-                    else { OnFeedback(msg, wb.Complete(p)); RefreshWorkbench(); }
-                });
-                db.GetComponent<LayoutElement>().preferredWidth = 240;
-                db.GetComponentInChildren<Text>().color = new Color(1f, 0.55f, 0.35f);
-            }
-            if (_g.modules != null && RobotModules.Chassis.Any(_g.modules.Built))
-            {
-                var mb = MakeButton(_wbActions, "Modify robots", () => ShowScreenRaw("modify"));
-                mb.GetComponent<LayoutElement>().preferredWidth = 240;
-            }
-            var cb = MakeButton(_wbActions, "Close", () => _g.SetState("play"));
-            cb.GetComponent<LayoutElement>().preferredWidth = 200;
+        }
+
+        /// <summary>Where a robot is on its way: tool board → blueprint → components → ready → operational.</summary>
+        string StageLine(RobotWorkbench wb, RobotWorkbench.Project p)
+        {
+            var st = wb.StatusOf(p);
+            int stage = st == RobotWorkbench.Status.Operational ? 4 : st == RobotWorkbench.Status.ReadyForActivation ? 3
+                      : wb.Unlocked(p) ? 2 : wb.ToolsMet(p) ? 1 : 0;
+            string comp = wb.Unlocked(p) && stage == 2 ? $"Components {wb.InstalledCount(p)}/{wb.Required(p)}" : "Components";
+            var steps = new[] { wb.HasToolRequirement(p) ? "Tool board" : "Eligible", "Blueprint", comp, "Ready", "Operational" };
+            return string.Join($" <color={Hex(Muted)}>→</color> ", steps.Select((s, i) =>
+                i < stage ? $"<color={Hex(GoodC)}>✓ {s}</color>" : i == stage ? $"<color={Hex(Cream)}><b>{s}</b></color>" : $"<color={Hex(Muted)}>{s}</color>"));
         }
 
         /// <summary>The info panel while an unfinished robot is in your hands.</summary>
@@ -338,7 +490,7 @@ namespace WorkshopWreckage
                     }
                 }
             }
-            t += $"\n<color=#9a8c74>[Mouse / Q E] turn   [Wheel] zoom\n[LMB] install delivered parts   [F / RMB] put it back</color>";
+            t += $"\n<color=#9a8c74>[Mouse / Q E] turn   [Wheel] zoom\n[F / RMB] put it back   ·   to build, hold a part to the robot on its mat</color>";
             _inspectText.text = t;
         }
 

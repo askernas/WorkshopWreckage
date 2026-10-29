@@ -450,12 +450,23 @@ namespace WorkshopWreckage
             return (best, best >= 0 ? bestT : float.PositiveInfinity);
         }
 
+        /// <summary>Pick forgiveness for the pegboard's small tools (sockets, hex keys...): their pick box is at
+        /// least this thick in every direction (metres, world), so a 2 mm key is not a pixel hunt.</summary>
+        public const float MinToolPickHalf = 0.012f;
+
         public float RayObb(int id, Vector3 origin, Vector3 dir)
         {
-            var inv = world.instances[id].transform.inverse;
+            var m = world.instances[id].transform;
+            var inv = m.inverse;
             var o = inv.MultiplyPoint3x4(origin);
             var d = inv.MultiplyVector(dir);
             var b = UnitBounds(id);
+            if (world.DefOf(id).IsPegboardTool)
+            {
+                var ext = b.extents;
+                for (int a = 0; a < 3; a++) ext[a] = Mathf.Max(ext[a], MinToolPickHalf / Mathf.Max(1e-5f, ((Vector3)m.GetColumn(a)).magnitude));
+                b.extents = ext;
+            }
             float tmin = float.NegativeInfinity, tmax = float.PositiveInfinity;
             for (int a = 0; a < 3; a++)
             {
@@ -504,11 +515,92 @@ namespace WorkshopWreckage
         /// sizes once and a save never scales twice. A robot carrying a part that is player-only now sets
         /// it down (Robot.AdoptCarried).
         /// 4: every loose part is saved with its place (not only the moved ones), so a load or a catalog
-        /// conversion puts back exactly what the player left and never the generator's spots.</summary>
+        /// conversion puts back exactly what the player left and never the generator's spots.
+        /// Saves are files named by the player (playtest 2026-10-28: "the ability to name your saves, and also to
+        /// delete old saves"): "name" holds the name, the file is a free id (save_&lt;time&gt;; quick, autosave and
+        /// the old slot1-3 keep theirs). Writing is checked: the new file is written beside the old one, read back,
+        /// and only then swapped in, the old one kept as .bak; a load whose file is damaged falls back to the .bak.
+        /// A deleted save goes to saves/deleted, not away.</summary>
         public const int Version = 4;
-        public static readonly string[] Slots = { "quick", "slot1", "slot2", "slot3" };
+        public const string Quick = "quick", Auto = "autosave";
+        /// <summary>Saves the automated tests make (and the copies they test with): never in the player's list.</summary>
+        static readonly string[] TestPrefixes = { "autotest", "premig_", "bench_" };
+        public static bool IsTestSlot(string slot) => TestPrefixes.Any(slot.StartsWith);
         public static string Dir => System.IO.Path.Combine(Application.persistentDataPath, "saves");
         public static string PathOf(string slot) => System.IO.Path.Combine(Dir, slot + ".json");
+        public static string TrashDir => System.IO.Path.Combine(Dir, "deleted");
+        /// <summary>Why the last Write failed ("" if it did not).</summary>
+        public static string LastError = "";
+
+        /// <summary>One save as the menus list it.</summary>
+        public class SaveInfo
+        {
+            public string slot, name, world, error = "";
+            public DateTime savedAt;
+            public int level, sorted, seed;
+            public double percent, playTime;
+            /// <summary>The file was damaged and its backup (.bak) is what loads.</summary>
+            public bool fromBackup;
+            public bool Ok => error == "";
+        }
+
+        public static string DefaultName(string slot)
+            => slot == Quick ? "Quicksave" : slot == Auto ? "Autosave"
+             : slot.StartsWith("slot") && int.TryParse(slot.Substring(4), out var n) ? $"Slot {n}" : slot;
+
+        /// <summary>A fresh file id for a new named save.</summary>
+        public static string NewSlotId(bool test)
+        {
+            var b = (test ? "autotest_save_" : "save_") + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var id = b;
+            for (int k = 2; System.IO.File.Exists(PathOf(id)) || System.IO.File.Exists(PathOf(id) + ".bak"); k++) id = $"{b}_{k}";
+            return id;
+        }
+
+        // the list reads every save; a file is parsed again only when it changed
+        static readonly Dictionary<string, (DateTime t, long len, SaveInfo info)> _infoCache = new();
+
+        /// <summary>The saves, newest first: the player's (tests: only the test saves). A save whose file is
+        /// lost but whose backup is there is listed too (it loads from the backup).</summary>
+        public static List<SaveInfo> List(bool tests = false)
+        {
+            var o = new List<SaveInfo>();
+            if (!System.IO.Directory.Exists(Dir)) return o;
+            var slots = System.IO.Directory.GetFiles(Dir, "*.json").Select(System.IO.Path.GetFileNameWithoutExtension)
+                .Concat(System.IO.Directory.GetFiles(Dir, "*.json.bak").Select(f => System.IO.Path.GetFileNameWithoutExtension(System.IO.Path.GetFileNameWithoutExtension(f))))
+                .Distinct();
+            foreach (var slot in slots)
+                if (IsTestSlot(slot) == tests) o.Add(Info(slot));
+            return o.OrderByDescending(i => i.savedAt).ToList();
+        }
+
+        public static SaveInfo Info(string slot)
+        {
+            var p = PathOf(slot);
+            var fi = new System.IO.FileInfo(System.IO.File.Exists(p) ? p : p + ".bak");
+            if (!fi.Exists) return null;
+            if (_infoCache.TryGetValue(slot, out var c) && c.t == fi.LastWriteTimeUtc && c.len == fi.Length) return c.info;
+            var info = new SaveInfo { slot = slot, name = DefaultName(slot), savedAt = fi.LastWriteTime, world = "" };
+            var d = Read(slot, out info.fromBackup, out var err);
+            if (d == null) info.error = err;
+            else
+            {
+                var st = Json.Obj(d.GetValueOrDefault("stats")) ?? new Dictionary<string, object>();
+                info.name = Json.Str(d, "name", info.name);
+                if (DateTime.TryParse(Json.Str(d, "saved_at"), out var t)) info.savedAt = t;
+                info.level = Json.Int(st, "level", 1);
+                info.sorted = Json.Int(st, "sorted");
+                info.percent = Json.Num(st, "percent");
+                info.playTime = Json.Num(d, "play_time_s");
+                info.world = WorldLabel(d);
+                info.seed = Json.Int(d, "seed");
+            }
+            _infoCache[slot] = (fi.LastWriteTimeUtc, fi.Length, info);
+            return info;
+        }
+
+        /// <summary>The name a save goes by (its own, or its file's).</summary>
+        public static string NameOf(string slot) => Info(slot)?.name ?? DefaultName(slot);
 
         public static Dictionary<string, object> Serialize(Game g)
         {
@@ -529,6 +621,7 @@ namespace WorkshopWreckage
             {
                 ["game"] = "Workshop Wreckage (Unity)", ["version"] = (double)Version, ["saved_at"] = DateTime.Now.ToString("s"),
                 ["preset"] = g.presetId, ["catalog_version"] = (double)Json.Int(g.db.config, "version", 1),
+                ["loose_settled"] = true,   // every loose part at rest (SaveGame finishes the piles): a load leaves them be
                 ["seed"] = (double)g.world.seed, ["item_count"] = (double)g.world.Count, ["catalog_hash"] = g.db.catalogHash.ToString(),
                 ["play_time_s"] = g.playTime, ["progression"] = g.progression.ToDict(),
                 ["robots"] = g.robots.ToDictionary(r => r.id, r => (object)r.ToDict()),
@@ -545,33 +638,100 @@ namespace WorkshopWreckage
             };
         }
 
-        /// <summary>True if the save describes the world currently being played
-        /// (same preset, seed and catalog), i.e. saving over it loses nothing else.</summary>
-        public static bool SameWorld(Dictionary<string, object> d, Game g)
-            => Json.Str(d, "preset", "standard") == g.presetId && Json.Int(d, "seed") == g.world.seed && Json.Str(d, "catalog_hash") == g.db.catalogHash.ToString();
-
         public static string WorldLabel(Dictionary<string, object> d)
         {
             var p = Json.Str(d, "preset", "standard");
             return $"{char.ToUpper(p[0]) + p.Substring(1)}, seed {Json.Int(d, "seed")}";
         }
 
+        /// <summary>Writes a save so that a failure never costs the one before: the new file goes beside the old
+        /// one (.tmp), is flushed to the disk and read back, and only a file that reads back exactly replaces
+        /// the old one, which stays as .bak. False (and LastError) if anything failed: the old save is untouched.</summary>
         public static bool Write(string slot, Dictionary<string, object> data)
         {
+            LastError = "";
+            var path = PathOf(slot);
+            var tmp = path + ".tmp";
             try
             {
                 System.IO.Directory.CreateDirectory(Dir);
-                var tmp = PathOf(slot) + ".tmp";
-                System.IO.File.WriteAllText(tmp, Json.Write(data));
-                if (System.IO.File.Exists(PathOf(slot))) System.IO.File.Delete(PathOf(slot));
-                System.IO.File.Move(tmp, PathOf(slot));
+                var text = Json.Write(data);
+                using (var fs = new System.IO.FileStream(tmp, System.IO.FileMode.Create, System.IO.FileAccess.Write, System.IO.FileShare.None))
+                using (var w = new System.IO.StreamWriter(fs, new System.Text.UTF8Encoding(false)))
+                {
+                    w.Write(text);
+                    w.Flush();
+                    fs.Flush(true);   // on the disk, not in a cache, before the old file goes
+                }
+                if (System.IO.File.ReadAllText(tmp) != text) throw new System.IO.IOException("the written file did not read back the same");
+                if (System.IO.File.Exists(path))
+                {
+                    try { System.IO.File.Replace(tmp, path, path + ".bak", true); }
+                    catch (Exception) when (System.IO.File.Exists(tmp) && System.IO.File.Exists(path))
+                    {
+                        // a file system without an atomic replace: the old file is copied aside first
+                        System.IO.File.Copy(path, path + ".bak", true);
+                        System.IO.File.Copy(tmp, path, true);
+                        System.IO.File.Delete(tmp);
+                    }
+                }
+                else System.IO.File.Move(tmp, path);
+                _infoCache.Remove(slot);
                 return true;
             }
-            catch (Exception e) { Debug.LogError("Save failed: " + e.Message); return false; }
+            catch (Exception e)
+            {
+                LastError = e.Message;
+                Debug.LogError($"[save] writing '{slot}' failed, the previous save is untouched: {e.Message}");
+                try { if (System.IO.File.Exists(tmp)) System.IO.File.Delete(tmp); } catch (Exception) { }
+                return false;
+            }
         }
 
-        public static Dictionary<string, object> Read(string slot)
-            => System.IO.File.Exists(PathOf(slot)) ? Json.Obj(Json.Parse(System.IO.File.ReadAllText(PathOf(slot)))) : null;
+        public static Dictionary<string, object> Read(string slot) => Read(slot, out _, out _);
+
+        /// <summary>A save's contents: its file, or its backup (.bak, `fromBackup`) if the file is lost or
+        /// damaged. Null and the reason in `error` if neither reads.</summary>
+        public static Dictionary<string, object> Read(string slot, out bool fromBackup, out string error)
+        {
+            fromBackup = false;
+            var d = TryRead(PathOf(slot), out error);
+            if (d != null) return d;
+            var b = TryRead(PathOf(slot) + ".bak", out var bakError);
+            if (b == null) { if (error == "missing") error = bakError == "missing" ? "No save in that slot." : bakError; return null; }
+            Debug.LogWarning($"[save] '{slot}': the save file is {error}; its backup is loaded instead");
+            fromBackup = true;
+            return b;
+        }
+
+        static Dictionary<string, object> TryRead(string path, out string error)
+        {
+            error = "";
+            if (!System.IO.File.Exists(path)) { error = "missing"; return null; }
+            try
+            {
+                var d = Json.Obj(Json.Parse(System.IO.File.ReadAllText(path)));
+                if (d != null && d.ContainsKey("items") && d.ContainsKey("stats") && d.ContainsKey("storage")) return d;
+                error = "incomplete";
+            }
+            catch (Exception e) { error = "damaged (" + e.Message + ")"; }
+            return null;
+        }
+
+        /// <summary>Moves a save (and its backup) to saves/deleted: gone from the menus, not from the disk.</summary>
+        public static bool Delete(string slot)
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(TrashDir);
+                var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                foreach (var f in new[] { PathOf(slot), PathOf(slot) + ".bak", PathOf(slot) + ".tmp" })
+                    if (System.IO.File.Exists(f)) System.IO.File.Move(f, System.IO.Path.Combine(TrashDir, $"{stamp}_{System.IO.Path.GetFileName(f)}"));
+                _infoCache.Remove(slot);
+                return true;
+            }
+            catch (Exception e) { LastError = e.Message; Debug.LogError($"[save] deleting '{slot}' failed: {e.Message}"); return false; }
+        }
 
         public static string Check(Dictionary<string, object> d, ItemDatabase db)
         {
@@ -605,12 +765,14 @@ namespace WorkshopWreckage
             }
         }
 
-        public static string Describe(string slot)
+        /// <summary>A save's one-line details for the menus.</summary>
+        public static string Describe(SaveInfo s)
         {
-            var d = Read(slot);
-            if (d == null) return slot + " — empty";
-            var st = Json.Obj(d["stats"]);
-            return $"{slot} — {WorldLabel(d)}  ·  {Json.Str(d, "saved_at").Replace('T', ' ')}  ·  level {Json.Int(st, "level", 1)}  ·  {Json.Int(st, "sorted")} sorted ({Json.Num(st, "percent"):0.0}%)";
+            var en = System.Globalization.CultureInfo.InvariantCulture;   // the game is in English whatever Windows is set to
+            if (!s.Ok) return $"can't be read: {s.error}  ·  {s.savedAt.ToString("d MMM yyyy HH:mm", en)}";
+            var played = TimeSpan.FromSeconds(s.playTime);
+            return FormattableString.Invariant($"{s.savedAt:d MMM yyyy  HH:mm}  ·  level {s.level}  ·  {s.sorted} sorted ({s.percent:0.0}%)  ·  played {(int)played.TotalHours} h {played.Minutes:00} min  ·  seed {s.seed}")
+                 + (s.fromBackup ? "  ·  file damaged, its backup loads" : "");
         }
     }
 
@@ -622,10 +784,12 @@ namespace WorkshopWreckage
     /// took off a shelf can't come back there in another copy's name (playtest 2026-10-26). A part stored in a destination that no longer
     /// holds its definition goes to the definition's current destination. Parts of removed
     /// definitions are dropped (XP already earned stays); extra copies stay unsorted in the
-    /// world. Instance ids in the inventory and the per-part sort-XP record are remapped.</summary>
+    /// world. Instance ids in the inventory and the per-part sort-XP record are remapped.
+    /// `added`: the parts the save did not have (new definitions, e.g. the pieces of a split tool set). They lie
+    /// where the generator estimated, which was never settled: the caller lets them fall (PileSim.DropLoose).</summary>
     public static class SaveMigration
     {
-        public static Dictionary<string, object> Remap(Dictionary<string, object> d, ItemWorld w, ItemDatabase db, out string report)
+        public static Dictionary<string, object> Remap(Dictionary<string, object> d, ItemWorld w, ItemDatabase db, out string report, out List<int> added)
         {
             var rows = Json.Arr(d["items"]);
             var defs = Json.Arr(d["item_defs"]);
@@ -693,6 +857,8 @@ namespace WorkshopWreckage
             progress["discovered"] = Json.Arr(progress.GetValueOrDefault("discovered")).Where(x => db.Get((int)(double)x) != null).ToList();
             progress["revealed"] = Json.Arr(progress.GetValueOrDefault("revealed")).Where(x => db.Get((int)(double)x) != null).ToList();
             o["progress"] = progress;
+            var kept = map.Values.ToHashSet();
+            added = w.instances.Where(i => !kept.Contains(i.id)).Select(i => i.id).ToList();
             report = $"{map.Count} parts carried over" + (rehomed > 0 ? $", {rehomed} moved to their new destinations" : "") + (dropped > 0 ? $", {dropped} of removed kinds dropped" : "");
             return o;
         }

@@ -197,7 +197,7 @@ namespace WorkshopWreckage
             }
             if (b.grain != null && Qa.ContainsKey("grain")) { b.grain.active = QaF("grain", 0) > 0; b.grain.intensity.Override(QaF("grain", 0)); }
             if (b.vignette != null) b.vignette.active = Vignette;
-            if (b.colorAdjust != null) b.colorAdjust.postExposure.Override(WorkshopBuilder.Exposure + Brightness);
+            if (b.colorAdjust != null) b.colorAdjust.postExposure.Override(WorkshopBuilder.Exposure + Brightness + GameLook.ExposureOffset);
             foreach (var s in b.shafts) if (s != null) s.SetActive(Shafts);
             b.shadowLights ??= b.GetComponentsInChildren<Light>(true).Where(l => l.shadows != LightShadows.None).ToList();
             foreach (var l in b.shadowLights)

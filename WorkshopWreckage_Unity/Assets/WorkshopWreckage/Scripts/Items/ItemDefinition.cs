@@ -3,7 +3,9 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    public enum RestMode { Long, Flat }
+    /// <summary>How a part lies: Flat on its local Y (up), Long on its side along local Y, Side on its widest face
+    /// (local Z up: the pegboard tools, built flat in the XY plane).</summary>
+    public enum RestMode { Long, Flat, Side }
 
     /// <summary>One kind of part, loaded from shared/data/item_catalog.json.</summary>
     public class ItemDefinition
@@ -73,7 +75,7 @@ namespace WorkshopWreckage
                 storageBox = Json.Str(d, "storage_box"),
                 spawnCount = Json.Int(d, "spawn_count"),
                 craftingPurpose = Json.Str(d, "crafting_purpose"),
-                restMode = Json.Str(d, "rest_mode", "flat") == "long" ? RestMode.Long : RestMode.Flat,
+                restMode = Json.Str(d, "rest_mode", "flat") switch { "long" => RestMode.Long, "side" => RestMode.Side, _ => RestMode.Flat },
             };
             def.category = System.Array.IndexOf(CategoryNames, Json.Str(d, "category"));
             if (def.category < 0)

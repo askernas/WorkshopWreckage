@@ -13,6 +13,8 @@ namespace WorkshopWreckage
         public Camera cam;
         public Transform head;
         public bool inputEnabled = true, lookEnabled = true;
+        /// <summary>Q / E scroll the part picker while aiming at a robot on the bench (Interaction), not turn.</summary>
+        public bool turnKeysTaken;
         public float sensitivity = 0.22f;
         /// <summary>The field of view set in Settings; holding the right mouse button zooms in from it.</summary>
         public float fov = 72f;
@@ -125,7 +127,7 @@ namespace WorkshopWreckage
                 float r = (kb.dKey.isPressed ? 1 : 0) - (kb.aKey.isPressed ? 1 : 0);
                 wish = (transform.forward * f + transform.right * r);
                 if (wish.sqrMagnitude > 1) wish.Normalize();
-                float turn = (kb.qKey.isPressed ? 1 : 0) - (kb.eKey.isPressed ? 1 : 0);
+                float turn = turnKeysTaken ? 0 : (kb.qKey.isPressed ? 1 : 0) - (kb.eKey.isPressed ? 1 : 0);
                 _yaw += turn * TurnSpeed * Time.deltaTime;
                 crouch = kb.leftCtrlKey.isPressed || kb.cKey.isPressed;
                 sprint = kb.leftShiftKey.isPressed && !crouch;

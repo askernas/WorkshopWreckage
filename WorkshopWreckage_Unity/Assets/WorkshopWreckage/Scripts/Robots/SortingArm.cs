@@ -391,15 +391,12 @@ namespace WorkshopWreckage
                 if (full[box]) continue;
                 var spot = _r.StagingSpot(box);
                 if (!spot.HasValue) continue;
-                foreach (var id in _g.index.QuerySphere(spot.Value + Vector3.up * 0.15f, 0.55f))
+                foreach (var id in _g.index.QuerySphere(spot.Value + Vector3.up * 0.15f, StagedReach + 0.2f))
                 {
                     var i = _g.world.instances[id];
-                    if (i.state != ItemState.InWorld || _g.robotReserved.Contains(id) || _g.interaction.busy.Contains(id)) continue;
+                    if (_g.robotReserved.Contains(id) || _g.interaction.busy.Contains(id)) continue;
                     var def = _g.world.DefOf(id);
-                    if (!def.robotCarry || def.IsRobotPart || def.storageBox != box || i.Position.y > 0.7f || ItemDatabase.Extents(def)[0] > _r.MaxItemSize) continue;   // Wide Gripper raises the size
-                    if (!Pickable(i.Position)) continue;   // the pincer must really get there
-                    bool staged = i.owner == "stage:" + box || Vector3.ProjectOnPlane(i.Position - spot.Value, Vector3.up).magnitude <= 0.5f;
-                    if (!staged) continue;
+                    if (def.storageBox != box || !CanReach(i)) continue;
                     float d = (i.Position - socket.point).magnitude - _r.FocusBonus(def.id);   // Set Awareness: nearly complete destinations first
                     if (d < bestD) { bestD = d; best = id; }
                 }
@@ -413,10 +410,15 @@ namespace WorkshopWreckage
         public bool Pickable(Vector3 p)
         {
             var l = socket.su.transform.InverseTransformPoint(p);
-            if (-l.z - socket.su.size.z / 2 < 0.1f) return false;   // the wrist stays clear of the unit's lowest beam
-            if (l.x < socket.xMin - 0.06f || l.x > socket.xMax + 0.06f) return false;
+            if (-l.z - socket.su.size.z / 2 < 0.1f - SlideIn) return false;   // the wrist stays clear of the unit's lowest beam (PickWrist)
+            if (l.x < socket.xMin - SlideIn || l.x > socket.xMax + SlideIn) return false;
             return InReach(PickWrist(p));
         }
+
+        /// <summary>How far a part may lie beyond where the wrist can come down (past the rail's end, or closer
+        /// to the unit than the wrist may go) and still be gripped off-centre, sliding into the claws as they
+        /// lift (playtest 2026-10-29: parts staged 6-9 cm from a shelf were never taken).</summary>
+        const float SlideIn = 0.1f;
 
         bool InReach(Vector3 wrist)
         {
@@ -442,14 +444,15 @@ namespace WorkshopWreckage
                 (Vector3.Lerp(w0, w1, u), Vector3.Slerp(d0, d1, Mathf.SmoothStep(0, 1, Mathf.Clamp01((u - turnFrom) / (1 - turnFrom)))));
         }
 
-        /// <summary>The wrist right above a part lying at `p`, claw tips just off the floor.</summary>
-        /// <summary>Over the part, in the swing plane: a part a little beyond the carriage's travel
-        /// (a wall close by) is gripped off-centre and slides into the claws as they lift.</summary>
+        /// <summary>The wrist right above a part lying at `p`, claw tips just off the floor, in the swing plane:
+        /// a part a little beyond the carriage's travel (a wall close by) or right in front of the unit's base
+        /// is gripped off-centre and slides into the claws as they lift.</summary>
         Vector3 PickWrist(Vector3 p)
         {
             var t = socket.su.transform;
             var l = t.InverseTransformPoint(p);
             l.x = Mathf.Clamp(l.x, socket.xMin, socket.xMax);
+            l.z = Mathf.Min(l.z, -socket.su.size.z / 2 - 0.1f);   // clear of the unit's lowest beam
             var q = t.TransformPoint(l);
             return new(q.x, Mathf.Max(p.y + GripLen, 0.42f), q.z);
         }
@@ -531,6 +534,64 @@ namespace WorkshopWreckage
             var (w1, d1) = s.At(1);
             Pose(w1, d1);
             if (heldId >= 0) HeldFollow();
+        }
+
+        /// <summary>How far from a destination's staging spot a part staged for it (a robot's overflowing
+        /// pile) is still the arm's (m); a part someone else left there counts within 0.5 m.</summary>
+        const float StagedReach = 1.0f;
+
+        /// <summary>A part lying in front of its unit that the arm can take: one of its destinations', in that
+        /// staging pile (staged for it, or left within 0.5 m of the spot), low, small enough, where the pincer
+        /// really gets at it.</summary>
+        public bool CanReach(ItemInstance i)
+        {
+            if (i.state != ItemState.InWorld) return false;
+            var def = _g.world.DefOf(i.id);
+            if (!def.robotCarry || def.IsRobotPart || def.storageBox == null || !Served.Contains(def.storageBox)) return false;
+            if (i.Position.y > 0.7f || ItemDatabase.Extents(def)[0] > _r.MaxItemSize) return false;   // Wide Gripper raises the size
+            var spot = _r.StagingSpot(def.storageBox);
+            if (!spot.HasValue) return false;
+            float off = Vector3.ProjectOnPlane(i.Position - spot.Value, Vector3.up).magnitude;
+            if (!(off <= 0.5f || i.owner == "stage:" + def.storageBox && off <= StagedReach)) return false;
+            return Pickable(i.Position);   // the pincer must really get there
+        }
+
+        /// <summary>QA: busy with a cycle or homing.</summary>
+        public bool BusyQA => _busy;
+
+        /// <summary>QA: why NextJob passes over a part lying near one of its destinations' staging spots
+        /// ("" = it would take it).</summary>
+        public string WhyNot(int id)
+        {
+            var i = _g.world.instances[id];
+            var def = _g.world.DefOf(id);
+            var box = def.storageBox;
+            if (box == null || !Served.Contains(box)) return "not this unit's";
+            if (_g.StraysIn(box).Count > 0) return "destination blocked by strays";
+            if (_g.storage.Stored(box).Count >= _g.db.BoxCapacity(box)) return "destination full";
+            var spot = _r.StagingSpot(box);
+            if (!spot.HasValue) return "no staging spot";
+            if (i.state != ItemState.InWorld) return "not lying";
+            if (_g.robotReserved.Contains(id)) return "reserved";
+            if (_g.interaction.busy.Contains(id)) return "busy";
+            if (!def.robotCarry || def.IsRobotPart) return "not for robots";
+            if (i.Position.y > 0.7f) return "higher than 0.7 m";
+            if (ItemDatabase.Extents(def)[0] > _r.MaxItemSize) return "too big";
+            float off = Vector3.ProjectOnPlane(i.Position - spot.Value, Vector3.up).magnitude;
+            if (!(off <= 0.5f || i.owner == "stage:" + box && off <= StagedReach)) return $"outside the staging pile ({off:0.00} m from the spot, owner {i.owner})";
+            if (!_g.index.QuerySphere(spot.Value + Vector3.up * 0.15f, StagedReach + 0.2f).Contains(id)) return "not in the spatial index";
+            if (!Pickable(i.Position))
+            {
+                var l = socket.su.transform.InverseTransformPoint(i.Position);
+                float clear = -l.z - socket.su.size.z / 2;
+                if (clear < 0.1f - SlideIn) return $"the pincer can't get there: too close to the unit ({clear * 100:0} cm out, {off:0.00} m from the spot)";
+                if (l.x < socket.xMin - SlideIn || l.x > socket.xMax + SlideIn) return $"the pincer can't get there: beyond the rail (x {l.x:0.00} of {socket.xMin:0.00}..{socket.xMax:0.00})";
+                var wr = PickWrist(i.Position);
+                var (cx, cH) = socket.CarriageFor(wr);
+                float d = (wr - (socket.Point(cx, cH) + Vector3.down * SortingArmModel.ShoulderDrop)).magnitude;
+                return $"the pincer can't get there: out of reach ({d:0.00} m, arm {SortingArmModel.L1 + SortingArmModel.L2:0.00} m; {clear * 100:0} cm out from the unit, {off:0.00} m from the spot)";
+            }
+            return "";
         }
 
         IEnumerator Cycle(int itemId)

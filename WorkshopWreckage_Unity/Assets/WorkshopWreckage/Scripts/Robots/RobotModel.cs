@@ -37,6 +37,7 @@ namespace WorkshopWreckage
         public float focusWeight;
         public float stow;         // 0..1 the arms swing a part up and back over the cargo hold (stowing models)
         public float toss;         // 0..1 stowing models: the loader arm flicks up overhead to throw the part into the hold
+        public int stowBox;        // stowing models: the hold slot the arms reach into (Caterpillarbot: its cargo box)
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and

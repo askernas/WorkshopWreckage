@@ -47,6 +47,13 @@ namespace WorkshopWreckage
             foreach (var s in sockets.Values) if (s.occupant != null && s.occupant.Working && s.dests.Contains(box)) return true;
             return false;
         }
+        /// <summary>Will a mounted, working Sorting Arm take this staged part (its unit's, where the pincer gets at it)?</summary>
+        public bool ArmTakes(ItemInstance i)
+        {
+            var box = world.DefOf(i.id).storageBox;
+            foreach (var s in sockets.Values) if (s.occupant != null && s.occupant.Working && s.dests.Contains(box) && s.occupant.CanReach(i)) return true;
+            return false;
+        }
         public readonly HashSet<int> robotReserved = new();
         /// <summary>The starter set placed in plain sight near the spawn (see WorldGenerator).</summary>
         public List<int> starterIds = new();   // parts a robot is on its way to: no one else takes them
@@ -146,6 +153,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("skins", out var sk)) ItemSkins.Enabled = sk != "0";   // QA: --skins=0 is the original salvage look (before / after)
             if (args.TryGetValue("items", out var n)) itemCount = int.Parse(n);
             WorkshopArtDirectionProfile.Load(args);   // before the workshop is built: its lights, grading and colours read it
+            GameLook.Init(args);                      // playtest: the sandbox's Variant B look (--look=baseline: the game's own)
             int seed = args.TryGetValue("seed", out var sd) ? int.Parse(sd) : Json.Int(db.config, "default_seed", 1912);
             if (!StartWorld(seed, null)) return;
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
@@ -163,6 +171,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("pegfill", out var pf) && builder.pegboard != null) builder.pegboard.PreviewFill(float.Parse(pf, System.Globalization.CultureInfo.InvariantCulture));   // QA: hang a share of the pegboard tools
+            if (args.TryGetValue("pegdump", out var pdump) && builder.pegboard != null) { System.IO.File.WriteAllText(pdump, builder.pegboard.LayoutDump()); Debug.Log("[pegboard] layout dump: " + pdump); Application.Quit(); return; }   // QA: the board's layout (tools/peg_layout.py)
             if (args.TryGetValue("pegview", out var pv)) { SetState("play"); hud.SetHudVisible(false); Pegboard.PegboardPreview.Open(this, float.TryParse(pv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pvf) ? pvf : 1f); return; }   // the pegboard on its own (docs/PEGBOARD.md)
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
@@ -217,6 +226,7 @@ namespace WorkshopWreckage
             builder.transform.SetParent(transform, false);
             Debug.Log("[boot] layout generated");
             builder.Build(layout);
+            GameLook.ApplyRoom(builder);
             GameSettings.ApplyWorld(builder);
             var trayTarget = new GameObject("Target_Tray") { layer = Layers.Target };
             trayTarget.transform.SetParent(builder.transform, false);
@@ -240,6 +250,8 @@ namespace WorkshopWreckage
 
         /// <summary>What the last load had to convert (empty if the catalog was unchanged).</summary>
         public string migrationReport = "";
+        /// <summary>The parts a save conversion added (they fall into place after loading).</summary>
+        public List<int> migrationAdded = new();
 
         /// <summary>QA: the item layout a seed generates, before any physics (determinism check).</summary>
         public (ItemWorld, WorldGenerator) GenerateOnly(int seed)
@@ -277,6 +289,7 @@ namespace WorkshopWreckage
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
             migrationReport = "";
+            migrationAdded = new List<int>();
             if (_layoutSeed != seed && !BuildWorkshop(seed)) return false;
             var gen = new WorldGenerator { forbidden = InsideContainerG };
             int total = db.WorldTotal;
@@ -293,7 +306,7 @@ namespace WorkshopWreckage
             inventory = new Inventory(world);
             if (save != null && SaveSystem.NeedsMigration(save, db))
             {
-                save = SaveMigration.Remap(save, world, db, out var report);
+                save = SaveMigration.Remap(save, world, db, out var report, out migrationAdded);
                 migrationReport = report;
                 Debug.Log("[save] migrated to the current catalog: " + report);
             }
@@ -329,6 +342,13 @@ namespace WorkshopWreckage
             // a new world settles once (the generator only estimates where parts rest); a load moves
             // nothing: every part is where the player left it (playtest 2026-10-26)
             if (save == null) piles.SettleWorld();
+            // ...except what never came to rest: parts a conversion added (generated, never settled) and, in a save
+            // from before "loose_settled" (2026-10-28), board tools an earlier build's conversion left in mid-air
+            // (playtest 2026-10-28: "floating in space"). A save made since is at rest (SaveGame finishes the piles)
+            // and loads untouched.
+            else if (migrationAdded.Count > 0 || !Json.Bool(save, "loose_settled"))
+                piles.DropLoose(migrationAdded.Concat(Json.Bool(save, "loose_settled") ? Enumerable.Empty<int>() : world.instances.Where(i => i.state == ItemState.InWorld && world.DefOf(i.id).IsPegboardTool).Select(i => i.id)).Distinct().ToList(),
+                                migrationAdded.ToHashSet());
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
             interaction.ResetState();
@@ -1207,7 +1227,9 @@ namespace WorkshopWreckage
         /// <summary>Leaving through the workshop door ends the game (after the prompt).</summary>
         public void LeaveWorkshop(bool save)
         {
-            if (save) SaveGame("quick");
+            // the player's own save if this game has one, else the quicksave; a save that fails keeps them inside
+            if (save && !SaveGame(currentSave ?? SaveSystem.Quick)) return;
+            _leaveWithoutSaving = !save;
             WriteTelemetry();
             if (Automated) return;   // tests never quit from here
             Application.Quit();
@@ -1217,6 +1239,7 @@ namespace WorkshopWreckage
         public void OpenWorkbench(string projectId)
         {
             workbench.selected = projectId;
+            hud?.WorkbenchFromStart();
             SetState("workbench");
         }
 
@@ -1324,12 +1347,14 @@ namespace WorkshopWreckage
             foreach (var e in progression.Validate()) Debug.LogError("[progression] " + e);
             telemetry = new Telemetry(presetId, seed, world.Count);
             playTime = 0;
+            _savedPlayTime = 0;
             _telemetryFile = Path.Combine(Application.persistentDataPath, "telemetry", $"{presetId}_{seed}_{DateTime.Now:yyyyMMdd_HHmmss}.json");
             progression.SetDestinationTotal(CompletableDestinations());
             if (save != null)
             {
                 progression.Load(Json.Obj(save.GetValueOrDefault("progression")));
                 playTime = Json.Num(save, "play_time_s");
+                _savedPlayTime = playTime;
                 // the ledger and the level points agree: a save from before the ledger keeps its completions,
                 // and a destination the ledger finished but never paid out pays now (once)
                 foreach (var d in progression.completedDestinations) progress.completedDefs.Add(d);
@@ -1364,7 +1389,7 @@ namespace WorkshopWreckage
                 bool robot = storage.lastDepositor.StartsWith("robot");
                 var def = world.DefOf(id);
                 GameEvents.Raise(GameEventKind.PartSorted, storage.lastDepositor, RobotTypeOf(storage.lastDepositor), def.id, def.CategoryName, box);
-                if (def.IsPegboardTool) { builder?.pegboard?.Install(def.PegSlot, def); telemetry.Sorted(false, playTime, progress.sortedTotal); return; }   // restored %, no XP (docs/PEGBOARD.md)
+                if (def.IsPegboardTool) { HangOnBoard(def); telemetry.Sorted(false, playTime, progress.sortedTotal); return; }   // restored %, no XP (docs/PEGBOARD.md)
                 progression.OnSorted(id, robot);
                 if (robot) robots.FirstOrDefault(r => r.Owner == storage.lastDepositor)?.stats.Dropped(id, def.id, Time.time, false);
                 telemetry.Sorted(robot, playTime, progress.sortedTotal);
@@ -1450,7 +1475,11 @@ namespace WorkshopWreckage
             catch (Exception e) { Debug.LogWarning("Telemetry not written: " + e.Message); }
         }
 
-        void OnApplicationQuit() => WriteTelemetry();
+        void OnApplicationQuit()
+        {
+            if (!Automated && !_leaveWithoutSaving) Autosave("quit");   // the window closed, Alt+F4, Quit
+            WriteTelemetry();
+        }
 
         /// <summary>Starts a new world, switching world-size preset first if needed.</summary>
         public bool NewGame(string preset, int seed)
@@ -1460,42 +1489,82 @@ namespace WorkshopWreckage
                 if (!LoadPreset(preset)) { hud.ShowFatal("The item data files are invalid:\n\n" + string.Join("\n", db.errors.Take(25))); return false; }
             }
             itemCount = -1;
+            currentSave = currentSaveName = null;
             return StartWorld(seed, null);
         }
 
-        // Saving never silently replaces a different world: the first attempt to
-        // overwrite a slot that holds another preset/seed only warns.
-        string _overwriteArmed;
-        float _overwriteArmedAt;
+        /// <summary>The save this game was loaded from or last saved to by the player (not the quicksave or the
+        /// autosave), and its name; null for a game never saved.</summary>
+        public string currentSave, currentSaveName;
+        /// <summary>The play time at the last save or load: what is unsaved is the time since.</summary>
+        double _savedPlayTime;
+        /// <summary>Minutes of play the autosave lets pass (playtest 2026-10-28: a refused save lost an evening).</summary>
+        public const double AutosaveInterval = 300;
+        public bool Unsaved => world != null && progress != null && playTime - _savedPlayTime > 1;
+        public double UnsavedSeconds => playTime - _savedPlayTime;
+        public string AutosaveSlot => Automated ? "autotest_autosave" : SaveSystem.Auto;
+        /// <summary>QA: automated runs autosave only when a test asks (a save settles the piles).</summary>
+        public bool autosaveInTests;
+        bool _leaveWithoutSaving;
 
-        public void SaveGame(string slot)
+        /// <summary>Saves the game. A save is never refused (playtest 2026-10-28: saving over a converted save
+        /// was refused as "a different workshop" and the evening's progress was gone on the next load); asking
+        /// before overwriting another game's save is the save screen's job. `name`: the save's name (default:
+        /// the one it has). False if the file could not be written: the player is told, and the save there before
+        /// is untouched.</summary>
+        public bool SaveGame(string slot, string name = null, bool quiet = false)
         {
-            var existing = SaveSystem.Read(slot);
-            if (existing != null && !Automated && !SaveSystem.SameWorld(existing, this) && !(_overwriteArmed == slot && Time.unscaledTime - _overwriteArmedAt < 8))
-            {
-                _overwriteArmed = slot;
-                _overwriteArmedAt = Time.unscaledTime;
-                var msg = $"Slot '{slot}' holds a different workshop ({SaveSystem.WorldLabel(existing)}). Save again within 8 s to overwrite it.";
-                hud.OnFeedback(msg, false);
-                hud.SetStatus(msg);
-                return;
-            }
-            _overwriteArmed = null;
+            if (world == null || progress == null) return false;
+            var t0 = Time.realtimeSinceStartup;
             piles.Finish();   // nothing is saved in mid-air
             var bad = UnreachableParts();
             if (bad.Count > 0) Debug.LogWarning($"[integrity] {bad.Count} unreachable part(s) at save: " + string.Join("; ", bad.Take(8).Select(b => $"{db.Get(world.instances[b.id].defId).displayName}: {b.why}")));
-            if (SaveSystem.Write(slot, SaveSystem.Serialize(this)))
+            name ??= slot == currentSave && currentSaveName != null ? currentSaveName : SaveSystem.NameOf(slot);
+            var data = SaveSystem.Serialize(this);
+            data["name"] = name;
+            if (!SaveSystem.Write(slot, data))
+            {
+                var msg = $"SAVE FAILED — '{name}' was NOT saved ({SaveSystem.LastError}). Your earlier save is untouched.";
+                hud.OnFeedback(msg, false);
+                hud.Toast(msg, true);
+                hud.SetStatus(msg);
+                return false;
+            }
+            _savedPlayTime = playTime;
+            if (slot != SaveSystem.Quick && slot != AutosaveSlot) { currentSave = slot; currentSaveName = name; }
+            Debug.Log($"[save] '{name}' ({slot}) written in {(Time.realtimeSinceStartup - t0) * 1000:0} ms");
+            if (!quiet)
             {
                 Sfx.Play("save", null, -6);
-                hud.Toast($"Game saved ({slot})");
-                WriteTelemetry();
+                hud.Toast($"Game saved: {name}");
+                hud.SetStatus($"Saved: {name}");
             }
+            WriteTelemetry();
+            return true;
+        }
+
+        /// <summary>Keeps what is unsaved in the autosave: every few minutes of play, on going to the main menu,
+        /// on quitting, and before another save is loaded. Nothing to keep: nothing written.</summary>
+        public bool Autosave(string why)
+        {
+            if (!Unsaved || (Automated && !autosaveInTests)) return false;
+            bool ok = SaveGame(AutosaveSlot, "Autosave", true);
+            if (ok) { Debug.Log($"[save] autosave ({why})"); if (why == "timer") hud.Toast("Autosaved"); }
+            return ok;
         }
 
         public void LoadGame(string slot)
         {
-            var d = SaveSystem.Read(slot);
-            if (d == null) { hud.SetStatus("No save in that slot."); return; }
+            // what is unsaved is kept first (unless it is the autosave itself that loads)
+            if (slot != AutosaveSlot) Autosave("before loading " + slot);
+            var d = SaveSystem.Read(slot, out bool fromBackup, out var readError);
+            if (d == null)
+            {
+                var msg = readError == "No save in that slot." ? readError : $"'{SaveSystem.NameOf(slot)}' can't be loaded: the file is {readError} and has no backup.";
+                hud.OnFeedback(msg, false);
+                hud.SetStatus(msg);
+                return;
+            }
             var preset = Json.Str(d, "preset", "standard");
             if (preset != presetId && !LoadPreset(preset)) { hud.ShowFatal($"The '{preset}' preset data is invalid:\n\n" + string.Join("\n", db.errors.Take(25))); return; }
             var problem = SaveSystem.Check(d, db);
@@ -1504,8 +1573,12 @@ namespace WorkshopWreckage
             itemCount = count == db.WorldTotal || SaveSystem.NeedsMigration(d, db) ? -1 : count;
             if (StartWorld(Json.Int(d, "seed"), d))
             {
+                var name = Json.Str(d, "name", SaveSystem.DefaultName(slot));
+                currentSave = slot == SaveSystem.Quick || slot == AutosaveSlot ? null : slot;
+                currentSaveName = currentSave != null ? name : null;
                 SetState("play");
-                hud.Toast("Loaded " + slot + (migrationReport != "" ? $"  ·  converted to the current parts catalog: {migrationReport}" : ""), migrationReport != "");
+                if (fromBackup) hud.Toast($"The file of '{name}' was damaged: its backup from {Json.Str(d, "saved_at").Replace('T', ' ')} was loaded", true);
+                hud.Toast("Loaded: " + name + (migrationReport != "" ? $"  ·  converted to the current parts catalog: {migrationReport}" : ""), migrationReport != "");
                 var bad = UnreachableParts();
                 if (bad.Count > 0) Debug.LogWarning($"[integrity] {bad.Count} unreachable part(s) after load (Esc: Recover unreachable parts)");
             }
@@ -1551,10 +1624,47 @@ namespace WorkshopWreckage
         {
             var pb = builder?.pegboard;
             if (pb == null) return;
+            foreach (var p in PegboardGuard(true)) Debug.LogWarning("[pegboard] guard: " + p);
             pb.Clear();
             foreach (var kv in storage.contents)
                 if (PegSlotOf(kv.Key) is string slot)
                     foreach (var id in kv.Value) pb.Install(slot, world.DefOf(id));
+        }
+
+        /// <summary>The pegboard's safety net (docs/PEGBOARD.md "Safety"), on every new world and load: each tool exists
+        /// exactly once (a missing or extra copy is reported, never made up or destroyed), and is either loose in the
+        /// world (lying in a pile or tucked away is fine: a hidden tool, not a lost one; a tool somewhere nobody can
+        /// reach goes to the sorting tray like any part, AutoRecover), in the player's hands, or on its own place. A
+        /// tool stored anywhere else, a set's piece on the board without its holder, or a tool held by a robot is
+        /// taken off and put in the sorting tray (repair), so it can always be found again.</summary>
+        public List<string> PegboardGuard(bool repair)
+        {
+            var o = new List<string>();
+            var pb = builder?.pegboard;
+            if (pb == null || world == null) return o;
+            foreach (var d in db.order.Select(db.Get).Where(d => d.IsPegboardTool))
+            {
+                var ids = world.IdsOf(d.id).ToList();
+                if (ids.Count != 1) o.Add($"{d.displayName}: {ids.Count} copies in the world (one expected)");
+                foreach (var id in ids)
+                {
+                    var i = world.instances[id];
+                    string why = null;
+                    var slot = pb.cfg.slotById.GetValueOrDefault(d.PegSlot);
+                    if (i.state == ItemState.Stored && i.owner != "box:" + d.storageBox) why = $"stored in {i.owner}, not on its own place";
+                    else if (i.state == ItemState.Stored && slot != null && slot.IsChild && storage.Stored(Pegboard.PegboardConfig.DestPrefix + slot.parent).Count == 0) why = "on the board without its holder";
+                    else if (i.state == ItemState.Carried && i.owner != "player") why = $"held by {i.owner}";
+                    else if (i.state == ItemState.Installed) why = $"installed ({i.owner})";
+                    if (why == null) continue;
+                    o.Add($"{d.displayName} #{id}: {why}" + (repair ? " → sorting tray" : ""));
+                    if (!repair) continue;
+                    if (i.state == ItemState.Stored && i.owner.StartsWith("box:")) storage.Remove(i.owner.Substring(4), id);
+                    world.SetTransform(id, interaction.TrayMatrix(d));
+                    world.SetState(id, ItemState.InWorld, "tray");
+                    index.Insert(id);
+                }
+            }
+            return o;
         }
 
         /// <summary>Parts assigned to a destination in this world: the target of its X/X count
@@ -1568,6 +1678,37 @@ namespace WorkshopWreckage
                                      && InventoryAudit.LooseRobotParts(this).Count == 0 && (builder?.pegboard == null || builder.pegboard.Missing == 0);
         bool _restoredAnnounced;
         float _recoverT;
+
+        /// <summary>A tool deposited on its pegboard place (player only: robots never carry pegboard tools). A section
+        /// it completes pops its sign and announces the robot blueprints it opens; the last tool of the board gets the
+        /// TOOL WALL COMPLETE celebration (no reward). Loading a save never comes through here (SyncPegboard).</summary>
+        void HangOnBoard(ItemDefinition def)
+        {
+            var pb = builder?.pegboard;
+            if (pb == null) return;
+            var sec = pb.cfg.SectionOf(def.PegSlot);
+            bool wasDone = sec != null && pb.SectionComplete(sec.id), wasFull = pb.Missing == 0;
+            var lockedBefore = workbench?.LockedByTools() ?? new List<RobotWorkbench.Project>();
+            pb.Install(def.PegSlot, def);
+            if (sec == null || wasDone || !pb.SectionComplete(sec.id)) return;
+            var tx = pb.cfg.Section("section_signs");
+            if (!wasFull && pb.Missing == 0)
+            {
+                pb.Celebrate(null);
+                Sfx.Play("complete", null, -2);
+                hud.Toast($"{Json.Str(tx, "full_title", "TOOL WALL COMPLETE!")}  ·  {Json.Str(tx, "full_text", "")}", true);
+            }
+            else
+            {
+                pb.Celebrate(sec.id);
+                Sfx.Play("milestone", null, -4);
+                hud.Toast(Json.Str(tx, "complete_toast", "{section} COMPLETE!").Replace("{section}", sec.name.ToUpperInvariant()), true);
+            }
+            foreach (var p in lockedBefore.Where(workbench.ToolsMet))
+                hud.Toast(workbench.Unlocked(p) ? $"{p.name.ToUpperInvariant()} CONSTRUCTION UNLOCKED  ·  see the Robot Workbench"
+                                                : $"{p.name.ToUpperInvariant()}: TOOLS READY  ·  {workbench.LockReason(p)}", true);
+            workbench?.CheckBlueprints(false);   // marks them announced (the toast above is the announcement)
+        }
 
         void CheckFullyRestored()
         {
@@ -1641,6 +1782,7 @@ namespace WorkshopWreckage
                 telemetry.MaybeSample(playTime, Json.Num(Json.Obj(_progressionCfg["telemetry"]), "sample_interval_s", 60), progress.sortedTotal, progression.level);
             }
             if (world == null || Automated) return;
+            if (state == "play" && playTime - _savedPlayTime >= AutosaveInterval) Autosave("timer");
             var kb = Keyboard.current;
             if (kb == null) return;
             if (kb.escapeKey.wasPressedThisFrame)
@@ -1657,7 +1799,7 @@ namespace WorkshopWreckage
                 if (state == "play" && !interaction.inspecting) { SetState("paused"); hud.OpenDirect(screen); }
                 else if (state == "paused" && hud.DirectScreen == screen) SetState("play");
             }
-            else if (kb.f5Key.wasPressedThisFrame && state == "play") SaveGame("quick");
+            else if (kb.f5Key.wasPressedThisFrame && state == "play") SaveGame(SaveSystem.Quick);
             else if (kb.rKey.wasPressedThisFrame && state == "play" && !interaction.inspecting)
             {
                 // the collection specialist takes assignments; otherwise the nearest robot focuses on that kind
@@ -1673,7 +1815,7 @@ namespace WorkshopWreckage
             else if (kb.tKey.wasPressedThisFrame && state == "play") NearestActiveRobot()?.ToggleFollow();
             else if (kb.hKey.wasPressedThisFrame && state == "play") RobotHandover();
             else if (kb.jKey.wasPressedThisFrame && state == "play") RobotZone();
-            else if (kb.f9Key.wasPressedThisFrame && (state == "play" || state == "paused")) LoadGame("quick");
+            else if (kb.f9Key.wasPressedThisFrame && (state == "play" || state == "paused")) LoadGame(SaveSystem.Quick);
             if (state == "play" && Cursor.lockState != CursorLockMode.Locked && Mouse.current.leftButton.wasPressedThisFrame) Cursor.lockState = CursorLockMode.Locked;
         }
 

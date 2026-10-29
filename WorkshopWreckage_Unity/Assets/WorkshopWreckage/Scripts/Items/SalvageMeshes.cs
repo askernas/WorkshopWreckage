@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -51,6 +52,8 @@ namespace WorkshopWreckage
             ["robot:radar_left_antenna"] = RadarAntennaL,
             ["robot:radar_right_antenna"] = RadarAntennaR,
             ["robot:radar_battery"] = RadarBattery,
+            // the Unibot's tyre as it is on the robot (UnibotModel.BuildWheel), not the old 7-sided export (playtest 2026-10-28)
+            ["robot:tire"] = UnibotTire,
             // Sorting Arm unique parts (robot_parts.json, yellow enamel with red joints)
             ["robot:sa_coupler"] = b => { b.Box(new Vector3(0, -0.3f, 0), new Vector3(1f, 0.16f, 0.7f), 0, Part); b.Box(new Vector3(0, -0.14f, -0.3f), new Vector3(0.7f, 0.2f, 0.12f), 2, DarkSteel); b.Cyl(new Vector3(0, -0.22f, 0.05f), new Vector3(0, 0.2f, 0.05f), 0.24f, 2, ArmRed); foreach (float x in new[] { -0.4f, 0.4f }) b.Cyl(new Vector3(x, -0.38f, 0.2f), new Vector3(x, -0.2f, 0.2f), 0.05f, 2, Hole); b.Box(new Vector3(0.3f, -0.21f, 0.25f), new Vector3(0.1f, 0.02f, 0.06f), 2, Lens); },
             ["robot:sa_shoulder"] = b => { b.Cyl(new Vector3(0, -0.4f, 0), new Vector3(0, 0.05f, 0), 0.45f, 2, ArmRed); b.Cyl(new Vector3(0, 0.05f, 0), new Vector3(0, 0.15f, 0), 0.38f, 2, DarkSteel); b.Box(new Vector3(0, 0.3f, 0), new Vector3(0.7f, 0.3f, 0.5f), 0, Part); b.Cyl(new Vector3(-0.38f, 0.32f, 0), new Vector3(0.38f, 0.32f, 0), 0.16f, 2, Chrome); },
@@ -313,6 +316,27 @@ namespace WorkshopWreckage
 
         // ------------------------------------------------------------------ parts
 
+        /// <summary>The Unibot's fat balloon tyre, lying flat (axis Y): UnibotModel's profile (rounded shoulders, the
+        /// bead ring open in the middle) and its staggered tread, all rubber. Unit space: 1 = the tyre's diameter.</summary>
+        static void UnibotTire(B b)
+        {
+            const float k = 0.5f / 0.218f;   // robot metres -> unit space (tread top = radius 0.5)
+            var profile = new[] { new Vector2(0.135f, -0.083f), new Vector2(0.18f, -0.086f), new Vector2(0.203f, -0.074f), new Vector2(0.213f, -0.045f),
+                                  new Vector2(0.213f, 0.045f), new Vector2(0.203f, 0.074f), new Vector2(0.18f, 0.086f), new Vector2(0.135f, 0.083f),
+                                  new Vector2(0.135f, -0.083f) };   // closed through the bead ring
+            for (int i = 0; i < profile.Length; i++) profile[i] *= k;
+            b.Lathe(profile, Mathf.Max(32, b.seg * 2), 2, Rubber);
+            int blocks = b.seg >= 24 ? 30 : 20;
+            for (int i = 0; i < blocks; i++)
+                foreach (float y in new[] { -0.036f, 0.036f })
+                {
+                    float a = i * Mathf.PI * 2 / blocks + (y > 0 ? Mathf.PI / blocks : 0);
+                    var radial = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                    var tangent = new Vector3(-Mathf.Sin(a), 0, Mathf.Cos(a));
+                    b.Block(radial * 0.214f * k + Vector3.up * y * k, Vector3.up, radial, tangent, new Vector3(0.064f, 0.008f, 0.026f) * k, 2, Rubber);
+                }
+        }
+
         /// <summary>Cylinder barrel, chrome piston rod, clevis eyes at both ends, hose port.</summary>
         static void HydraulicActuator(B b)
         {
@@ -365,27 +389,27 @@ namespace WorkshopWreckage
             b.Box(new Vector3(-0.1f, 0.0f, 0.34f), new Vector3(0.16f, 0.1f, 0.01f), 2, Warn);  // rating plate
         }
 
-        /// <summary>Pressed-steel limb shell: flat body between two joint bosses, lightening holes, bearings.</summary>
+        /// <summary>Pressed-steel limb shell: one dog-bone shell (the waist runs into the two joint bosses, all
+        /// one thickness: playtest 2026-10-28, the old body, bosses and flange were separate overlapping solids),
+        /// bearings in the bosses, lightening holes, a rivet row along each edge, a cable channel and a tag.</summary>
         static void LimbHousing(B b)
         {
-            b.Box(new Vector3(0, 0, 0), new Vector3(0.3f, 1.3f, 0.16f), 0, Part);
-            b.Box(new Vector3(0, 0, -0.06f), new Vector3(0.36f, 1.2f, 0.04f), 0, Part);        // flange
+            b.DogBone(0.15f, 0.2f, 0.7f, -0.08f, 0.08f, 0, Part);
             foreach (float y in new[] { -0.7f, 0.7f })
             {
-                b.Cyl(new Vector3(0, y, -0.1f), new Vector3(0, y, 0.1f), 0.2f, 0, Part);     // joint boss
-                b.Cyl(new Vector3(0, y, 0.1f), new Vector3(0, y, 0.125f), 0.12f, 2, Chrome);   // bearing
-                b.Cyl(new Vector3(0, y, 0.125f), new Vector3(0, y, 0.13f), 0.05f, 2, Hole);
+                b.Cyl(new Vector3(0, y, 0.079f), new Vector3(0, y, 0.105f), 0.12f, 2, Chrome);   // bearing
+                b.Cyl(new Vector3(0, y, 0.104f), new Vector3(0, y, 0.11f), 0.05f, 2, Hole);
             }
             for (int i = -1; i <= 1; i++)
-                b.Cyl(new Vector3(0, i * 0.3f, 0.08f), new Vector3(0, i * 0.3f, 0.085f), 0.08f, 2, Hole);   // lightening holes
-            b.Box(new Vector3(0.155f, 0, 0.04f), new Vector3(0.02f, 0.9f, 0.04f), 2, Rubber);  // cable channel
-            for (int i = 0; i < 5; i++)
-                foreach (float x in new[] { -0.167f, 0.167f })
+                b.Cyl(new Vector3(0, i * 0.3f, 0.079f), new Vector3(0, i * 0.3f, 0.085f), 0.07f, 2, Hole);   // lightening holes
+            b.Box(new Vector3(0.158f, 0, 0), new Vector3(0.024f, 0.8f, 0.06f), 2, Rubber);      // cable channel
+            foreach (float x in new[] { -0.12f, 0.12f })
+                for (int i = -2; i <= 2; i++)
                 {
-                    var p = new Vector3(x, -0.4f + i * 0.2f, -0.04f);
-                    b.Cyl(p, p + Vector3.forward * 0.03f, 0.022f, 2, DarkSteel, 6);              // flange bolts
+                    var p = new Vector3(x, i * 0.225f, 0.079f);
+                    b.Cyl(p, p + Vector3.forward * 0.014f, 0.016f, 2, DarkSteel, 6);              // rivets
                 }
-            b.Box(new Vector3(-0.06f, 0.15f, 0.081f), new Vector3(0.12f, 0.07f, 0.004f), 2, Warn);   // service tag
+            b.Box(new Vector3(-0.05f, 0.15f, 0.081f), new Vector3(0.1f, 0.06f, 0.004f), 2, Warn);   // service tag
         }
 
         /// <summary>L-shaped chassis bracket with gussets, slotted holes and bolts.</summary>
@@ -590,7 +614,7 @@ namespace WorkshopWreckage
                 float a = k * Mathf.PI * 2 / 10;
                 b.Box(new Vector3(Mathf.Cos(a) * 0.38f, 0.053f, Mathf.Sin(a) * 0.38f), new Vector3(0.07f, 0.008f, 0.07f), 2, Hole);   // slots
             }
-            b.Cyl(new Vector3(0, -0.07f, 0), new Vector3(0, 0.2f, 0), 0.18f, 2, DarkSteel);                       // hub
+            b.Cyl(new Vector3(0, -0.05f, 0), new Vector3(0, 0.2f, 0), 0.18f, 2, DarkSteel);                       // hub (starts inside the disc: its base never shares the disc's underside)
             b.Cyl(new Vector3(0, 0.2f, 0), new Vector3(0, 0.205f, 0), 0.08f, 2, Hole, 8);                         // bore
             b.Cyl(new Vector3(0.17f, 0.1f, 0), new Vector3(0.23f, 0.1f, 0), 0.035f, 2, Chrome, 6);                // set screw
         }
@@ -658,6 +682,86 @@ namespace WorkshopWreckage
                     Tri(slot, ca, c0, c1, -ax);
                     int cb = V(b, ax, col), e0 = V(b + d0 * r, ax, col), e1 = V(b + d1 * r, ax, col);
                     Tri(slot, cb, e0, e1, ax);
+                }
+            }
+
+            /// <summary>A box along the axes x, y, z (unit, perpendicular) with those sizes.</summary>
+            public void Block(Vector3 c, Vector3 x, Vector3 y, Vector3 z, Vector3 size, int slot, Color col)
+            {
+                var ax = new[] { x * size.x * 0.5f, y * size.y * 0.5f, z * size.z * 0.5f };
+                for (int i = 0; i < 3; i++)
+                    foreach (float sg in new[] { -1f, 1f })
+                    {
+                        var n = ax[i] * sg;
+                        var u = ax[(i + 1) % 3]; var w = ax[(i + 2) % 3];
+                        Quad(slot, c + n - u - w, c + n + u - w, c + n + u + w, c + n - u + w, n.normalized, col);
+                    }
+            }
+
+            /// <summary>A flat dog-bone along Y between z0 and z1: a waist halfW wide running into two discs of radius r
+            /// at y = ±yc, as one closed shell (no overlapping parts).</summary>
+            public void DogBone(float halfW, float r, float yc, float z0, float z1, int slot, Color col)
+            {
+                float h = Mathf.Sqrt(r * r - halfW * halfW);
+                float a0 = Mathf.Atan2(-h, halfW), a1 = Mathf.PI - a0;   // where the waist meets the top disc
+                int nOut = Mathf.Max(12, seg), nIn = Mathf.Max(4, seg / 4);
+                Vector2 Disc(float a, float s) => new Vector2(r * Mathf.Cos(a), s * (yc + r * Mathf.Sin(a)));
+                var outer = new List<float>(); for (int i = 0; i <= nOut; i++) outer.Add(Mathf.Lerp(a0, a1, (float)i / nOut));
+                var inner = new List<float>(); for (int i = 0; i <= nIn; i++) inner.Add(Mathf.Lerp(a1, a0 + Mathf.PI * 2, (float)i / nIn));
+                // the waist: the top disc's inner arc, down the right side, the bottom disc's inner arc, up the left
+                var waist = inner.Select(a => Disc(a, 1)).Concat(Enumerable.Reverse(inner).Select(a => Disc(a, -1))).ToList();
+                foreach (float z in new[] { z0, z1 })
+                {
+                    var n = z > (z0 + z1) / 2 ? Vector3.forward : Vector3.back;
+                    Vector3 P(Vector2 q) => new Vector3(q.x, q.y, z);
+                    for (int i = 0; i < waist.Count; i++)
+                        Tri(slot, V(new Vector3(0, 0, z), n, col), V(P(waist[i]), n, col), V(P(waist[(i + 1) % waist.Count]), n, col), n);
+                    foreach (float sg in new[] { -1f, 1f })
+                    {
+                        var c = new Vector3(0, sg * yc, z);
+                        var ring = outer.Concat(inner.Skip(1)).ToList();
+                        for (int i = 0; i + 1 < ring.Count; i++)
+                            Tri(slot, V(c, n, col), V(P(Disc(ring[i], sg)), n, col), V(P(Disc(ring[i + 1], sg)), n, col), n);
+                    }
+                }
+                foreach (float sg in new[] { -1f, 1f })   // the discs' outer rims
+                    for (int i = 0; i < nOut; i++)
+                    {
+                        var q0 = Disc(outer[i], sg); var q1 = Disc(outer[i + 1], sg);
+                        Vector3 N(float a) => new Vector3(Mathf.Cos(a), sg * Mathf.Sin(a), 0);
+                        int p0 = V(new Vector3(q0.x, q0.y, z0), N(outer[i]), col), p1 = V(new Vector3(q1.x, q1.y, z0), N(outer[i + 1]), col);
+                        int p2 = V(new Vector3(q1.x, q1.y, z1), N(outer[i + 1]), col), p3 = V(new Vector3(q0.x, q0.y, z1), N(outer[i]), col);
+                        var mid = N((outer[i] + outer[i + 1]) / 2);
+                        Tri(slot, p0, p1, p2, mid); Tri(slot, p0, p2, p3, mid);
+                    }
+                foreach (float sx in new[] { -1f, 1f })   // the waist's flat sides
+                {
+                    float y = yc - h;
+                    Quad(slot, new Vector3(sx * halfW, -y, z0), new Vector3(sx * halfW, y, z0), new Vector3(sx * halfW, y, z1), new Vector3(sx * halfW, -y, z1), Vector3.right * sx, col);
+                }
+            }
+
+            /// <summary>A profile (radius, height) turned around the Y axis: smooth around, one normal per profile edge.</summary>
+            public void Lathe(Vector2[] profile, int segs, int slot, Color col)
+            {
+                var centre = Vector2.zero;
+                for (int i = 0; i + 1 < profile.Length; i++) centre += profile[i] / (profile.Length - 1);
+                for (int i = 0; i + 1 < profile.Length; i++)
+                {
+                    var q0 = profile[i]; var q1 = profile[i + 1];
+                    var e = q1 - q0;
+                    var nn = new Vector2(e.y, -e.x).normalized;
+                    if (Vector2.Dot(nn, (q0 + q1) * 0.5f - centre) < 0) nn = -nn;
+                    for (int j = 0; j < segs; j++)
+                    {
+                        float t0 = j * Mathf.PI * 2 / segs, t1 = (j + 1) * Mathf.PI * 2 / segs;
+                        var d0 = new Vector3(Mathf.Cos(t0), 0, Mathf.Sin(t0)); var d1 = new Vector3(Mathf.Cos(t1), 0, Mathf.Sin(t1));
+                        Vector3 N(Vector3 d) => d * nn.x + Vector3.up * nn.y;
+                        int a = V(d0 * q0.x + Vector3.up * q0.y, N(d0), col), b1 = V(d1 * q0.x + Vector3.up * q0.y, N(d1), col);
+                        int c1 = V(d1 * q1.x + Vector3.up * q1.y, N(d1), col), dd = V(d0 * q1.x + Vector3.up * q1.y, N(d0), col);
+                        var mid = N((d0 + d1).normalized);
+                        Tri(slot, a, b1, c1, mid); Tri(slot, a, c1, dd, mid);
+                    }
                 }
             }
 

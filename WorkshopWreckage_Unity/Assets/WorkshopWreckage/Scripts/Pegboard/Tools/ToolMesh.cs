@@ -55,6 +55,10 @@ namespace WorkshopWreckage.Pegboard
         /// kind 0 = a straight peg, 1 = a J hook (the tool hangs in its curl), 2 = a pair of rest pins.</summary>
         public void Hook(Vector2 at, float kind = 0) => _hooks.Add((_m.MultiplyPoint3x4(new Vector3(at.x, at.y, 0)), kind));
 
+        /// <summary>A holder's place for one of its pieces (ToolFactory.AnchorKind, z kept): the piece's first hook
+        /// goes there. Anchors come after the holder's own hooks, in the order of its child slots.</summary>
+        public void Anchor(Vector3 at) => _hooks.Add((_m.MultiplyPoint3x4(at), ToolFactory.AnchorKind));
+
         public void Box(Vector3 c, Vector3 s, int slot, Color col, float angleDeg = 0)
         {
             if (angleDeg != 0) Push(c, angleDeg); else Push(c);

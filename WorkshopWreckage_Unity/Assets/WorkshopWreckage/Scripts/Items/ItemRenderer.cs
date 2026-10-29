@@ -45,6 +45,7 @@ namespace WorkshopWreckage
         int[] _slot;       // instance -> slot within group
         readonly List<Group> _groupList = new();
         readonly HashSet<int> _hidden = new();
+        readonly Dictionary<int, Matrix4x4> _flying = new();
         GraphicsBuffer _data;
         Material _material, _skinMaterial;
         public int VisibleCount { get; private set; }
@@ -57,6 +58,7 @@ namespace WorkshopWreckage
             _groups.Clear();
             _groupList.Clear();
             _hidden.Clear();
+            _flying.Clear();
             if (_material == null)   // a rebuild (the visual sandbox's pile) keeps its materials and their slot copies
             {
                 _material = new Material(ItemAppearance.Shader) { name = "ItemInstanced", enableInstancing = true };
@@ -167,13 +169,15 @@ namespace WorkshopWreckage
             var inst = world.instances[id];
             var g = _groupList[_group[id]];
             int s = _slot[id];
-            bool show = Shows(inst);
-            g.chunks[s / Chunk][s % Chunk] = show ? inst.transform : Matrix4x4.TRS(inst.Position, Quaternion.identity, Vector3.zero);
+            bool flying = _flying.TryGetValue(id, out var fm);
+            bool show = flying || Shows(inst);
+            var m = flying ? fm : inst.transform;
+            g.chunks[s / Chunk][s % Chunk] = show ? m : Matrix4x4.TRS(inst.Position, Quaternion.identity, Vector3.zero);
             if (show)
             {
                 // items moved into storage or dropped elsewhere grow their chunk's bounds
                 var cb = g.chunkBounds[s / Chunk];
-                cb.Encapsulate(new Bounds(inst.Position, Vector3.one * g.radius * 2));
+                cb.Encapsulate(new Bounds(m.GetColumn(3), Vector3.one * g.radius * 2));
                 g.chunkBounds[s / Chunk] = cb;
             }
         }
@@ -186,6 +190,19 @@ namespace WorkshopWreckage
         }
 
         public bool IsHidden(int id) => _hidden.Contains(id);
+
+        /// <summary>Draws an instance at m whatever its state or hidden flag (a part flying between the hand and where
+        /// it lands), with the same world mesh, skin and wear as when it lies there; null gives it back to its state.
+        /// False: drawn elsewhere (the pegboard's tools).</summary>
+        public bool Fly(int id, Matrix4x4? m)
+        {
+            if (_group == null || id < 0 || id >= _group.Length || _groupList[_group[id]].external) return false;
+            if (m is Matrix4x4 mm) _flying[id] = mm; else _flying.Remove(id);
+            Refresh(id);
+            return true;
+        }
+
+        public bool IsFlying(int id) => _flying.ContainsKey(id);
 
         void Recount()
         {

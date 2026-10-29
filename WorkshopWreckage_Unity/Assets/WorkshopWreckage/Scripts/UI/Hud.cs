@@ -30,6 +30,9 @@ namespace WorkshopWreckage
         string _screen = "", _backTo = "pause";
         InputField _seed;
         RectTransform _saveList, _loadList, _logBody;
+        InputField _saveName;
+        Text _saveHeader, _loadHeader;
+        Button _saveOver, _saveNew;
         Text _logText;
         Button _continue;
         readonly List<float> _frames = new();
@@ -301,7 +304,7 @@ namespace WorkshopWreckage
             _mainTitleBits.Add(Title(m, "WORKSHOP\nWRECKAGE", 60).gameObject);
             _mainTitleBits.Add(Para(m, "EST. 1952   ·   SALVAGE & ROBOTICS   ·   WORKSHOP No. 7", 13, Brass, 20).gameObject);
             _mainTitleBits.Add(Para(m, "Restore order. Rebuild the robots.", 18, Muted, 28).gameObject);
-            _continue = MakeButton(m, "Continue", () => _g.LoadGame(LatestSlot()));
+            _continue = MakeButton(m, "Continue", () => _g.LoadGame(LatestSlot()?.slot));
             // world size: cycles through shared/data/world_presets.json
             var presets = ItemDatabase.Presets();
             if (presets.Count == 0) presets.Add((_g.presetId, _g.db.config));
@@ -354,19 +357,10 @@ namespace WorkshopWreckage
                     OnFeedback($"{n} part{(n == 1 ? "" : "s")} moved to the sorting tray", true);
                 });
             }
-            MakeButton(p, "Main Menu", () => _g.SetState("menu"));
-            MakeButton(p, "Quit", Application.Quit);
+            MakeButton(p, "Main Menu", () => { _g.Autosave("main menu"); _g.SetState("menu"); });
+            MakeButton(p, "Quit", Application.Quit);   // Game.OnApplicationQuit autosaves
 
-            var s = Screen("save", 720);
-            Title(s, "SAVE GAME");
-            _saveList = Rect("List", s, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            Stack(_saveList);
-            MakeButton(s, "Back", () => ShowScreenRaw(_backTo));
-            var l = Screen("load", 720);
-            Title(l, "LOAD GAME");
-            _loadList = Rect("List", l, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            Stack(_loadList);
-            MakeButton(l, "Back", () => ShowScreenRaw(_backTo));
+            BuildSaveScreens();
 
             var sk = Screen("skills", 1000);
             Title(sk, "SKILLS");
@@ -379,7 +373,7 @@ namespace WorkshopWreckage
 
             var ex = Screen("exit", 620);
             Title(ex, "LEAVE THE WORKSHOP?", 34);
-            Para(ex, "Stepping out through the door ends the game.\nYour workshop is saved to the quick slot if you choose to save.", 17, Muted, 56);
+            Para(ex, "Stepping out through the door ends the game.\nSaving keeps your workshop in your current save (or the quicksave).", 17, Muted, 56);
             MakeButton(ex, "Save and leave", () => _g.LeaveWorkshop(true));
             MakeButton(ex, "Leave without saving", () => _g.LeaveWorkshop(false));
             MakeButton(ex, "Stay in the workshop", () => _g.SetState("play"));
@@ -602,7 +596,7 @@ namespace WorkshopWreckage
                 PlayerPrefs.SetInt("ww_part_afterglow", on ? 1 : 0);
                 PlayerPrefs.Save();
             }), () => Interaction.Afterglow);
-            Para(cr, "A robot part you looked at blinks once after you look away.", 15, Muted, 22).alignment = TextAnchor.MiddleLeft;
+            Para(cr, "A robot part you looked at blinks once after you look away (once you have the Part Afterglow skill).", 15, Muted, 22).alignment = TextAnchor.MiddleLeft;
             Reg(ToggleRow(cr, "Show performance stats  [F3]", false, on => _debug.transform.parent.gameObject.SetActive(on)), () => _debug.transform.parent.gameObject.activeSelf);
 
             var bottom = HRow(st, 44, 12);
@@ -749,7 +743,12 @@ namespace WorkshopWreckage
             else if (_previewCam != null) PreviewCamera(false);
             if (name == "inventory") RefreshLog();
             if (name == "settings") RefreshSettings();
-            if (name == "main") _continue.interactable = LatestSlot() != "";
+            if (name == "main")
+            {
+                var latest = LatestSlot();
+                _continue.interactable = latest != null;
+                _continue.GetComponentInChildren<Text>().text = latest != null ? $"Continue  —  {latest.name}" : "Continue";
+            }
         }
 
         public bool BackFromSubScreen()
@@ -762,22 +761,200 @@ namespace WorkshopWreckage
         public void SetStatus(string t) => _status.text = t;
         public void OpenScreen(string name) => ShowSub(name);
 
+        // ------------------------------------------------------------------ save / load screens
+
+        /// <summary>Save and Load (playtest 2026-10-28: "a surefire load and save, the ability to name your saves,
+        /// and also to delete old saves"). Save: over this game's own save in one click, or as a new save under a
+        /// typed name; every save listed with Overwrite and Delete. Load: every save, newest first, with Load and
+        /// Delete. Overwriting another save and deleting ask once more on the button itself (no pop-up).</summary>
+        void BuildSaveScreens()
+        {
+            var s = Screen("save", 980);
+            Title(s, "SAVE GAME");
+            _saveHeader = Para(s, "", 16, Muted, 24);
+            _saveOver = MakeButton(s, "Save", () => { if (_g.currentSave != null && _g.SaveGame(_g.currentSave)) RefreshSlots(); });
+            var row = HRow(s, 46);
+            var lab = Para(row, "New save:", 18, Cream, 46);
+            lab.alignment = TextAnchor.MiddleLeft;
+            lab.GetComponent<LayoutElement>().preferredWidth = 120;
+            var inGo = DefaultControls.CreateInputField(new DefaultControls.Resources());
+            inGo.transform.SetParent(row, false);
+            inGo.AddComponent<LayoutElement>().flexibleWidth = 1;
+            _saveName = inGo.GetComponent<InputField>();
+            _saveName.characterLimit = 48;
+            _saveName.textComponent.font = TextAtlas.Font;
+            _saveName.textComponent.fontSize = 20;
+            var ph = (Text)_saveName.placeholder;
+            ph.font = TextAtlas.Font; ph.fontSize = 20; ph.text = "Name this save…";
+            _saveNew = Armed(row, "Save as new", SaveAsNew, () => SameNamed() is SaveSystem.SaveInfo same ? $"Overwrite '{same.name}'? Click again" : null);
+            Fixed(_saveNew, 230);
+            Para(s, "Your saves", 16, Muted, 22);
+            _saveList = ScrollList(s, 380);
+            MakeButton(s, "Back", () => ShowScreenRaw(_backTo));
+
+            var l = Screen("load", 980);
+            Title(l, "LOAD GAME");
+            _loadHeader = Para(l, "", 16, Muted, 24);
+            _loadList = ScrollList(l, 470);
+            Para(l, "Deleted saves are kept in the saves\\deleted folder. Your game is autosaved every 5 minutes, before loading and on quitting.", 13, Muted, 20);
+            var lrow = HRow(l, 44);
+            MakeButton(lrow, "Open saves folder", () => { System.IO.Directory.CreateDirectory(SaveSystem.Dir); Application.OpenURL("file:///" + SaveSystem.Dir.Replace('\\', '/')); }).GetComponent<LayoutElement>().flexibleWidth = 1;
+            MakeButton(lrow, "Back", () => ShowScreenRaw(_backTo)).GetComponent<LayoutElement>().flexibleWidth = 1;
+        }
+
+        RectTransform HRow(Transform parent, float height)
+        {
+            var row = new GameObject("Row", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            row.transform.SetParent(parent, false);
+            row.GetComponent<LayoutElement>().preferredHeight = height;
+            var h = row.GetComponent<HorizontalLayoutGroup>();
+            h.spacing = 10; h.childControlWidth = h.childControlHeight = true; h.childForceExpandWidth = false; h.childForceExpandHeight = true;
+            return (RectTransform)row.transform;
+        }
+
+        static void Fixed(Button b, float width)
+        {
+            var le = b.GetComponent<LayoutElement>();
+            le.preferredWidth = width; le.flexibleWidth = 0;
+        }
+
+        /// <summary>A list that scrolls (mouse wheel or drag) inside a box of the given height.</summary>
+        RectTransform ScrollList(Transform parent, float height)
+        {
+            var sv = new GameObject("Scroll", typeof(RectTransform), typeof(Image), typeof(ScrollRect), typeof(LayoutElement));
+            sv.transform.SetParent(parent, false);
+            sv.GetComponent<LayoutElement>().preferredHeight = height;
+            sv.GetComponent<Image>().color = new Color(0, 0, 0, 0.14f);
+            var vp = Rect("Viewport", sv.transform, Vector2.zero, Vector2.one, new Vector2(6, 6), new Vector2(-6, -6));
+            vp.gameObject.AddComponent<RectMask2D>();
+            var content = Rect("Content", vp, new Vector2(0, 1), Vector2.one, Vector2.zero, Vector2.zero);
+            content.pivot = new Vector2(0.5f, 1);
+            Stack(content);
+            var sr = sv.GetComponent<ScrollRect>();
+            sr.viewport = vp; sr.content = content; sr.horizontal = false;
+            sr.movementType = ScrollRect.MovementType.Clamped; sr.scrollSensitivity = 40;
+            return content;
+        }
+
+        /// <summary>A button that, while `confirm` returns a question, asks it on its own label first and acts on
+        /// the second click within 5 s (the label goes back after that).</summary>
+        Button Armed(Transform parent, string text, System.Action act, System.Func<string> confirm)
+        {
+            float armed = -99;
+            Button b = null;
+            b = MakeButton(parent, text, () =>
+            {
+                var label = b.GetComponentInChildren<Text>();
+                var q = confirm();
+                if (q != null && Time.unscaledTime - armed > 5)
+                {
+                    armed = Time.unscaledTime;
+                    label.text = q;
+                    StartCoroutine(Unarm(label, text, armed, () => armed));
+                    return;
+                }
+                armed = -99;
+                label.text = text;
+                act();
+            });
+            return b;
+        }
+
+        System.Collections.IEnumerator Unarm(Text label, string text, float at, System.Func<float> armedNow)
+        {
+            yield return new WaitForSecondsRealtime(5);
+            if (label != null && armedNow() == at) label.text = text;
+        }
+
+        SaveSystem.SaveInfo SameNamed()
+        {
+            var n = _saveName.text.Trim();
+            return n == "" ? null : SaveSystem.List(_g.Automated).FirstOrDefault(x => x.Ok && string.Equals(x.name, n, System.StringComparison.OrdinalIgnoreCase));
+        }
+
+        void SaveAsNew()
+        {
+            var n = _saveName.text.Trim();
+            if (n == "") n = "Workshop " + System.DateTime.Now.ToString("d MMM HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            var same = SameNamed();
+            if (_g.SaveGame(same?.slot ?? SaveSystem.NewSlotId(_g.Automated), n)) { _saveName.text = ""; RefreshSlots(); }
+        }
+
         void RefreshSlots()
         {
+            var saves = SaveSystem.List(_g.Automated);
+            bool inGame = _g.world != null && _g.progress != null && _backTo == "pause";
+            var cur = _g.currentSave;
+            _saveHeader.text = cur != null
+                ? $"This game: <b>{_g.currentSaveName}</b>{(_g.Unsaved ? $"  ·  {Mins(_g.UnsavedSeconds)} of play not saved yet" : "  ·  saved")}"
+                : "This game has not been saved under a name yet: name it below.";
+            _saveOver.gameObject.SetActive(cur != null);
+            if (cur != null) _saveOver.GetComponentInChildren<Text>().text = $"Save  —  update '{_g.currentSaveName}'";
+            _loadHeader.text = saves.Count == 0 ? "No saves yet." : $"{saves.Count} save{(saves.Count == 1 ? "" : "s")}, newest first" + (inGame && _g.Unsaved ? "  ·  loading keeps this game's unsaved play in Autosave" : "");
             foreach (var (list, saving) in new[] { (_saveList, true), (_loadList, false) })
             {
                 foreach (Transform c in list) Destroy(c.gameObject);
-                foreach (var slot in SaveSystem.Slots)
+                foreach (var sv in saves)
                 {
-                    if (saving && slot == "quick") continue;
-                    var b = MakeButton(list, SaveSystem.Describe(slot), () =>
-                    {
-                        if (saving) { _g.SaveGame(slot); RefreshSlots(); }
-                        else _g.LoadGame(slot);
-                    });
-                    b.interactable = saving || System.IO.File.Exists(SaveSystem.PathOf(slot));
+                    if (saving && sv.slot == _g.AutosaveSlot) continue;   // the autosave is the game's to write
+                    SaveRow(list, sv, saving, sv.slot == cur && inGame);
                 }
+                if (saves.Count == 0) Para(list, saving ? "No saves yet." : "No saves yet: start a New Game, then Save from the pause menu (Esc).", 16, Muted, 30);
             }
+        }
+
+        static string Mins(double s) => s < 90 ? $"{s:0} s" : $"{s / 60:0} min";
+
+        void SaveRow(RectTransform list, SaveSystem.SaveInfo sv, bool saving, bool current)
+        {
+            var row = HRow(list, 60);
+            row.name = "Save " + sv.slot;
+            row.gameObject.AddComponent<Image>().color = current ? new Color(1f, 0.85f, 0.5f, 0.16f) : new Color(1, 1, 1, 0.05f);
+            row.GetComponent<HorizontalLayoutGroup>().padding = new RectOffset(12, 6, 4, 4);
+            var t = Para(row, $"<b>{sv.name}</b>{(current ? "   <i>(this game)</i>" : "")}\n<size=13>{SaveSystem.Describe(sv)}</size>", 19, Cream, 52);
+            t.alignment = TextAnchor.MiddleLeft;
+            t.GetComponent<LayoutElement>().flexibleWidth = 1;
+            Button main;
+            if (saving)
+                main = Armed(row, "Overwrite", () => { if (_g.SaveGame(sv.slot, sv.name)) RefreshSlots(); }, () => current ? null : "Confirm?");
+            else
+            {
+                main = MakeButton(row, "Load", () => _g.LoadGame(sv.slot));
+                main.interactable = sv.Ok || sv.fromBackup;
+            }
+            Fixed(main, saving ? 140 : 110);
+            var del = Armed(row, "Delete", () =>
+            {
+                if (!SaveSystem.Delete(sv.slot)) { SetStatus($"'{sv.name}' could not be deleted: {SaveSystem.LastError}"); return; }
+                if (sv.slot == _g.currentSave) _g.currentSave = _g.currentSaveName = null;
+                SetStatus($"Deleted '{sv.name}'");
+                RefreshSlots();
+            }, () => "Confirm?");
+            Fixed(del, 120);
+        }
+
+        /// <summary>QA: types a name into the save screen's name field.</summary>
+        public void QaSaveName(string n) => _saveName.text = n;
+
+        /// <summary>QA: clicks the button whose label starts with `label` on the open screen (in the row of save
+        /// `slot`, if given), as a mouse click would. False if there is none.</summary>
+        public bool QaClick(string label, string slot = null)
+        {
+            if (!_screens.TryGetValue(_screen ?? "", out var scr)) return false;
+            Transform root = scr;
+            if (slot != null) root = scr.GetComponentsInChildren<RectTransform>().FirstOrDefault(r => r.name == "Save " + slot);
+            var b = root?.GetComponentsInChildren<Button>().FirstOrDefault(x => x.interactable && x.GetComponentInChildren<Text>().text.StartsWith(label));
+            if (b == null) return false;
+            b.onClick.Invoke();
+            return true;
+        }
+
+        /// <summary>QA: every text in save `slot`'s row on the open screen (null: no such row).</summary>
+        public string QaRowText(string slot)
+        {
+            if (!_screens.TryGetValue(_screen ?? "", out var scr)) return null;
+            var row = scr.GetComponentsInChildren<RectTransform>().FirstOrDefault(r => r.name == "Save " + slot);
+            return row == null ? null : string.Join(" | ", row.GetComponentsInChildren<Text>().Select(x => x.text));
         }
 
         Text _skillHeader;
@@ -838,17 +1015,8 @@ namespace WorkshopWreckage
         /// <summary>A rank's name without its numeral ("Magnetic Glove IV" → "Magnetic Glove").</summary>
         static string RankBase(string name) => System.Text.RegularExpressions.Regex.Replace(name, @"\s+[IVX]+$", "");
 
-        static string LatestSlot()
-        {
-            string best = "";
-            System.DateTime bestT = System.DateTime.MinValue;
-            foreach (var s in SaveSystem.Slots)
-            {
-                var p = SaveSystem.PathOf(s);
-                if (System.IO.File.Exists(p) && System.IO.File.GetLastWriteTime(p) > bestT) { bestT = System.IO.File.GetLastWriteTime(p); best = s; }
-            }
-            return best;
-        }
+        /// <summary>The newest save that loads (Continue), or null.</summary>
+        SaveSystem.SaveInfo LatestSlot() => SaveSystem.List(_g.Automated).FirstOrDefault(s => s.Ok || s.fromBackup);
 
         void RefreshLog()
         {
@@ -893,8 +1061,12 @@ namespace WorkshopWreckage
         }
 
         /// <summary>A line in the message log (top left, no box): newest at the bottom, fading out after 8 s.</summary>
+        /// <summary>QA: every message-log line of this session (newest last).</summary>
+        public readonly List<string> toastLog = new();
+
         public void Toast(string text, bool big = false)
         {
+            toastLog.Add(text);
             var r = Rect("Line", _toasts, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
             var t = Label(r, "t", 15, big ? Brass : Cream, TextAnchor.UpperLeft, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
             t.supportRichText = true;

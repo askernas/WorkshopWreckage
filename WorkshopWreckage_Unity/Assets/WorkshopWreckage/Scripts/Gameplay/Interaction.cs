@@ -31,9 +31,11 @@ namespace WorkshopWreckage
         public string targetType = "none";
         public SortingArm targetArm;   // targetType "arm": one standing on the floor
         public int targetItem = -1;
-        /// <summary>Robot part afterglow (Settings, PlayerPrefs "ww_part_afterglow", on by default): a robot
-        /// part blinks once after the crosshair leaves it, so it is easier to spot again (playtest 2026-10-26).</summary>
+        /// <summary>Robot part afterglow (playtest 2026-10-26): a robot part blinks once after the crosshair leaves it,
+        /// so it is easier to spot again. A skill bought with skill points ("part_afterglow", playtest 2026-10-28: not
+        /// from the start); this Settings preference (PlayerPrefs "ww_part_afterglow") can turn it off once bought.</summary>
         public static bool Afterglow = PlayerPrefs.GetInt("ww_part_afterglow", 1) == 1;
+        public bool AfterglowOn => Afterglow && game.progression != null && game.progression.Has("part_afterglow");
         public const float AfterglowTime = 0.9f;
         static readonly Color AfterglowColor = new(0.35f, 0.85f, 1f);
         public int afterglowId = -1;
@@ -41,6 +43,8 @@ namespace WorkshopWreckage
         int _lastHover = -1;
         Material _afterglowMat;
         public string targetDest;
+        /// <summary>targetType "station": the robot part in the parts pool tray under the crosshair (-1: none).</summary>
+        public int targetPoolPart = -1;
         public StorageUnit targetUnit;
         public bool inspecting;
         /// <summary>The unfinished robot taken off the workbench to look at (null = none).</summary>
@@ -118,8 +122,7 @@ namespace WorkshopWreckage
             if (inspecting)
             {
                 HideHover();
-                if (lmbDown && inspectRobot != null) InstallFromInspect();
-                else if (lmbDown && inspectWorldId >= 0) { int id = inspectWorldId; EndInspect(); Pickup(id, false); }
+                if (lmbDown && inspectWorldId >= 0) { int id = inspectWorldId; EndInspect(); Pickup(id, false); }
                 else if (mouse != null && mouse.rightButton.wasPressedThisFrame && inspectRobot != null) EndInspect();
                 else if (kb.fKey.wasPressedThisFrame) EndInspect();
                 else if (kb.rKey.wasPressedThisFrame) game.held.autoRotate = !game.held.autoRotate;
@@ -146,12 +149,23 @@ namespace WorkshopWreckage
             }
             _repeatT -= Time.deltaTime;
             if (lmbDown) { _repeatT = Repeat * 2.5f; Primary(); }
-            else if (lmbHeld && _repeatT <= 0) { _repeatT = Repeat; Primary(); }
+            else if (lmbHeld && _repeatT <= 0) { _repeatT = Repeat; Primary(true); }
             if (kb.gKey.wasPressedThisFrame) DepositAll();
+            // X take off / V apply: only in workbench mode now (playtest 2026-10-28), on the bench screen
             if (kb.fKey.wasPressedThisFrame) BeginInspect();
             if (kb.zKey.wasPressedThisFrame) DropHeld();
-            if (wheel < 0) Inv.Cycle(1);
-            if (wheel > 0) Inv.Cycle(-1);
+            if (PickerActive)
+            {
+                // at a robot on its mat the wheel and Q / E scroll through the found parts that fit it
+                if (wheel < 0 || kb.eKey.wasPressedThisFrame) Pick(1);
+                if (wheel > 0 || kb.qKey.wasPressedThisFrame) Pick(-1);
+            }
+            else
+            {
+                if (wheel < 0) Inv.Cycle(1);
+                if (wheel > 0) Inv.Cycle(-1);
+            }
+            game.player.turnKeysTaken = PickerActive;
             // the number keys use skills (PlayerTools); the wheel picks the slot
         }
 
@@ -182,6 +196,7 @@ namespace WorkshopWreckage
             targetDest = null;
             targetUnit = null;
             targetPeg = null;
+            targetPoolPart = -1;
             // a pile in front of a drawer must not stop you storing into it: while you hold a part
             // that belongs right there, aiming through the pile (within 0.8 m of it) selects the drawer
             if (pid >= 0 && hit.HasValue && Inv.HeldId() >= 0 && hit.Value.distance - pdist < 0.8f
@@ -202,14 +217,47 @@ namespace WorkshopWreckage
             else if (hit.HasValue)
             {
                 var st = hit.Value.collider.GetComponent<StorageTarget>();
-                if (st != null && st.station) { targetType = "station"; targetPoint = hit.Value.point; }
+                if (st != null && st.station)
+                {
+                    targetType = "station";
+                    targetPoint = game.workbench.BenchPoint(o, dir, hit.Value.point);
+                    if (game.workbench.AtPool(targetPoint)) targetPoolPart = game.workbench.PoolPartAt(o, dir);
+                }
                 else if (st != null && st.destId == "TRAY") targetType = "tray";
                 else if (st != null && st.destId == "EXIT") targetType = "exit";
                 else if (st != null && st.destId.StartsWith("SOCKET:")) { targetType = "socket"; targetSocket = st.destId.Substring(7); }
                 else if (st != null) { targetType = "dest"; targetDest = st.destId; targetUnit = st.unit; }
             }
+            RefreshPicker();
             NoteHover();
             ShowHover();
+            TargetChanged?.Invoke(Describe());
+        }
+
+        // ---------------------------------------------------------------- the part picker (playtest 2026-10-28)
+
+        /// <summary>Found parts that fit the robot aimed at on its mat (hands and parts pool, one of each kind).</summary>
+        public readonly List<int> fitChoices = new();
+        int _pickId = -1, _pickIdx, _pickHeld = -1;
+        RobotWorkbench.Project _pickProj;
+        /// <summary>The part the picker shows (LMB tries it on), or -1.</summary>
+        public int PickedPart => fitChoices.Count > 0 && _pickIdx < fitChoices.Count ? fitChoices[_pickIdx] : -1;
+        public bool PickerActive => targetType == "station" && fitChoices.Count > 0;
+
+        void RefreshPicker()
+        {
+            fitChoices.Clear();
+            // playtest 2026-10-28: robots are only changed in workbench mode (LMB on the bench), so no in-world picker
+            _pickProj = null;
+        }
+
+        /// <summary>Scrolls the picker by one, round the list.</summary>
+        public void Pick(int step)
+        {
+            if (fitChoices.Count == 0) return;
+            _pickIdx = ((_pickIdx + step) % fitChoices.Count + fitChoices.Count) % fitChoices.Count;
+            _pickId = fitChoices[_pickIdx];
+            Sfx.Play("ui_click", null, -12);
             TargetChanged?.Invoke(Describe());
         }
 
@@ -241,7 +289,7 @@ namespace WorkshopWreckage
         {
             int now = targetType == "item" ? targetItem : -1;
             if (now >= 0 && now == afterglowId) afterglowId = -1;   // back on it: the normal highlight shows
-            if (_lastHover >= 0 && _lastHover != now && Afterglow && _lastHover < World.Count
+            if (_lastHover >= 0 && _lastHover != now && AfterglowOn && _lastHover < World.Count
                 && World.instances[_lastHover].state == ItemState.InWorld && World.DefOf(_lastHover).IsRobotPart)
             { afterglowId = _lastHover; _afterglowT = Time.time; }
             _lastHover = now;
@@ -252,7 +300,7 @@ namespace WorkshopWreckage
         {
             if (afterglowId < 0) return;
             float k = (Time.time - _afterglowT) / AfterglowTime;
-            if (!Afterglow || k >= 1 || afterglowId >= World.Count || World.instances[afterglowId].state != ItemState.InWorld) { afterglowId = -1; return; }
+            if (!AfterglowOn || k >= 1 || afterglowId >= World.Count || World.instances[afterglowId].state != ItemState.InWorld) { afterglowId = -1; return; }
             float s = Mathf.Sin(k * Mathf.PI);
             _afterglowMat.SetFloat("_Width", 2.5f * s);
             _afterglowMat.SetFloat("_Glow", 9f * s);
@@ -369,6 +417,8 @@ namespace WorkshopWreckage
                     if (pb.IsOccupied(targetPeg)) return new TargetInfo { title = title, sub = sub, hint = "" };
                     int n = Inv.items.Count(i => World.DefOf(i).IsPegboardTool);
                     string all = n > 1 ? $"    [G] Hang all {n}" : "";
+                    if (pb.WaitsForHolder(targetPeg) && CarriedToolFor(targetPeg) >= 0)
+                        return new TargetInfo { title = title, sub = sub, hint = MountHolderFirst(targetPeg) + all, tone = -1 };
                     if (CarriedToolFor(targetPeg) >= 0)
                         return new TargetInfo { title = title, sub = sub, hint = "[LMB] " + pb.cfg.S("interaction", "prompt", "Hang {tool}").Replace("{tool}", tool.name) + all, tone = 1 };
                     if (held >= 0)
@@ -399,10 +449,18 @@ namespace WorkshopWreckage
                     var wb = game.workbench;
                     var p = wb.ActiveOnMat(MatAt(targetPoint));
                     var parts = StationParts();
-                    string sub = $"{p.name}: {RobotWorkbench.StatusText(wb.StatusOf(p))}  ·  {wb.InstalledCount(p)}/{wb.Required(p)} installed" + (wb.Unlocked(p) ? "" : $"  ·  {wb.LockReason(p)}");
+                    int fitted = wb.FittedIds(p).Count;
+                    string sub = $"{p.name}: {RobotWorkbench.StatusText(wb.StatusOf(p))}  ·  {wb.InstalledCount(p)}/{wb.Required(p)} installed"
+                        + (fitted > 0 ? $" ({fitted} fitted, not committed)" : "") + (wb.Unlocked(p) ? "" : $"  ·  {wb.LockReason(p)}");
+                    // playtest 2026-10-28: LMB anywhere on the bench opens workbench mode (blueprints, then the parts);
+                    // what you carry for the robots goes into the parts box first, so it is there to fit
+                    string open = "[LMB] Open the Robot Workbench" + (parts.Count > 0 ? $" (puts the {parts.Count} part{(parts.Count == 1 ? "" : "s")} you carry in the parts box)" : "");
+                    if (wb.AtPool(targetPoint))
+                        return targetPoolPart >= 0
+                            ? new TargetInfo { title = World.DefOf(targetPoolPart).displayName, sub = $"In the parts box  ·  {wb.FitsText(targetPoolPart)}", hint = open, tone = 1 }
+                            : new TargetInfo { title = "Robot Workbench  ·  parts box", sub = sub, hint = open, tone = 1 };
                     string look = wb.RobotOf(p) is Robot r && r.mode == Robot.Mode.Assembling && r.gameObject.activeSelf ? "    [F] Pick up and look" : "";
-                    string hint = parts.Count > 0 ? $"[LMB] Deliver {World.DefOf(parts[0]).displayName}    [G] Deliver all ({parts.Count})" : "[LMB] Open the workbench" + look;
-                    return new TargetInfo { title = "Robot Workbench", sub = sub, hint = hint, tone = parts.Count > 0 ? 1 : 0 };
+                    return new TargetInfo { title = "Robot Workbench", sub = sub, hint = open + look, tone = 1 };
                 }
             }
             return new TargetInfo();
@@ -417,7 +475,11 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- actions
 
-        public void Primary()
+        /// <summary>The held part if it is a robot part (-1: none).</summary>
+        int HeldRobotPart() => Inv.HeldId() is int h && h >= 0 && World.DefOf(h).IsRobotPart ? h : -1;
+
+        /// <summary>repeat: LMB held down (fitting and taking out of the pool happen once per click).</summary>
+        public void Primary(bool repeat = false)
         {
             switch (targetType)
             {
@@ -429,10 +491,15 @@ namespace WorkshopWreckage
                     else if (targetUnit.type == "drawer_cabinet") OpenDrawer(targetUnit, targetDest);
                     break;
                 case "station":
-                    var p = StationParts();
-                    if (p.Count > 0) DepositStation(p[0]);
-                    else game.OpenWorkbench(game.workbench.ActiveOnMat(MatAt(targetPoint)).id);
+                {
+                    var wb = game.workbench;
+                    // playtest 2026-10-28: a click on the bench opens workbench mode; robots are changed only there.
+                    // Carried robot parts, materials and batteries go into the parts box first.
+                    if (repeat) break;
+                    DepositAll();
+                    game.OpenWorkbench(wb.ActiveOnMat(MatAt(targetPoint)).id);
                     break;
+                }
                 case "tray":
                     if (Inv.HeldId() >= 0) DropInTray(Inv.HeldId());
                     break;
@@ -487,7 +554,7 @@ namespace WorkshopWreckage
             World.SetState(id, ItemState.Carried, "player");
             Inv.Add(id);
             Inv.Select(def.id);
-            if (animate) StartCoroutine(Fly(def, from, game.held.HandWorld(), 0.16f, null));
+            if (animate) StartCoroutine(Fly(id, from, game.held.HandWorld(), 0.16f, null));
             game.tools?.OnManualPickup(id);   // Handful: nearby copies come along
             SettleNeighbours(from, def);
             if (!def.IsRobotPart) Sfx.Play(ItemDatabase.Extents(def)[0] > 0.24f ? "pickup_heavy" : "pickup", from.GetColumn(3), -2);   // a robot part has its own (Game)
@@ -512,13 +579,13 @@ namespace WorkshopWreckage
             if (unit.type == "drawer_cabinet")
             {
                 OpenDrawer(unit, dest);
-                StartCoroutine(Fly(def, game.held.HandWorld(), unit.FrontWorld(unit.SlotOf(dest)) * Matrix4x4.Translate(new Vector3(0, 0.05f, -0.25f)) * Matrix4x4.Scale(Vector3.one * def.worldScale), 0.18f, null));
+                StartCoroutine(Fly(id, game.held.HandWorld(), unit.FrontWorld(unit.SlotOf(dest)) * Matrix4x4.Translate(new Vector3(0, 0.05f, -0.25f)) * Matrix4x4.Scale(Vector3.one * def.worldScale), 0.18f, null));
             }
             else
             {
                 game.renderer.SetHidden(id, true);
                 busy.Add(id);
-                StartCoroutine(Fly(def, game.held.HandWorld(), World.instances[id].transform, 0.2f, () => { busy.Remove(id); game.renderer.SetHidden(id, false); }));
+                StartCoroutine(Fly(id, game.held.HandWorld(), World.instances[id].transform, 0.2f, () => { busy.Remove(id); game.renderer.SetHidden(id, false); }));
             }
             Sfx.Play("drop_drawer", World.instances[id].Position, -3);
             Feedback?.Invoke($"Stored: {def.displayName}  →  {Json.Str(d, "slot")}", true);
@@ -538,7 +605,7 @@ namespace WorkshopWreckage
             foreach (var o in game.index.QuerySphere(p + Vector3.up * 0.1f, Mathf.Max(e[0], e[1]) * 0.5f + 0.05f))
                 if (World.instances[o].state == ItemState.InWorld && !busy.Contains(o)) rest = Mathf.Max(rest, game.index.WorldBounds(o).max.y);
             return Matrix4x4.TRS(new Vector3(p.x, rest + e[2] * 0.5f + 0.003f, p.z),
-                Quaternion.Euler(UnityEngine.Random.Range(-10f, 10f), UnityEngine.Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+                Quaternion.Euler(UnityEngine.Random.Range(-10f, 10f) + (def.restMode == RestMode.Side ? 90 : 0), UnityEngine.Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
         }
 
         /// <summary>Hangs a carried board tool in its own slot (only the player hangs tools; it can only go
@@ -549,6 +616,8 @@ namespace WorkshopWreckage
             var pb = game.builder?.pegboard;
             if (pb == null || !def.IsPegboardTool) return false;
             var dest = def.storageBox;
+            // a set's piece goes on its holder's place, so the holder has to be up first (docs/PEGBOARD.md "Tool sets")
+            if (pb.WaitsForHolder(def.PegSlot)) { Feedback?.Invoke(MountHolderFirst(def.PegSlot), false); Sfx.Play("reject", null, -4); return false; }
             var r = Storage.Check(dest, id);
             if (r != StorageSystem.Result.Ok) { Feedback?.Invoke(Storage.ResultText(r, dest, id), false); Sfx.Play("reject", null, -4); return false; }
             Inv.Remove(id);
@@ -556,6 +625,14 @@ namespace WorkshopWreckage
             Sfx.Play(pb.cfg.S("interaction", "sound", "peg_hang"), pb.SlotCentre(def.PegSlot), -3);
             Feedback?.Invoke($"Hung: {def.displayName}  ({pb.Hung}/{pb.Total} on the tool board)", true);
             return true;
+        }
+
+        /// <summary>"Mount the metric socket holder first." for a set piece's slot.</summary>
+        string MountHolderFirst(string slot)
+        {
+            var cfg = game.builder.pegboard.cfg;
+            var holder = cfg.toolById[cfg.slotById[cfg.slotById[slot].parent].tool];
+            return $"Mount the {holder.name.ToLowerInvariant()} first.";
         }
 
         public bool DropInTray(int id, bool feedback = true)
@@ -572,7 +649,7 @@ namespace WorkshopWreckage
             game.index.Insert(id);
             busy.Add(id);
             game.renderer.SetHidden(id, true);
-            StartCoroutine(Fly(def, from, m, 0.25f, () => { busy.Remove(id); game.renderer.SetHidden(id, false); }));
+            StartCoroutine(Fly(id, from, m, 0.25f, () => { busy.Remove(id); game.renderer.SetHidden(id, false); }));
             Sfx.Play("drop_floor", p, -6);
             if (feedback) Feedback?.Invoke($"In the sorting tray: {def.displayName}", true);
             return true;
@@ -612,13 +689,32 @@ namespace WorkshopWreckage
             return true;
         }
 
-        void InstallFromInspect()
+        void Report((bool ok, string text) r)
         {
-            var p = game.workbench.P(inspectRobot.id);
-            int n = game.workbench.InstallAll(p, false);
-            if (n > 0) { Feedback?.Invoke($"Installed {n} part{(n == 1 ? "" : "s")} on {p.name}", true); game.held.RefreshObject(); }
-            else Feedback?.Invoke(game.workbench.Summary(p), false);
-            RobotInspectChanged?.Invoke(inspectRobot);
+            if (!string.IsNullOrEmpty(r.text)) Feedback?.Invoke(r.text, r.ok);
+            if (!r.ok) Sfx.Play("reject", null, -4);
+        }
+
+        /// <summary>X at a robot on the bench: its last fitted (uncommitted) part comes off into your hands.</summary>
+        void TakeOffLast()
+        {
+            if (targetType != "station" || game.workbench.AtPool(targetPoint)) return;
+            var wb = game.workbench;
+            var p = wb.ActiveOnMat(MatAt(targetPoint));
+            var f = wb.FittedIds(p);
+            if (f.Count == 0) { Feedback?.Invoke($"Nothing on {p.name} is loose: applied parts stay on", false); return; }
+            Report(wb.TakeOff(p, f[^1]));
+        }
+
+        /// <summary>V at a robot on the bench: Apply (every fitted part locked in place).</summary>
+        public void ApplyAimed()
+        {
+            if (targetType != "station" || game.workbench.AtPool(targetPoint)) return;
+            var wb = game.workbench;
+            var p = wb.ActiveOnMat(MatAt(targetPoint));
+            int n = wb.Commit(p);
+            if (n == 0) { Feedback?.Invoke($"No fitted parts on {p.name} to apply", false); return; }
+            Feedback?.Invoke($"{p.name}: {n} part{(n == 1 ? "" : "s")} applied ({wb.InstalledCount(p)}/{wb.Required(p)})" + (wb.CanActivate(p) ? " — ready to activate" : ""), true);
         }
 
         void DepositAll()
@@ -637,7 +733,8 @@ namespace WorkshopWreckage
             }
             else if (targetType == "peg")
             {
-                int n = Inv.items.Where(id => World.DefOf(id).IsPegboardTool).ToList().Count(HangTool);
+                var pcfg = game.builder.pegboard.cfg;
+                int n = Inv.items.Where(id => World.DefOf(id).IsPegboardTool).OrderBy(id => pcfg.slotById.TryGetValue(World.DefOf(id).PegSlot, out var ps) && ps.IsChild ? 1 : 0).ToList().Count(HangTool);
                 if (n > 1) Feedback?.Invoke($"Hung {n} tools ({game.builder.pegboard.Hung}/{game.builder.pegboard.Total} on the tool board)", true);
             }
             else if (targetType == "tray")
@@ -680,6 +777,13 @@ namespace WorkshopWreckage
             var away = Vector3.ProjectOnPlane(want - me, Vector3.up);
             if (away.magnitude < 0.6f) want = me + (away.sqrMagnitude > 1e-4f ? away.normalized : flat) * 0.6f;
             var p = game.SafeDropPoint(new Vector3(want.x, 0, want.z), me);
+            // blocked in front (a bench, a unit): the open floor beside or behind the player, never at the feet
+            foreach (float turn in new[] { 45f, -45f, 90f, -90f, 135f, -135f, 180f })
+            {
+                if (Vector3.ProjectOnPlane(p - me, Vector3.up).magnitude >= 0.5f) break;
+                var q = game.SafeDropPoint(me + Quaternion.Euler(0, turn, 0) * flat * 0.8f, me);
+                if (Vector3.ProjectOnPlane(q - me, Vector3.up).magnitude > Vector3.ProjectOnPlane(p - me, Vector3.up).magnitude) p = q;
+            }
             arm.SetDown(new Vector3(p.x, 0, p.z), Quaternion.LookRotation(-flat, Vector3.up));
             Sfx.Play("servo", p, -6);
             Feedback?.Invoke("Sorting Arm set down — click it to pick it up again", true);
@@ -698,6 +802,7 @@ namespace WorkshopWreckage
             var rot = Quaternion.Euler(0, UnityEngine.Random.value * 360, 0);
             float halfH = b.y / 2;
             if (def.restMode == RestMode.Long) { rot *= Quaternion.Euler(0, 0, 90); halfH = b.x / 2; }
+            else if (def.restMode == RestMode.Side) { rot *= Quaternion.Euler(90, 0, 0); halfH = b.z / 2; }   // falls flat, not onto an edge
             // let go just above whatever already lies there; it falls and tumbles onto the pile (PileSim)
             float top = Mathf.Max(p.y, game.piles.TopAt(p, Mathf.Max(b.x, b.z) * 0.5f));
             rot = Quaternion.Euler(UnityEngine.Random.Range(-20f, 20f), 0, UnityEngine.Random.Range(-20f, 20f)) * rot;
@@ -709,7 +814,7 @@ namespace WorkshopWreckage
             game.renderer.SetHidden(id, true);
             busy.Add(id);
             var push = new Vector3(dir.x, 0, dir.z).normalized * 0.06f;
-            StartCoroutine(Fly(def, game.held.HandWorld(), m, 0.25f, () =>
+            StartCoroutine(Fly(id, game.held.HandWorld(), m, 0.25f, () =>
             {
                 busy.Remove(id);
                 game.renderer.SetHidden(id, false);
@@ -764,13 +869,22 @@ namespace WorkshopWreckage
         // ---------------------------------------------------------------- helpers
 
         /// <summary>Tool pulls (magnet, Supermagnet, sweep) leave a glowing trail.</summary>
-        public void StartFly(ItemDefinition def, Matrix4x4 from, Matrix4x4 to, float dur) => StartCoroutine(Fly(def, from, to, dur, null, true));
+        public void StartFly(int id, Matrix4x4 from, Matrix4x4 to, float dur) => StartCoroutine(Fly(id, from, to, dur, null, true));
 
         static Material _trailMat;
 
-        IEnumerator Fly(ItemDefinition def, Matrix4x4 from, Matrix4x4 to, float dur, Action done, bool trail = false)
+        readonly Dictionary<int, int> _flight = new();   // instance -> its latest flight (a part caught again mid-air)
+        int _flights;
+
+        /// <summary>A part flies from one place to another. The world renderer draws it on the way, so it looks just
+        /// as it does where it lands (its world mesh, skin and wear: playtest 2026-10-28, a dropped part showed the
+        /// old look in the air); the pegboard's tools, drawn elsewhere, fly as a stand-in model.</summary>
+        IEnumerator Fly(int id, Matrix4x4 from, Matrix4x4 to, float dur, Action done, bool trail = false)
         {
-            var go = HeldView.MakeModel(def);
+            var def = World.DefOf(id);
+            int flight = _flight[id] = ++_flights;
+            bool own = game.renderer.Fly(id, from);
+            var go = own ? new GameObject("Flight_" + def.id) : HeldView.MakeModel(def);
             if (trail)
             {
                 var tr = go.AddComponent<TrailRenderer>();
@@ -795,8 +909,10 @@ namespace WorkshopWreckage
                 go.transform.position = Vector3.Lerp(p0, p1, e) + Vector3.up * Mathf.Sin(Mathf.PI * t) * lift;
                 go.transform.rotation = Quaternion.Slerp(q0, q1, e);
                 go.transform.localScale = Vector3.Lerp(s0, s1, e);
+                if (own && _flight.GetValueOrDefault(id) == flight) game.renderer.Fly(id, go.transform.localToWorldMatrix);
                 yield return null;
             }
+            if (own && _flight.GetValueOrDefault(id) == flight) { _flight.Remove(id); game.renderer.Fly(id, null); }
             Destroy(go);
             done?.Invoke();
         }

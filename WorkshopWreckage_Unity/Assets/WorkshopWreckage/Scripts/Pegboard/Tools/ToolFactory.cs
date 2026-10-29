@@ -26,6 +26,7 @@ namespace WorkshopWreckage.Pegboard
             RegisterMeasuring();
             RegisterCutting();
             RegisterSpecialty();
+            RegisterSets();
         }
 
         static void Add(string model, Action<ToolMesh> build) => Models[Prefix + model] = build;

@@ -104,7 +104,7 @@ namespace WorkshopWreckage
         // stowing robots: the hold slot each carried part rides in (stable while others come and go), the
         // part currently in the grippers (-1: none), the arms' swing over the hold, the parts of this trip
         readonly Dictionary<int, int> _slotOf = new();
-        int _clawItem = -1, _tripParts;
+        int _clawItem = -1, _tripParts, _stowBox;
         float _stow, _toss;
         float _gripArc;   // > 0: the part flies (thrown into the hold): arc height over the straight line (world m)
 
@@ -378,7 +378,7 @@ namespace WorkshopWreckage
             (_model.headFrom, _model.armLFrom, _model.armRFrom) = (g.workbench.DonorOrigin(p, ModuleSlot.Head), g.workbench.DonorOrigin(p, ModuleSlot.ArmL), g.workbench.DonorOrigin(p, ModuleSlot.ArmR));
             _modelFroms = (_model.headFrom, _model.armLFrom, _model.armRFrom, _model.propFrom);
             _model.assembling = true;
-            _model.mountReady = part => !p.requires.TryGetValue(part, out var req) || req.All(have.Contains);
+            _model.mountReady = null;   // any part can go on the ghost now, so every empty socket shows
             _model.Build(have);
             _model.SetEyes(false);
             var (pos, rot) = g.workbench.MatSpot(p.mat);
@@ -638,7 +638,7 @@ namespace WorkshopWreckage
             _unreachable.Clear();
             _completeT = 0;
             if (AtBench) return $"{displayName}: noted — after the workbench";
-            if (targetId >= 0 && g.world.instances[targetId].defId != defId) { Release(); _step = carried.Count > 0 ? Step.ToDest : Step.Choose; _path = null; }
+            if (targetId >= 0 && g.world.instances[targetId].defId != defId) { Release(); _step = carried.Count > 0 && !FillsOneDest ? Step.ToDest : Step.Choose; _path = null; }
             mode = Mode.Working;
             if (auto) return "";
             Sfx.Play("servo", transform.position + Vector3.up * 0.3f, -6);
@@ -892,7 +892,7 @@ namespace WorkshopWreckage
             if (_step == Step.ToItem && targetId >= 0 && center.HasValue && Flat(g.world.instances[targetId].Position - center.Value).magnitude > zoneRadius)
             {
                 Release();
-                _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
+                _step = carried.Count > 0 && !FillsOneDest ? Step.ToDest : Step.Choose;
                 _path = null;
             }
             if (!AtBench) mode = Mode.Working;
@@ -1191,8 +1191,9 @@ namespace WorkshopWreckage
                 if (pool == null && strategy == "staging_first")
                 {
                     // Hoverbot: finish what the others left in the staging zones first
-                    // ...except the piles below a working Sorting Arm's drawers: those are the arm's
-                    var staged = g.world.instances.Where(i => i.state == ItemState.InWorld && i.owner.StartsWith("stage:") && !g.ArmServes(i.owner.Substring(6)) && Pickable(i)).ToList();
+                    // ...except the parts a working Sorting Arm can take: those are the arm's (one it can't get at,
+                    // Hoverbot puts away itself)
+                    var staged = g.world.instances.Where(i => i.state == ItemState.InWorld && i.owner.StartsWith("stage:") && !g.ArmTakes(i) && Pickable(i)).ToList();
                     if (Fleet)
                     {
                         // Fleet Coordination (player skill): leave zones another Hoverbot is already working on
@@ -1249,12 +1250,13 @@ namespace WorkshopWreckage
             return len;
         }
 
-        /// <summary>Caterpillarbot (multi_stop) fills its cargo boxes for one destination, so it never drives off
-        /// with a single part (playtest 2026-10-26). Once loaded it takes only parts going where the first one
-        /// goes, from anywhere in the room (not only within the gather radius); with Route Planning, when none is
-        /// left for that destination, also parts for destinations beside it (0.6 m per rank between their
-        /// staging spots). Empty, it starts where several parts share a destination: each further part waiting
-        /// for the same place (up to a full load) counts as 1.5 m less walking.</summary>
+        /// <summary>Caterpillarbot (multi_stop) fills its cargo boxes for one area before a delivery run, so it never
+        /// drives off with a single part (playtest 2026-10-26; 2026-10-28: "still only taking one item at the time.
+        /// He should find three items that goes to the same general area"). Once loaded it takes parts whose
+        /// destination is in the area of the first one's (SameArea: the same storage unit, or staging spots within
+        /// cargo_area_m, wider with Route Planning), from anywhere in the room; a part for the very same box counts
+        /// as 1 m less walking. Empty, it starts where several parts wait for one area: each further one (up to a
+        /// full load) counts as 1.5 m less walking. It drives off short only when no more for that area is left.</summary>
         IEnumerable<ItemInstance> OneDestination(IEnumerable<ItemInstance> pool, List<ItemInstance> tray, Vector3 me, ref System.Func<ItemInstance, float> score)
         {
             if (carried.Count == 0) _fillSkip.Clear();
@@ -1262,23 +1264,31 @@ namespace WorkshopWreckage
             if (carried.Count > 0)
             {
                 var box = g.world.DefOf(carried[0]).storageBox;
-                bool Same(ItemInstance i) => g.db.Get(i.defId).storageBox == box && !_fillSkip.Contains(i.id);
-                var same = pool.Where(Same).ToList();
-                if (same.Count == 0 && pool == tray) same = g.world.instances.Where(i => Same(i) && Pickable(i)).ToList();
-                else same = same.Where(Pickable).ToList();
-                if (same.Count > 0 || _routeRank <= 0) return same;
-                // Route Planning: a destination right beside it (the same unit) tops the load up
-                var spot = StagingSpot(box);
-                if (!spot.HasValue) return same;
-                float near = 0.6f * _routeRank;
-                return g.world.instances.Where(i => Pickable(i) && !_fillSkip.Contains(i.id) && StagingSpot(g.db.Get(i.defId).storageBox) is Vector3 s && Flat(s - spot.Value).magnitude <= near).ToList();
+                bool Near(ItemInstance i) => !_fillSkip.Contains(i.id) && SameArea(box, g.db.Get(i.defId).storageBox);
+                var near = pool.Where(Near).ToList();
+                if (near.Count == 0 && pool == tray) near = g.world.instances.Where(i => Near(i) && Pickable(i)).ToList();
+                else near = near.Where(Pickable).ToList();
+                var plainScore = score;
+                score = i => plainScore(i) - (g.db.Get(i.defId).storageBox == box ? 1f : 0f);
+                return near;
             }
             var list = pool.Where(Pickable).ToList();
-            var waiting = list.GroupBy(i => g.db.Get(i.defId).storageBox).ToDictionary(gr => gr.Key, gr => gr.Count());
+            var perBox = list.GroupBy(i => g.db.Get(i.defId).storageBox).ToDictionary(gr => gr.Key, gr => gr.Count());
+            var waiting = perBox.Keys.ToDictionary(b => b, b => perBox.Where(kv => SameArea(b, kv.Key)).Sum(kv => kv.Value));
             var plain = score;
             int cap = _capacity;
             score = i => plain(i) - 1.5f * Mathf.Min(waiting[g.db.Get(i.defId).storageBox] - 1, cap - 1);
             return list;
+        }
+
+        /// <summary>Caterpillarbot's cargo area: two destinations one load may serve. The same box or storage unit,
+        /// or staging spots at most robot_ai cargo_area_m apart, 0.6 m more per Route Planning rank.</summary>
+        public bool SameArea(string a, string b)
+        {
+            if (a == b) return true;
+            if (a == null || b == null || !g.db.boxes.TryGetValue(a, out var da) || !g.db.boxes.TryGetValue(b, out var dbx)) return false;
+            if (Json.Str(da, "unit") == Json.Str(dbx, "unit")) return true;
+            return StagingSpot(a) is Vector3 sa && StagingSpot(b) is Vector3 sb && Flat(sa - sb).magnitude <= AiNum("cargo_area_m", 2.0) + 0.6f * _routeRank;
         }
 
         /// <summary>Route Planning as destinations per load (robots.json robot_ai route_mode "destinations"; QA:
@@ -1724,6 +1734,26 @@ namespace WorkshopWreckage
             return o;
         }
 
+        /// <summary>A staging pile grows out into the aisle from its spot, never back towards the unit: a Sorting
+        /// Arm's pincer stays clear of the unit's lowest beam, so parts dropped between the spot and the unit
+        /// were out of its reach for good (playtest 2026-10-29: "the robot arms stop working after a while").</summary>
+        Vector3 OffTheUnit(Vector3 p, Vector3 spot)
+        {
+            var front = UnitFront(_destUnit);
+            float inward = Vector3.Dot(Flat(p - spot), front);
+            if (inward < 0) p -= front * inward;
+            // and along the unit, within its arm mount's rail
+            foreach (var s in g.sockets.Values)
+            {
+                if (s.su != _destUnit) continue;
+                var l = s.su.transform.InverseTransformPoint(p);
+                l.x = Mathf.Clamp(l.x, s.xMin, s.xMax);
+                p = s.su.transform.TransformPoint(l);
+                break;
+            }
+            return p;
+        }
+
         static Vector3 UnitFront(StorageUnit unit) => Flat(unit.transform.TransformDirection(new Vector3(0, 0, -1))).normalized;   // units face Godot +Z
 
         public bool IsPiledBelowDestination(int itemId)
@@ -1805,7 +1835,7 @@ namespace WorkshopWreckage
                 _bend = 0; _armReach = 0; _aimW = 0; _clawOpen = 0; _reachY = 0;
                 _clawsBusy = false;
                 _path = null;
-                _step = carried.Count > 0 ? Step.ToDest : Step.Choose;
+                _step = carried.Count > 0 && !FillsOneDest ? Step.ToDest : Step.Choose;   // Caterpillarbot: another part for the load (playtest 2026-10-28: it left with one)
                 _idleT = 0;
                 yield break;
             }
@@ -2177,6 +2207,7 @@ namespace WorkshopWreckage
         IEnumerator Unstow(int itemId)
         {
             _clawsBusy = true; _gripW = PartWidth(itemId);
+            _stowBox = SlotFor(itemId);   // the gripper reaches into that part's own box
             float swingT = _depositTime * 0.22f, closeT = _depositTime * 0.078f, backT = _depositTime * 0.2f;   // about 0.6 s at Caterpillarbot's base deposit time
             for (float t = 0; t < swingT; t += Time.deltaTime)
             {
@@ -2356,7 +2387,7 @@ namespace WorkshopWreckage
                 float spread = 0.1f + 0.012f * Mathf.Max(0, StagingCount(_destBox) - StagingCapacity / 2);
                 var jitter = new Vector3(Random.Range(-spread, spread), 0, Random.Range(-spread, spread));
                 // a wide pile never spreads under the unit: the spot slides out to open floor
-                var at = g.SafeDropPoint(spot + jitter, spot + UnitFront(_destUnit) * 0.4f);
+                var at = g.SafeDropPoint(OffTheUnit(spot + jitter, spot), spot + UnitFront(_destUnit) * 0.4f);
                 jitter = new Vector3(at.x, 0, at.z) - spot;
                 float y = at.y + e[2] * 0.5f + Mathf.Min(nearby, 5) * e[2] * 0.45f;
                 places.Add((spot + jitter + Vector3.up * y, Quaternion.Euler(Random.Range(-12f, 12f), Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 + Random.Range(-10f, 10f) : Random.Range(-12f, 12f))));
@@ -2384,7 +2415,7 @@ namespace WorkshopWreckage
                 // set down where they are, as long as that is still in the staging zone
                 var def0 = g.world.DefOf(ids[0]);
                 var e0 = ItemDatabase.Extents(def0);
-                var sp = g.SafeDropPoint(new Vector3(cgp.x, 0, cgp.z), spot + UnitFront(_destUnit) * 0.4f);
+                var sp = g.SafeDropPoint(OffTheUnit(new Vector3(cgp.x, 0, cgp.z), spot), spot + UnitFront(_destUnit) * 0.4f);
                 if (Flat(sp - spot).magnitude <= 0.35f)
                 {
                     int near0 = g.index.QuerySphere(sp, 0.16f).Count;
@@ -2580,7 +2611,7 @@ namespace WorkshopWreckage
                 dt = dt, speed01 = _speedNow / _walk, speed = _speedNow, gait = _gait, phase = _phase, turnRate = _turnRate, bend = _bend,
                 armReach = _armReach, armHold = _armHold, armLift = _armLift, altitude = _altitude, active = true, time = _time, reachHeight = _reachY,
                 aim = _aimPoint, aimWeight = _aimW, clawOpen = _clawOpen, clawClose = _clawClose, gripWidth = _gripW,
-                armExtend = _extend, stow = _stow, toss = _toss, focus = qaTarget, focusWeight = _clawsBusy ? 1 : 0, lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
+                armExtend = _extend, stow = _stow, toss = _toss, stowBox = _stowBox, focus = qaTarget, focusWeight = _clawsBusy ? 1 : 0, lookAhead = PathAhead(0.6f) ?? Vector3.zero, lookAheadWeight = _path != null && _pathIdx < _path.Count && !_clawsBusy ? 1 : 0,
                 lookAt = g.player.transform.position, lookWeight = idle ? 1 : 0,
                 gesture = _step == Step.Gesture ? Mathf.Clamp01(_gestureT / GestureTime) : 0,
             });
@@ -2671,6 +2702,7 @@ namespace WorkshopWreckage
             bool part = false, onFloor = false, simulated = false;
             _qaInClaws = true; _stowQA = null; _tossQA = null; _gripArc = 0; _gripBlend = 1;
             float S(float x) => Mathf.SmoothStep(0, 1, Mathf.Clamp01(x));
+            if (name.Length == 5 && name.StartsWith("stow") && char.IsDigit(name[4])) { a.stowBox = name[4] - '0'; name = "stow"; }   // stow1, stow2: the middle, rear box
             switch (name)
             {
                 case "walk": a.gait = 1; a.speed = _walk; a.speed01 = 1; a.phase = t * Mathf.PI * 2; break;
