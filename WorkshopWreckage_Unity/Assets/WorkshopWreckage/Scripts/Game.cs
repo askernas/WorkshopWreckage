@@ -13,7 +13,7 @@ namespace WorkshopWreckage
     /// <summary>Entry point and game controller (port of Godot main.gd). Created
     /// automatically after the first scene loads, so the scene needs no setup.
     ///
-    /// Command line: --preset=standard|large|massive  --seed=N  --shot=a.png;b.png
+    /// Command line: --preset=standard|large|massive  --seed=N|random  --shot=a.png;b.png
     /// --cam=x,y,z,yaw,pitch;...  --items=N (benchmark subset)  --presort=0.35  --play  --hud
     /// --bench=out.json  --autoplay=out_dir  --pegview[=fill] (the pegboard preview)</summary>
     public class Game : MonoBehaviour
@@ -154,7 +154,7 @@ namespace WorkshopWreckage
             if (args.TryGetValue("items", out var n)) itemCount = int.Parse(n);
             WorkshopArtDirectionProfile.Load(args);   // before the workshop is built: its lights, grading and colours read it
             GameLook.Init(args);                      // playtest: the sandbox's Variant B look (--look=baseline: the game's own)
-            int seed = args.TryGetValue("seed", out var sd) ? int.Parse(sd) : Json.Int(db.config, "default_seed", 1912);
+            int seed = args.TryGetValue("seed", out var sd) ? (sd == "random" ? RandomSeed() : int.Parse(sd)) : NewSeed();
             if (!StartWorld(seed, null)) return;
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
             Debug.Log($"[boot] interactive at {startupMs:0} ms; cavity bake {CavityMask.BakeMs:0} ms over {CavityMask.Meshes} meshes");
@@ -750,8 +750,7 @@ namespace WorkshopWreckage
             PlaceCamera("0.6,1.65,3.6,0,-18");
             player.cam.fieldOfView = 60;
             yield return Capture(Path.Combine(dir, "overview.png"), 3);
-            var heap = layout.piles.First(p => p.kind == "heap" && p.surface == 0);
-            var hc = Shared.Pos(heap.center.x, 0, heap.center.y);
+            var hc = WorldGenerator.CrowdedFloorSpots(world, 1)[0];   // the floor has no heaps: its most crowded spot
             Look(hc + new Vector3(1.1f, 1.0f, 1.1f), hc, 50);
             yield return Capture(Path.Combine(dir, "heap.png"), 3);
             var (mat, matRot) = workbench.MatSpot(0);
@@ -1480,6 +1479,15 @@ namespace WorkshopWreckage
             if (!Automated && !_leaveWithoutSaving) Autosave("quit");   // the window closed, Alt+F4, Quit
             WriteTelemetry();
         }
+
+        /// <summary>While debugging, every new world gets the preset's default_seed, so things lie in known places.
+        /// false: a new random seed for every new game (shown in the menu's seed field). Automated runs always use
+        /// default_seed; --seed=N (or --seed=random) always wins.</summary>
+        public static readonly bool FixedSeed = true;
+
+        /// <summary>The seed for a new world: default_seed or a random one (see FixedSeed).</summary>
+        public int NewSeed() => FixedSeed || Automated ? Json.Int(db.config, "default_seed", 1912) : RandomSeed();
+        static int RandomSeed() => UnityEngine.Random.Range(1, 1000000);
 
         /// <summary>Starts a new world, switching world-size preset first if needed.</summary>
         public bool NewGame(string preset, int seed)

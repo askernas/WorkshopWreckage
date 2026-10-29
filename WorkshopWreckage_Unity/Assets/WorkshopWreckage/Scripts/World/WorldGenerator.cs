@@ -189,8 +189,10 @@ namespace WorkshopWreckage
         /// <summary>See PileSurface.forbidden (set by the game from the built storage units).</summary>
         public System.Func<Vector3, float, bool> forbidden;
         System.Random _rng;
+        WorkshopLayout _layout;
+        Vector2 _patch;   // this seed's offset into the patch noise
 
-        static readonly Dictionary<string, float> MaxHeight = new() { ["heap"] = 1.25f, ["feature"] = 0.9f, ["spill"] = 0.6f, ["cluster"] = 0.45f, ["scatter"] = 0.35f };
+        static readonly Dictionary<string, float> MaxHeight = new() { ["spread"] = 0.3f, ["heap"] = 0.8f, ["feature"] = 0.9f, ["spill"] = 0.6f, ["cluster"] = 0.45f, ["scatter"] = 0.35f };
 
         /// <summary>limit &gt; 0 builds a deterministic subset (benchmark mode only).</summary>
         public ItemWorld Generate(ItemDatabase db, WorkshopLayout layout, int seed, int limit = -1)
@@ -215,6 +217,8 @@ namespace WorkshopWreckage
             }
 
             _rng = new System.Random((int)(ItemDatabase.Fnv("workshop-wreckage:" + seed) & 0x7fffffff));
+            _layout = layout;
+            _patch = new Vector2(Range(0, 1000), Range(0, 1000));
             var surfaces = new List<PileSurface>();
             foreach (var s in layout.surfaces)
             {
@@ -230,43 +234,31 @@ namespace WorkshopWreckage
             surfaces[0].blockers.Add(new Rect(layout.starterSpot - Vector2.one * (StarterRing + 0.35f), Vector2.one * (StarterRing + 0.35f) * 2));
             int clearN = surfaces[0].blockers.Count - clear0;
 
-            var robotIds = new List<int>();
-            var pegIds = new List<int>();
+            // robot parts, Part Radar pieces and pegboard tools are part of the mix like everything else
+            // (playtest 2026-10-29), except Retrobot's parts on the open spots by the start
+            var robotIds = world.instances.Where(i => db.Get(i.defId).IsRobotPart).Select(i => i.id).ToList();
+            var pegIds = world.instances.Where(i => db.Get(i.defId).IsPegboardTool).Select(i => i.id).ToList();
+            var retro = robotIds.Where(id => world.DefOf(id).craftingPurpose == "robot:retrobot")
+                .OrderBy(id => world.DefOf(id).shape == "Torso" ? 0 : 1).ThenBy(id => id).ToList();
+            var retroPlaced = retro.Take(layout.retroSpots.Count).ToList();
             var groups = new Dictionary<int, List<int>>();
             foreach (var inst in world.instances)
             {
-                var def = db.Get(inst.defId);
-                if (def.IsRobotPart) { robotIds.Add(inst.id); continue; }
-                if (def.IsPegboardTool) { pegIds.Add(inst.id); continue; }
-                if (!groups.TryGetValue(def.id, out var g)) groups[def.id] = g = new List<int>();
+                if (retroPlaced.Contains(inst.id)) continue;
+                if (!groups.TryGetValue(inst.defId, out var g)) groups[inst.defId] = g = new List<int>();
                 g.Add(inst.id);
             }
-            int ordinary = world.Count - robotIds.Count - pegIds.Count;
-            var caps = Capacities(layout, ordinary);
+            var caps = Capacities(layout, groups.Values.Sum(g => g.Count));
             var assign = Distribute(layout, caps, groups, db);
             // the starter assortment: one copy each of a few different large parts in plain
-            // sight by the spawn (their other copies stay in the piles)
+            // sight by the spawn (their other copies stay in the mix)
             var starter = StarterAssortment(db, world, assign);
             foreach (var a in assign) a.RemoveAll(starter.Contains);
-            // robot parts: Retrobot's lie alone on open floor near the start, the chassis (torso)
-            // on the spot straight ahead; the others on top of their piles (placed last), so they
-            // can be seen, never buried
-            var retro = robotIds.Where(id => world.DefOf(id).craftingPurpose == "robot:retrobot")
-                .OrderBy(id => world.DefOf(id).shape == "Torso" ? 0 : 1).ThenBy(id => id).ToList();
-            foreach (var id in robotIds.Except(retro.Take(layout.retroSpots.Count)).Where(id => !world.DefOf(id).IsToolItem))
-            {
-                var robot = System.Text.RegularExpressions.Regex.Replace(world.DefOf(id).craftingPurpose.Split(':').ElementAtOrDefault(1) ?? "", @"_\d+$", "");   // a further unit's kit lies where its type's does
-                var choices = layout.robotPartPiles.TryGetValue(robot, out var ch) && ch.Count > 0 ? ch : new List<int> { 0 };
-                assign[choices[_rng.Next(choices.Count)]].Add(id);
-            }
+
             // heaps foundation-first: big parts go down before small ones settle between them
             for (int p = 0; p < layout.piles.Count; p++)
-            {
-                var kind = layout.piles[p].kind;
-                if (kind != "heap" && kind != "feature" && kind != "spill") continue;
-                assign[p] = assign[p].Select(id => (k: world.DefOf(id).IsRobotPart ? -1f : Radius(world.DefOf(id)) * (kind == "feature" ? 1f : Range(0.55f, 1.45f)), id))
-                    .OrderByDescending(t => t.k).Select(t => t.id).ToList();
-            }
+                if (layout.piles[p].kind == "heap")
+                    assign[p] = assign[p].Select(id => (k: Radius(world.DefOf(id)) * Range(0.55f, 1.45f), id)).OrderByDescending(t => t.k).Select(t => t.id).ToList();
 
             var leftovers = new List<int>();
             pileOf = Enumerable.Repeat(-1, world.Count).ToArray();
@@ -310,15 +302,12 @@ namespace WorkshopWreckage
             // the spots nearest straight ahead of the spawn first: the chassis gets the most visible one
             var sp = new Vector2(layout.spawn.x, layout.spawn.z);
             var spots = layout.retroSpots.OrderBy(s => Mathf.Abs(Mathf.DeltaAngle(-90f, Mathf.Atan2(s.y - sp.y, s.x - sp.x) * Mathf.Rad2Deg))).ToList();
-            var retroPlaced = retro.Take(spots.Count).ToList();
             for (int k = 0; k < retroPlaced.Count; k++)
             {
                 var site = new PileSite { kind = "feature", center = spots[k], sigma = new Vector2(0.05f, 0.05f) };
                 if (!Place(world, surfaces[0], layout.surfaces[0], site, retroPlaced[k], layout, true) && !PlaceAnywhere(world, surfaces[0], layout, floorPile, retroPlaced[k]))
                     errors.Add($"Could not place instance {retroPlaced[k]}");
             }
-            PlaceToolItems(world, robotIds.Where(id => world.DefOf(id).IsToolItem).ToList(), surfaces, layout, floorPile, seed);
-            PlaceToolItems(world, pegIds, surfaces, layout, floorPile, seed, "pegboard:");
             foreach (var id in pegIds) world.instances[id].zone = -1;   // the board's tools earn no zone-restored XP
             // the tools lie on their widest face: their local Z (the thinnest axis) within 30 degrees of vertical
             int flat = pegIds.Count(id => Mathf.Abs(((Vector3)world.instances[id].transform.GetColumn(2)).normalized.y) > 0.86f);
@@ -327,30 +316,26 @@ namespace WorkshopWreckage
             return errors.Count == 0 ? world : null;
         }
 
-        /// <summary>Part Radar parts and batteries (spec v1.2 §4, §8): spread over the floor piles of the whole
-        /// workshop, on top (placed after everything else, so never buried), from their own random stream: the
-        /// rest of the world lies exactly where it would without them, and older saves keep their positions.
-        /// The pegboard's tools (docs/PEGBOARD.md) are placed the same way, from a stream of their own.</summary>
-        void PlaceToolItems(ItemWorld world, List<int> ids, List<PileSurface> surfaces, WorkshopLayout layout, PileSite floorPile, int seed, string stream = "part-radar:")
-        {
-            if (ids.Count == 0) return;
-            var keep = _rng;
-            _rng = new System.Random((int)(ItemDatabase.Fnv(stream + seed) & 0x7fffffff));
-            var piles = Enumerable.Range(0, layout.piles.Count).Where(p => layout.piles[p].surface == 0 && layout.piles[p].kind != "feature").ToList();
-            for (int k = ids.Count - 1; k > 0; k--) { int j = _rng.Next(k + 1); (ids[k], ids[j]) = (ids[j], ids[k]); }
-            for (int k = 0; k < ids.Count; k++)
-            {
-                int p = piles.Count > 0 ? piles[(k + _rng.Next(piles.Count)) % piles.Count] : -1;
-                if (p >= 0 && Place(world, surfaces[0], layout.surfaces[0], layout.piles[p], ids[k], layout)) { pileOf[ids[k]] = p; continue; }
-                if (!PlaceAnywhere(world, surfaces[0], layout, floorPile, ids[k])) errors.Add($"Could not place instance {ids[k]}");
-            }
-            _rng = keep;
-        }
-
         bool PlaceAnywhere(ItemWorld world, PileSurface floor, WorkshopLayout layout, PileSite site, int id)
         {
             for (int attempt = 0; attempt < 40; attempt++) if (Place(world, floor, layout.surfaces[0], site, id, layout)) return true;
             return false;
+        }
+
+        /// <summary>QA: centres (Unity space) of the n most crowded 1 m floor cells, at least 2 m apart: where the
+        /// tests and screenshots go for "lots of parts" now that the floor has no heaps.</summary>
+        public static List<Vector3> CrowdedFloorSpots(ItemWorld w, int n)
+        {
+            var cells = w.instances.Where(i => i.state == ItemState.InWorld && i.Position.y < 0.4f)
+                .GroupBy(i => (Mathf.FloorToInt(i.Position.x), Mathf.FloorToInt(i.Position.z)))
+                .OrderByDescending(c => c.Count()).Select(c => new Vector3(c.Key.Item1 + 0.5f, 0, c.Key.Item2 + 0.5f));
+            var o = new List<Vector3>();
+            foreach (var c in cells)
+            {
+                if (o.Count >= n) break;
+                if (o.All(q => (q - c).magnitude >= 2f)) o.Add(c);
+            }
+            return o;
         }
 
         /// <summary>Instance ids of the starter assortment (one copy each of different parts).</summary>
@@ -365,7 +350,7 @@ namespace WorkshopWreckage
         List<int> StarterAssortment(ItemDatabase db, ItemWorld world, List<List<int>> assign)
         {
             var big = db.order.Select(db.Get)
-                .Where(d => !d.IsRobotPart && world.TotalOf(d.id) >= 3 && d.category >= 3 && Radius(d) >= 0.08f && Radius(d) <= 0.24f)
+                .Where(d => !d.IsRobotPart && !d.IsPegboardTool && world.TotalOf(d.id) >= 3 && d.category >= 3 && Radius(d) >= 0.08f && Radius(d) <= 0.24f)
                 .ToList();
             Shuffle(big);
             var o = new List<int>();
@@ -437,6 +422,12 @@ namespace WorkshopWreckage
 
         float Range(float a, float b) => a + (float)_rng.NextDouble() * (b - a);
 
+        /// <summary>Anywhere in a..b, densest in the middle: 40 % evenly, the rest the mean of two draws
+        /// (triangular), so the middle gets about four times the parts of the edges.</summary>
+        const float PatchSize = 2.4f;   // metres per patch-noise unit
+
+        float Centred(float a, float b) => _rng.NextDouble() < 0.4 ? Range(a, b) : (Range(a, b) + Range(a, b)) * 0.5f;
+
         float Gauss(float sigma)
         {
             double u1 = 1.0 - _rng.NextDouble(), u2 = _rng.NextDouble();
@@ -463,6 +454,17 @@ namespace WorkshopWreckage
             {
                 case "scatter":
                     return new Vector2(Range(pile.rect.xMin, pile.rect.xMax), Range(pile.rect.yMin, pile.rect.yMax));
+                case "spread":
+                    // patchy: dense and thin areas a few metres across; walkways mostly clear
+                    var at = Vector2.zero;
+                    for (int k = 0; k < 40; k++)
+                    {
+                        at = new Vector2(Centred(pile.rect.xMin, pile.rect.xMax), Centred(pile.rect.yMin, pile.rect.yMax));
+                        float n = Mathf.Clamp01((Mathf.PerlinNoise(_patch.x + at.x / PatchSize, _patch.y + at.y / PatchSize) - 0.3f) / 0.4f);
+                        float keep = (0.1f + 0.9f * n * n) * (_layout.OnWalkway(at) ? 0.06f : 1f);
+                        if (_rng.NextDouble() < keep) break;
+                    }
+                    return at;
                 case "spill":
                     float ang = pile.dir + Gauss(pile.spread * 0.5f * spread);
                     float dist = Mathf.Abs(Gauss(pile.length * 0.45f * spread)) + 0.05f;

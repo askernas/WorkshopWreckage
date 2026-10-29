@@ -20,7 +20,7 @@ namespace WorkshopWreckage
     public class PileSite
     {
         public int surface;
-        public string kind;                        // heap, spill, cluster, feature, scatter
+        public string kind;                        // spread (the floor), heap, cluster, feature, scatter
         public Vector2 center, sigma = new(0.5f, 0.5f);
         public float dir, length = 1f, spread = 0.7f;
         public Rect rect;
@@ -53,7 +53,6 @@ namespace WorkshopWreckage
         public readonly List<(Rect rect, float y)> decks = new();
         public readonly List<PileSite> piles = new();
         public readonly List<string> placementErrors = new();
-        public readonly Dictionary<string, List<int>> robotPartPiles = new();
         /// <summary>Open floor near the spawn: Retrobot's parts lie here in plain sight, and
         /// the starter assortment (a few different parts) lies around starterSpot.</summary>
         public readonly List<Vector2> retroSpots = new();
@@ -63,6 +62,10 @@ namespace WorkshopWreckage
         /// <summary>Height of the sorting tray's bottom (parts in the tray rest on it).</summary>
         public const float TrayFloor = 0.04f;
         public readonly List<Rect> keepClear = new();             // no starting piles here, but walkable
+        /// <summary>Walkways (Godot XZ segments, half width): the spread leaves them mostly clear (see OnWalkway;
+        /// the floor in front of storage, `access`, counts as walkway too).</summary>
+        public readonly List<(Vector2 a, Vector2 b, float halfWidth)> walkways = new();
+        const float WalkwayHalfWidth = 0.5f;
         /// <summary>Clear floor in front of every storage unit (Godot XZ): no furniture or other
         /// unit may stand there (loose parts may lie there); reachable from the spawn on foot.</summary>
         public readonly Dictionary<string, Rect> access = new();
@@ -231,57 +234,25 @@ namespace WorkshopWreckage
             surfaces.Add(new PileSurfaceDef { name = "lathe", rect = new Rect(-1.6f, south - 1.12f, 2.2f, 0.42f), y = 0.92f, maxHeight = 0.3f });
             surfaces.Add(new PileSurfaceDef { name = "island_shelf", rect = new Rect(-0.6f, -1.3f, 3.0f, 1.1f), y = 0.24f, maxHeight = 0.5f });
 
+            // --- walkways -------------------------------------------------------------
+            // mostly clear floor (a few strays): from the start to the door, the sorting tray, the robots'
+            // home spots and the north bench, and in front of every storage unit (playtest 2026-10-29)
+            var sp0 = new Vector2(spawn.x, spawn.z);
+            foreach (var to in new[] { new Vector2(doorX, south - 1.0f), new Vector2(trayRect.center.x, trayRect.yMin - 0.6f),
+                                       new Vector2(repairBayPos.x, repairBayPos.z - 1.2f), new Vector2(0, north + 1.5f) })
+                walkways.Add((sp0, to, WalkwayHalfWidth));
+
             // --- pile sites ----------------------------------------------------------
-            var shares = new Dictionary<string, float> { ["heap"] = 0.40f, ["spill"] = 0.14f, ["cluster"] = 0.12f, ["feature"] = 0.06f, ["scatter"] = 0.03f, ["bench"] = 0.06f, ["shelf"] = 0.13f, ["pallet"] = 0.06f };
-            float area = W * D;
-            var counts = new Dictionary<string, int>
-            {
-                ["heap"] = Mathf.Max(3, Mathf.RoundToInt(area / 95f)), ["spill"] = Mathf.Max(4, Mathf.RoundToInt(area / 80f)),
-                ["cluster"] = Mathf.Max(4, Mathf.RoundToInt(area / 80f)), ["feature"] = Mathf.Max(4, Mathf.RoundToInt(area / 85f)),
-            };
-            var spots = FreeFloorSpots(rng, counts.Values.Sum());
-            int si = 0;
-            var fasteners = new Dictionary<int, float> { [0] = 6, [1] = 6, [2] = 6, [9] = 0.1f, [3] = 0.4f, [6] = 0.3f };
-            foreach (var kind in new[] { "heap", "feature", "spill", "cluster" })
-            {
-                for (int k = 0; k < counts[kind] && si < spots.Count; k++, si++)
-                {
-                    var c = spots[si];
-                    var p = new PileSite { surface = 0, kind = kind, center = c, share = shares[kind] / counts[kind] };
-                    switch (kind)
-                    {
-                        case "heap":
-                            p.sigma = new Vector2(0.5f + (float)rng.NextDouble() * 0.15f, 0.45f + (float)rng.NextDouble() * 0.15f);
-                            p.bias[9] = 1.4f; p.bias[3] = 1.3f;
-                            break;
-                        case "feature":
-                            p.sigma = new Vector2(0.42f, 0.42f);
-                            p.bias[9] = 3f;
-                            break;
-                        case "spill":
-                            p.dir = (float)rng.NextDouble() * Mathf.PI * 2;
-                            p.length = 0.8f + (float)rng.NextDouble() * 0.4f;
-                            p.spread = 0.7f;
-                            var origin = c - new Vector2(Mathf.Cos(p.dir), Mathf.Sin(p.dir)) * 0.55f;
-                            string[] kinds = { "tipped_crate", "tipped_bin", "tipped_box", "overturned_chest" };
-                            var kindT = kinds[rng.Next(kinds.Length)];
-                            var size = kindT switch { "tipped_crate" => new Vector3(0.75f, 0.52f, 0.58f), "tipped_bin" => new Vector3(0.5f, 0.35f, 0.6f), "tipped_box" => new Vector3(0.48f, 0.38f, 0.44f), _ => new Vector3(1.0f, 0.8f, 0.55f) };
-                            // a tipped container never lands in front of storage (the parts may spill there)
-                            var box = new Rect(origin - new Vector2(0.4f, 0.4f), new Vector2(0.8f, 0.8f));
-                            if (access.Values.Any(a => a.Overlaps(box))) break;
-                            F(kindT, new Vector3(origin.x, 0, origin.y), size, -p.dir + Mathf.PI / 2);
-                            Block(origin, new Vector2(0.8f, 0.8f));
-                            break;
-                        default:
-                            p.sigma = new Vector2(0.28f, 0.24f);
-                            foreach (var kv in fasteners) p.bias[kv.Key] = kv.Value;
-                            break;
-                    }
-                    piles.Add(p);
-                }
-            }
-            piles.Add(new PileSite { surface = 0, kind = "scatter", rect = new Rect(west + 1.2f, north + 1.2f, W - 2.4f, D - 2.4f), share = shares["scatter"] });
-            piles.Last().bias[9] = 0.2f;
+            // the floor: one spread over the whole room, patchy and denser towards the middle than by the walls,
+            // walkways mostly clear (WorldGenerator.SamplePosition), plus a few heaps; robot parts and tools lie
+            // in the same mix (playtest 2026-10-29)
+            var shares = new Dictionary<string, float> { ["spread"] = 0.58f, ["heap"] = 0.20f, ["bench"] = 0.06f, ["shelf"] = 0.13f, ["pallet"] = 0.03f };
+            var spreadRect = new Rect(west + 0.6f, north + 0.6f, W - 1.2f, D - 1.2f);
+            piles.Add(new PileSite { surface = 0, kind = "spread", rect = spreadRect, center = spreadRect.center, share = shares["spread"] });
+            var heaps = HeapSpots(rng, Mathf.Max(3, Mathf.RoundToInt(W * D / 65f)));
+            foreach (var c in heaps)
+                piles.Add(new PileSite { surface = 0, kind = "heap", center = c, share = shares["heap"] / heaps.Count,
+                    sigma = new Vector2(0.4f + (float)rng.NextDouble() * 0.2f, 0.4f + (float)rng.NextDouble() * 0.2f) });
             for (int s = benchN; s < benchN + 4; s++)
             {
                 var r = surfaces[s].rect;
@@ -299,24 +270,17 @@ namespace WorkshopWreckage
             }
             foreach (var s in palletSurfaces)
             {
-                var p = new PileSite { surface = s, kind = "heap", center = surfaces[s].rect.center, sigma = surfaces[s].rect.size * 0.25f, share = shares["pallet"] / Mathf.Max(1, palletSurfaces.Count), maxHeight = 0.7f };
+                var p = new PileSite { surface = s, kind = "scatter", rect = surfaces[s].rect, share = shares["pallet"] / Mathf.Max(1, palletSurfaces.Count), maxHeight = 0.35f };
                 p.bias[9] = 2.5f; p.bias[3] = 1.5f;
                 piles.Add(p);
             }
             float total = piles.Sum(p => p.share);
             foreach (var p in piles) p.share /= total;
 
-            // robot parts: Retrobot near the start (early access), the rest anywhere on the floor
-            var floorPiles = Enumerable.Range(0, piles.Count).Where(i => piles[i].surface == 0 && piles[i].kind != "scatter").ToList();
-            var nearSpawn = floorPiles.OrderBy(i => Vector2.Distance(piles[i].center, new Vector2(spawn.x, spawn.z))).Take(4).ToList();
-            robotPartPiles["retrobot"] = nearSpawn;
-            foreach (var robot in new[] { "unibot", "spiderbot", "caterpillarbot", "hoverbot" })
-                robotPartPiles[robot] = floorPiles.OrderBy(_ => rng.Next()).Take(4).ToList();
-
             // open spots near the start, away from every heap: Retrobot's parts (the middle of the fan,
             // straight ahead, first: the chassis goes there) and then the starter assortment beside them
             var sp = new Vector2(spawn.x, spawn.z);
-            var taken = piles.Where(p => p.kind != "scatter").Select(p => p.center).ToList();
+            var taken = new List<Vector2>(heaps);
             foreach (int k in new[] { 2, 1, 3, 0, 4 })
             {
                 float a = -Mathf.PI / 2 + (k - 2) * 0.62f;   // a fan in front of the spawn (Godot -z = north = ahead)
@@ -516,22 +480,35 @@ namespace WorkshopWreckage
             return null;
         }
 
-        /// <summary>Well-spread free floor positions (Poisson-disc style, deterministic).</summary>
-        List<Vector2> FreeFloorSpots(System.Random rng, int wanted)
+        /// <summary>A few heap centres on open floor: off the walkways, clear of furniture and keep-clear areas,
+        /// away from the start and from each other. Seeded.</summary>
+        List<Vector2> HeapSpots(System.Random rng, int wanted)
         {
             var o = new List<Vector2>();
-            float minDist = Mathf.Sqrt((roomMax.x - roomMin.x) * (roomMax.z - roomMin.z) / Mathf.Max(1, wanted)) * 0.8f;
-            for (int attempt = 0; attempt < wanted * 300 && o.Count < wanted; attempt++)
+            var sp = new Vector2(spawn.x, spawn.z);
+            for (int attempt = 0; attempt < wanted * 400 && o.Count < wanted; attempt++)
             {
-                var p = new Vector2(Mathf.Lerp(roomMin.x + 1.6f, roomMax.x - 1.6f, (float)rng.NextDouble()), Mathf.Lerp(roomMin.z + 1.8f, roomMax.z - 1.6f, (float)rng.NextDouble()));
-                if (Vector2.Distance(p, new Vector2(spawn.x, spawn.z)) < 1.8f) continue;
-                if (floorBlockers.Any(b => new Rect(b.position - Vector2.one * 0.9f, b.size + Vector2.one * 1.8f).Contains(p))) continue;
-                if (keepClear.Any(b => new Rect(b.position - Vector2.one * 1.5f, b.size + Vector2.one * 3f).Contains(p))) continue;   // heaps keep their distance from the door, tray and robot mats
-                if (o.Any(q => Vector2.Distance(p, q) < minDist)) continue;
+                var p = new Vector2(Mathf.Lerp(roomMin.x + 1.8f, roomMax.x - 1.8f, (float)rng.NextDouble()), Mathf.Lerp(roomMin.z + 1.8f, roomMax.z - 1.8f, (float)rng.NextDouble()));
+                if (Vector2.Distance(p, sp) < 3.2f || OnWalkway(p, 1.1f)) continue;
+                if (floorBlockers.Concat(keepClear).Any(b => new Rect(b.position - Vector2.one * 1.0f, b.size + Vector2.one * 2f).Contains(p))) continue;
+                if (o.Any(q => Vector2.Distance(p, q) < 3.5f)) continue;
                 o.Add(p);
-                if (attempt > wanted * 150) minDist *= 0.97f;
             }
             return o;
+        }
+
+        /// <summary>Whether p (Godot XZ) lies on a walkway, widened by margin.</summary>
+        public bool OnWalkway(Vector2 p, float margin = 0)
+        {
+            foreach (var a in access.Values)
+                if (new Rect(a.position - Vector2.one * margin, a.size + Vector2.one * margin * 2).Contains(p)) return true;
+            foreach (var (a, b, hw) in walkways)
+            {
+                var ab = b - a;
+                float t = Mathf.Clamp01(Vector2.Dot(p - a, ab) / Mathf.Max(1e-4f, ab.sqrMagnitude));
+                if ((a + ab * t - p).magnitude < hw + margin) return true;
+            }
+            return false;
         }
 
         /// <summary>Zone index for a Unity-space position (zones are Godot XZ rects).</summary>

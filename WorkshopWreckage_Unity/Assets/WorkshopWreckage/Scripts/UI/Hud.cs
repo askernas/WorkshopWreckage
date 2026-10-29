@@ -304,34 +304,45 @@ namespace WorkshopWreckage
             _mainTitleBits.Add(Title(m, "WORKSHOP\nWRECKAGE", 60).gameObject);
             _mainTitleBits.Add(Para(m, "EST. 1952   ·   SALVAGE & ROBOTICS   ·   WORKSHOP No. 7", 13, Brass, 20).gameObject);
             _mainTitleBits.Add(Para(m, "Restore order. Rebuild the robots.", 18, Muted, 28).gameObject);
+            // New Game first, then Continue and Load (playtest 2026-10-29); world size and seed are on the New Game screen
+            MakeButton(m, "New Game", () => ShowSub("newgame"));
             _continue = MakeButton(m, "Continue", () => _g.LoadGame(LatestSlot()?.slot));
+            MakeButton(m, "Load Game", () => ShowSub("load"));
+            MakeButton(m, "Settings", () => ShowSub("settings"));
+            MakeButton(m, "Quit", Application.Quit);
+            _mainTitleBits.Add(Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel select · 1-9 skills (glove, scan, supermagnet, sweep) · K skills · U robots · R/T/H/J robots · Tab log · F5/F9 save/load", 14, Muted, 40).gameObject);
+
+            var ng = Screen("newgame", 560);
+            Title(ng, "NEW GAME", 34);
             // world size: cycles through shared/data/world_presets.json
             var presets = ItemDatabase.Presets();
             if (presets.Count == 0) presets.Add((_g.presetId, _g.db.config));
             int pi = Mathf.Max(0, presets.FindIndex(x => x.id == _g.presetId));
             string PresetText() => $"World size:  {Json.Str(presets[pi].cfg, "label", presets[pi].id)}  ({Json.Int(presets[pi].cfg, "total_items"):N0} parts)";
             Button presetBtn = null;
-            presetBtn = MakeButton(m, PresetText(), () =>
+            presetBtn = MakeButton(ng, PresetText(), () =>
             {
                 if (presets.Count == 0) return;
                 pi = (pi + 1) % presets.Count;
                 presetBtn.GetComponentInChildren<Text>().text = PresetText();
             });
             var seedRow = new GameObject("Seed", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
-            seedRow.transform.SetParent(m, false);
+            seedRow.transform.SetParent(ng, false);
             seedRow.GetComponent<LayoutElement>().preferredHeight = 40;
             Para(seedRow.transform, "Workshop seed", 18, Cream, 40).alignment = TextAnchor.MiddleLeft;
             var inGo = DefaultControls.CreateInputField(new DefaultControls.Resources());
             inGo.transform.SetParent(seedRow.transform, false);
             _seed = inGo.GetComponent<InputField>();
-            _seed.text = Json.Int(_g.db.config, "default_seed", 1912).ToString();
+            _seed.text = _g.NewSeed().ToString();
             _seed.textComponent.font = TextAtlas.Font;
-            MakeButton(m, "New Game", () => { if (_g.NewGame(presets[pi].id, int.TryParse(_seed.text, out var s) ? s : 1912)) _g.SetState("play"); });
-            MakeButton(m, "Load Game", () => ShowSub("load"));
-            MakeButton(m, "Settings", () => ShowSub("settings"));
-            MakeButton(m, "Quit", Application.Quit);
-            _mainTitleBits.Add(Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel select · 1-9 skills (glove, scan, supermagnet, sweep) · K skills · U robots · R/T/H/J robots · Tab log · F5/F9 save/load", 14, Muted, 40).gameObject);
-            _mainTitleBits.Add(Para(m, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20).gameObject);
+            Para(ng, "<i>Every seed generates a new workshop. Saves remember their world size and seed.</i>", 13, Muted, 20);
+            MakeButton(ng, "Start", () =>
+            {
+                if (!_g.NewGame(presets[pi].id, int.TryParse(_seed.text, out var s) ? s : _g.NewSeed())) return;
+                _seed.text = _g.NewSeed().ToString();   // the next new game: a fresh seed (Game.FixedSeed off)
+                _g.SetState("play");
+            });
+            MakeButton(ng, "Back", () => ShowScreenRaw(_backTo));
 
             var p = Screen("pause", 460);
             Title(p, "PAUSED");
@@ -753,7 +764,7 @@ namespace WorkshopWreckage
 
         public bool BackFromSubScreen()
         {
-            if (_screen == "save" || _screen == "load" || _screen == "settings" || _screen == "skills" || _screen == "robots") { ShowScreenRaw(_backTo); return true; }
+            if (_screen == "save" || _screen == "load" || _screen == "settings" || _screen == "skills" || _screen == "robots" || _screen == "newgame") { ShowScreenRaw(_backTo); return true; }
             if (_screen == "modify") { ShowScreenRaw("workbench"); return true; }
             return false;
         }

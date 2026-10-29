@@ -310,10 +310,9 @@ namespace WorkshopWreckage
             float yawRight = g.player.Yaw;
             Check("Q turns left, E turns right", yawLeft > yaw0 + 0.1f && yawRight < yawLeft - 0.2f, $"yaw {yaw0:0.00} -> {yawLeft:0.00} (Q) -> {yawRight:0.00} (E)");
 
-            // 0b. walking into a heap: the player climbs onto the parts instead of passing through
+            // 0b. walking into the parts: the player climbs onto them instead of passing through
             {
-                var hs = g.layout.piles.First(p => p.kind == "heap" && p.surface == 0);
-                var hc = Shared.Pos(hs.center.x, 0, hs.center.y);
+                var hc = WorldGenerator.CrowdedFloorSpots(g.world, 1)[0];   // the floor has no heaps: the most crowded spot
                 var start = hc + new Vector3(1.6f, 0, 0.4f);
                 g.player.Teleport(start);
                 var d = hc - start;
@@ -339,8 +338,8 @@ namespace WorkshopWreckage
             yield return PlaytestChecks();
 
             // 1. pick individual items from a heap by aiming at them
-            var heap = g.layout.piles.First(p => p.kind == "heap" && p.surface == 0);   // procedural: first floor heap
-            var pile = ItemsNear(new Vector3(heap.center.x, 0, heap.center.y), 1.2f);
+            var heap = WorldGenerator.CrowdedFloorSpots(w, 1)[0];   // the floor's most crowded spot (Unity space)
+            var pile = ItemsNear(new Vector3(heap.x, 0, -heap.z), 1.2f);
             int visibleBefore = g.renderer.VisibleCount, picked = 0, exact = 0;
             foreach (var id in pile.Take(40))
             {
@@ -1043,8 +1042,9 @@ namespace WorkshopWreckage
                 }
                 dominant /= Mathf.Max(1, placed); pilesPerSet /= Mathf.Max(1, sets); onePile /= Mathf.Max(1, sets);
             }
-            Check("parts are mixed: no pile is mostly one category, a set's copies lie in several piles, few neighbours are the same part",
-                  dominant < 0.4 && onePile < 0.15 && pilesPerSet >= 2 && sameDef < 0.12,
+            // the floor is one spread over the whole room (no heaps, playtest 2026-10-29): a set's copies lie far apart
+            Check("parts are mixed: no site is mostly one category, a set's copies lie far apart, few neighbours are the same part",
+                  dominant < 0.4 && median > 4f && sameDef < 0.12,
                   $"biggest category per pile {dominant:P0} of its parts; sets of 3+ in one pile only {onePile:P0}, piles per set {pilesPerSet:0.0}; {samples} parts sampled: neighbours within 0.4 m the same part {sameDef:P1}, the same category {sameCat:P1}; median span of a set's copies {median:0.0} m");
             Check("world generation is deterministic from the seed", same, a1 == null ? "generation failed" : $"{a1.Count} parts");
             // what a new game shows: the chassis ahead, the assortment to the right
@@ -1735,8 +1735,7 @@ namespace WorkshopWreckage
 
             EmptyHands();
             // Area Sweep: everything loose around you, up to the limit
-            var heap = g.layout.piles.Where(p => p.kind == "heap" && p.surface == 0).Skip(1).First();
-            var hc = Shared.Pos(heap.center.x, 0, heap.center.y);
+            var hc = WorldGenerator.CrowdedFloorSpots(g.world, 2)[1];   // the second most crowded floor spot
             g.player.Teleport(hc + new Vector3(1.0f, 0, 0));
             g.player.SetView(Mathf.Atan2(1.0f, 0), -0.7f);
             yield return Frames(3);
@@ -4406,8 +4405,7 @@ namespace WorkshopWreckage
             Check("a new world has no unreachable parts once it has settled", unreach0.Count == 0, $"{unreach0.Count} unreachable");
             Check("a new world's parts all rest on something (nothing in mid-air at the start)", air.Count == 0,
                   $"{sample.Count} of {loose.Count} loose parts checked, in the air: {air.Count}{(air.Count > 0 ? " (" + string.Join("; ", air.Take(3)) + ")" : "")}; deepest overlap {deep0 * 1000:0.0} mm; {g.piles.lastInfo}");
-            var hs = g.layout.piles.First(p => p.kind == "heap" && p.surface == 0);
-            var hc = new Vector3(hs.center.x, 0.3f, hs.center.y);
+            var hc = WorldGenerator.CrowdedFloorSpots(g.world, 1)[0] + Vector3.up * 0.3f;
             var toRoom = new Vector3(-hc.x, 0, -hc.z).normalized;
             LookFrom(hc + toRoom * 1.3f + Vector3.up * 0.9f, hc + Vector3.down * 0.3f);
             yield return g.Capture(Path.Combine(outDir, "07d_start_heap.png"), 3);
