@@ -1,0 +1,100 @@
+{
+	"version": 3,
+	"note": "Robot definitions (docs/specs/robots_and_levels.md §3, §15; docs/specs/robot_blueprints_and_assembly.md). All robots are toys at Retrobot's scale (~30 cm). Distances/heights in metres, speeds in m/s, times in seconds. Player: walk 3.0 m/s, eye height 1.62 m.\nBlueprints: a robot can be assembled at the Robot Workbench only once the player reaches its unlock level (unlocks.json robots); its unique parts (robot_parts.json) may be found and delivered earlier (they wait in the holding tray). assembly.requires: part -> parts that must be installed first (real mechanical dependencies only; everything else installs in any order).\nCapabilities: capacity = cargo slots (a part whose longest side is >= large_item_size takes two); item_types = different part kinds per trip; reach_height = highest point it can pick from / store into standing on the floor; climb_height (climbers only) = highest point it can reach by climbing furniture and shelving; can_direct_store false = it always leaves parts in the staging zone in front of the destination (still UNSORTED); heap_step_height = parts piled higher than this are obstacles; strategy: opportunistic | courier | assigned_definition | multi_stop | staging_first.\nlimits: permanent ceilings the upgrade trees (progression.json robot_upgrades) can never raise a stat beyond. battery_minutes: working time on a full charge; charge_minutes: time on its charging mat to recharge fully.",
+	"large_item_size": 0.25,
+	"staging_capacity": 14,
+	"robot_ai": {"note": "Design v1.0 §6–8: robot intelligence is bought, never given by player level. Base robots take the nearest feasible part. focus_bonus_m: Set Awareness bonus (metres of walking) for a destination at full completion and full reachability; strategist_bonus_m: the same with Completion Strategist. switch_penalty_m: Local Persistence, per rank, for switching kind; persistence_radius_m and persistence_s: how far from its last pickup and how long it keeps to that kind, per rank. staging_soft_limit: a courier with Courier Hand-off stops feeding a zone here (the hard cap is staging_capacity). order_slots: lasting R orders at once (Destination Orders). cargo_area_m: Caterpillarbot fills a load with parts for one area: the same storage unit, or destinations whose staging spots are at most this far apart (+0.6 m per Route Planning rank). route_mode: how Caterpillarbot Route Planning works. \"adjacent\" (default) tops a one-destination load up from destinations right beside it; \"destinations\" (trial, QA --routemode) allows route_destinations[rank-1] destinations per load, choosing further ones by route_detour_weight x distance from the staging spots on board, and from rank III tries every stop order (up to 4).", "focus_bonus_m": 2.5, "strategist_bonus_m": 4.0, "switch_penalty_m": 1.5, "persistence_radius_m": [4, 7], "persistence_s": [60, 150], "staging_soft_limit": 10, "order_slots": 1, "route_mode": "adjacent", "route_destinations": [2, 3, 3], "route_detour_weight": 1, "cargo_area_m": 2.0},
+	"robots": {
+		"retrobot": {
+			"name": "Retrobot", "max_instances": 1, "strategy": "opportunistic",
+			"battery_minutes": 8, "charge_minutes": 0.75, "locomotion": "biped", "height": 0.3,
+			"capacity": 1, "item_types": 1, "walk_speed": 0.7, "turn_speed_deg": 260,
+			"reach": 0.32, "reach_height": 0.35, "max_item_size": 0.33, "heap_step_height": 0.18,
+			"can_direct_store": true, "can_climb": false, "can_fly": false,
+			"pick_time": 1.1, "deposit_time": 0.9, "follow_distance": 1.1, "radius": 0.12,
+			"plan_ahead": true, "decide_pause": 0.5,
+			"limits": {"capacity": 3, "item_types": 3, "reach_height": 0.71, "walk_speed": 1.05, "heap_step_height": 0.18},
+			"strengths": ["Reliable all-rounder", "Stores low destinations itself"],
+			"limitations": ["One part at a time (upgradable to three)", "Walks only on flat floor, around heaps", "Cannot climb or fly", "Never reaches the high shelves"],
+			"assembly": {"requires": {"head": ["torso"], "left arm": ["torso"], "right arm": ["torso"]}},
+			"personality": "Earnest, enthusiastic, slightly clumsy. One part at a time, always knows where it belongs."
+		},
+		"unibot": {
+			"name": "Unibot", "max_instances": 1, "strategy": "courier",
+			"battery_minutes": 6, "charge_minutes": 0.75, "locomotion": "wheel", "height": 0.29,
+			"capacity": 1, "item_types": 1, "walk_speed": 1.4, "turn_speed_deg": 300,
+			"reach": 0.3, "reach_height": 0.35, "max_item_size": 0.28, "heap_step_height": 0.12,
+			"can_direct_store": false, "store_with_reach": true, "can_climb": false, "can_fly": false,
+			"pick_time": 0.8, "deposit_time": 0.7, "follow_distance": 1.2, "radius": 0.11,
+			"limits": {"capacity": 3, "item_types": 3, "walk_speed": 2.3, "max_item_size": 0.28, "reach_height": 0.71},
+			"strengths": ["Twice as fast as Retrobot", "Clears flat floor quickly"],
+			"limitations": ["Stores only into the low shelves and bottom drawers until it has Arm Reach; higher parts go to the staging zone", "One part at a time (upgradable to three small ones)", "Flat floor only, cannot cross heaps", "Cannot climb or fly"],
+			"assembly": {"requires": {"chest lamp": ["torso"], "signal mast": ["torso"], "head shell": ["torso"], "left arm": ["torso"], "right arm": ["torso"], "tire": ["wheel hub"]}},
+			"personality": "Energetic, slightly nervous, constantly balancing. A fast courier."
+		},
+		"spiderbot": {
+			"name": "Spiderbot", "max_instances": 1, "strategy": "assigned_definition",
+			"battery_minutes": 10, "charge_minutes": 1.0, "locomotion": "hexapod", "height": 0.24,
+			"capacity": 1, "item_types": 1, "walk_speed": 0.85, "turn_speed_deg": 220,
+			"reach": 0.34, "reach_height": 0.4, "climb_height": 1.35, "climb_speed": 0.35, "max_item_size": 0.3, "heap_step_height": 0.55, "gather_radius": 2.5, "scan_radius": 6,
+			"can_direct_store": true, "can_climb": true, "can_fly": false,
+			"pick_time": 0.9, "deposit_time": 0.8, "follow_distance": 1.0, "radius": 0.13,
+			"limits": {"capacity": 3, "climb_height": 1.75, "walk_speed": 1.2, "item_types": 1},
+			"strengths": ["Collects one exact part definition until the set is complete", "Climbs heaps, benches and shelving", "Stores directly into what it can reach"],
+			"limitations": ["Works on one assigned part definition at a time", "Slower than Unibot on open floor", "Cannot fly; the top shelves stay out of reach"],
+			"assembly": {"requires": {"head": ["body shell"], "spinneret": ["body shell"], "front left leg": ["body shell"], "front right leg": ["body shell"], "middle left leg": ["body shell"], "middle right leg": ["body shell"], "rear left leg": ["body shell"], "rear right leg": ["body shell"], "left arm": ["body shell"], "right arm": ["body shell"]}},
+			"personality": "Curious, methodical, precise. Clambers over heaps and up the shelving."
+		},
+		"caterpillarbot": {
+			"name": "Caterpillarbot", "max_instances": 1, "strategy": "multi_stop",
+			"battery_minutes": 14, "charge_minutes": 1.5, "locomotion": "tracks", "height": 0.3,
+			"capacity": 3, "item_types": 3, "walk_speed": 0.45, "turn_speed_deg": 70,
+			"reach": 0.36, "reach_height": 0.4, "max_item_size": 0.45, "heap_step_height": 0.32, "gather_radius": 3.0,
+			"can_direct_store": true, "can_climb": false, "can_fly": false,
+			"pick_time": 0.9, "deposit_time": 1.2, "follow_distance": 1.4, "radius": 0.2,
+			"limits": {"capacity": 6, "item_types": 6, "walk_speed": 0.7, "heap_step_height": 0.48, "max_item_size": 0.55, "reach_height": 0.5},
+			"strengths": ["Fills its three cargo boxes for one destination per trip", "Crosses low and moderate heaps", "Hauls bulky parts"],
+			"limitations": ["Slow, wide turns", "Needs room for its long body", "Cannot climb shelving or fly", "Uses the staging zone below high destinations"],
+			"assembly": {"requires": {"head": ["chassis"], "searchlight": ["chassis"], "radio mast": ["chassis"], "hazard beacon": ["chassis"], "left track": ["chassis", "left drive sprocket"], "right track": ["chassis", "right drive sprocket"], "front cargo box": ["chassis"], "middle cargo box": ["chassis"], "rear cargo box": ["chassis"], "left track tensioner": ["chassis"], "right track tensioner": ["chassis"]}},
+			"personality": "Slow, determined, dependable. Hauls loads in three cargo boxes."
+		},
+		"hoverbot": {
+			"name": "Hoverbot", "max_instances": 3, "strategy": "staging_first",
+			"battery_minutes": 5, "charge_minutes": 1.0, "locomotion": "hover", "height": 0.3,
+			"capacity": 1, "item_types": 1, "walk_speed": 1.2, "turn_speed_deg": 280,
+			"reach": 0.2, "reach_height": 2.5, "max_item_size": 0.3, "gather_radius": 2.5, "cruise_altitude": 2.95,
+			"can_direct_store": true, "can_climb": false, "can_fly": true,
+			"pick_time": 0.8, "deposit_time": 0.8, "follow_distance": 1.3, "radius": 0.14,
+			"limits": {"capacity": 2, "item_types": 2, "walk_speed": 1.9, "max_item_size": 0.36},
+			"strengths": ["Reaches every storage height", "Empties the staging zones other robots fill", "Up to three can fly at once"],
+			"limitations": ["One part at a time (two at most)", "Light parts only", "Cannot dig parts out from under a heap", "Not a bulk transporter"],
+			"assembly": {"requires": {"upper saucer shell": ["lower saucer shell"], "rim light 1": ["upper saucer shell"], "rim light 2": ["upper saucer shell"], "rim light 3": ["upper saucer shell"], "rim light 4": ["upper saucer shell"], "head": ["upper saucer shell"], "left sensor pod": ["upper saucer shell"], "right sensor pod": ["upper saucer shell"], "left stabilizer fin": ["upper saucer shell"], "right stabilizer fin": ["upper saucer shell"], "left vent cover": ["lower saucer shell"], "right vent cover": ["lower saucer shell"], "rotor mast": ["head"], "rotor hub": ["rotor mast"], "propeller blade a": ["rotor hub"], "propeller blade b": ["rotor hub"], "left shoulder servo": ["upper saucer shell"], "right shoulder servo": ["upper saucer shell"], "thruster glow plate": ["thruster ring"]}},
+			"extra_units": [
+				{"id": "hoverbot_2", "name": "Hoverbot #2"},
+				{"id": "hoverbot_3", "name": "Hoverbot #3"}
+			],
+			"extra_units_note": "Hoverbot #2 and #3 are built from their own unique kits (robot_parts.json), which lie in the world from the start like every robot part. A further unit goes on the Hoverbot mat once the one before it is operational; its delivered parts wait in the holding tray until then.",
+			"personality": "Curious, enthusiastic, slightly overactive. Reaches the high shelves and stores the piles the small robots leave."
+		},
+		"sorting_arm": {
+			"name": "Sorting Arm", "max_instances": 3, "strategy": "stationary",
+			"locomotion": "fixed", "height": 0.84,
+			"capacity": 1, "item_types": 1, "walk_speed": 0, "turn_speed_deg": 0,
+			"reach": 2.1, "reach_height": 2.1, "max_item_size": 0.36,
+			"can_direct_store": true, "can_climb": false, "can_fly": false,
+			"pick_time": 1.1, "deposit_time": 1.0, "cycle_speed": 1.0,
+			"battery_minutes": 0, "charge_minutes": 0, "radius": 0.2,
+			"limits": {"cycle_speed": 1.6, "max_item_size": 0.45},
+			"strengths": ["Fast local sorting: clears the staging piles below its half of a drawer cabinet", "Works all day on workshop power"],
+			"limitations": ["Stationary: serves only the unit it is mounted on (all 36 drawers of a cabinet, or the containers of a shelving unit; wooden crates under a deck are too low to reach into)", "Never picks loose parts from the floor or other units", "The player carries it from mount to mount"],
+			"assembly": {"requires": {"shoulder turret": ["docking coupler"], "control unit": ["shoulder turret"], "upper arm": ["shoulder turret"], "motor cartridge": ["upper arm"], "elbow servo": ["upper arm"], "forearm": ["elbow servo"], "wrist rotator": ["forearm"], "sensor head": ["wrist rotator"], "left finger": ["wrist rotator"], "right finger": ["wrist rotator"], "cable harness": ["control unit", "forearm"]}},
+			"extra_units": [
+				{"id": "sorting_arm_2", "name": "Sorting Arm #2"},
+				{"id": "sorting_arm_3", "name": "Sorting Arm #3"}
+			],
+			"extra_units_note": "Every arm is built from its own kit of 12 unique parts (robot_parts.json), all in the world from the start; a further arm goes on the mat once the one before it is operational. At most max_instances arms exist.",
+			"sockets_note": "Arms mount only on fixed sockets: one overhead rail mount per drawer cabinet and per shelving unit (storage_layout.json sockets: SK-<unit> serves the whole unit; the arm hangs from a trolley and lift mast that run along a ceiling-hung rail, independent of the furniture).",
+			"personality": "Patient, precise, a little proud. Ticks its servos while it waits."
+		}
+	}
+}

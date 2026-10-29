@@ -1,3 +1,26 @@
+.claude/
+# Godot
+.godot/
+*.import.tmp
+export_presets.cfg.bak
+# Unity
+WorkshopWreckage_Unity/[Ll]ibrary/
+WorkshopWreckage_Unity/[Tt]emp/
+WorkshopWreckage_Unity/[Oo]bj/
+WorkshopWreckage_Unity/[Bb]uild/
+WorkshopWreckage_Unity/[Bb]uilds/
+WorkshopWreckage_Unity/[Ll]ogs/
+WorkshopWreckage_Unity/[Uu]ser[Ss]ettings/
+*.csproj
+*.sln
+# local benchmark scratch
+bench_out/
+
+# engine builds
+Builds/
+*.slnx
+WorkshopWreckage_Unity/.vs/
+
 # large generated QA/reference images (local only)
 part audit/
 sheets/

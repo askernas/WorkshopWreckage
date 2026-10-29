@@ -1,0 +1,95 @@
+{
+	"schemaVersion": 1,
+	"id": "part_radar",
+	"enabled": true,
+	"note": "The Part Radar (resources/part radar/Workshop_Wreckage_Part_Radar_v1.2.md): a player-built tool assembled at the Robot Workbench from one of each of eight component types. Its parts and batteries are merged into every preset's catalogue by Author Catalogs (category Robot Parts, crafting_purpose tool:part_radar:<type>); they never count as robot components or ordinary parts and give no level progress. Battery charges are assigned per world from spawnDistribution (seeded) and saved; the battery item's spawn_count must equal the distribution's total.",
+	"assembly": {
+		"station": "RS-part_radar",
+		"requiredComponents": {
+			"radar_housing": 1,
+			"radar_left_handle": 1,
+			"radar_right_handle": 1,
+			"radar_pulse_button": 1,
+			"radar_selector_dial": 1,
+			"radar_led_module": 1,
+			"radar_left_antenna": 1,
+			"radar_right_antenna": 1
+		},
+		"componentSpawnCounts": {
+			"radar_housing": 2,
+			"radar_left_handle": 3,
+			"radar_right_handle": 3,
+			"radar_pulse_button": 3,
+			"radar_selector_dial": 2,
+			"radar_led_module": 3,
+			"radar_left_antenna": 3,
+			"radar_right_antenna": 3
+		}
+	},
+	"scanning": {
+		"durationSeconds": 3.0,
+		"horizontalToleranceDegrees": 5.0,
+		"useVerticalAngle": false,
+		"closeRangeMeters": 2.0,
+		"closeRangeDistanceMode": "3d_euclidean",
+		"blinkFrequencyHz": 4.0,
+		"cooldownSeconds": 0.0,
+		"targetLockDuringPulse": true,
+		"genericTargetPolicy": "nearest_eligible",
+		"requireLineOfSight": false
+	},
+	"batterySystem": {
+		"enabled": true,
+		"batterySlots": 1,
+		"maxChargesPerBattery": 4,
+		"chargesPerActivation": 1,
+		"spawnDistribution": [
+			{
+				"charges": 1,
+				"count": 4
+			},
+			{
+				"charges": 2,
+				"count": 3
+			},
+			{
+				"charges": 3,
+				"count": 3
+			},
+			{
+				"charges": 4,
+				"count": 2
+			}
+		],
+		"manualReplacement": true,
+		"replacementDurationSeconds": 1.75,
+		"allowPartialBatteryRemoval": true,
+		"showChargeBeforePickup": false,
+		"showChargeAfterPickup": true,
+		"rechargeable": false,
+		"craftable": false,
+		"respawn": false,
+		"automaticReplacement": false
+	},
+	"feedback": {
+		"directionLedColor": "#FFAA22",
+		"batteryIndicatorCount": 4,
+		"showTargetArrow": false,
+		"showDistance": false,
+		"highlightTarget": false
+	},
+	"stations": [
+		{"id": "RS-part_radar", "label": "Part Radar parts bin", "capacity": 34, "tool": "part_radar"}
+	],
+	"items": [
+		{"id": 70168, "name": "Radar Controller Housing", "category": "Robot Parts", "subcategory": "part_radar", "shape": "Controller Housing", "geometry_key": "robot:part:part_radar:radar_housing", "material": "painted", "finish": "robot", "color": "#ccbd99", "diameter_mm": 196.0, "length_mm": 280.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 420.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 2, "crafting_purpose": "tool:part_radar:radar_housing", "rest_mode": "side"},
+		{"id": 70169, "name": "Radar Left Handle", "category": "Robot Parts", "subcategory": "part_radar", "shape": "Left Handle", "geometry_key": "robot:part:part_radar:radar_left_handle", "material": "painted", "finish": "robot", "color": "#b08d3c", "diameter_mm": 96.0, "length_mm": 213.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 110.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 3, "crafting_purpose": "tool:part_radar:radar_left_handle", "rest_mode": "side"},
+		{"id": 70170, "name": "Radar Right Handle", "category": "Robot Parts", "subcategory": "part_radar", "shape": "Right Handle", "geometry_key": "robot:part:part_radar:radar_right_handle", "material": "painted", "finish": "robot", "color": "#4a4744", "diameter_mm": 96.0, "length_mm": 212.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 120.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 3, "crafting_purpose": "tool:part_radar:radar_right_handle", "rest_mode": "side"},
+		{"id": 70171, "name": "Radar Pulse Button Assembly", "category": "Robot Parts", "subcategory": "part_radar", "shape": "Pulse Button Assembly", "geometry_key": "robot:part:part_radar:radar_pulse_button", "material": "painted", "finish": "robot", "color": "#a8261a", "diameter_mm": 65.0, "length_mm": 99.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 35.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 3, "crafting_purpose": "tool:part_radar:radar_pulse_button", "rest_mode": "flat"},
+		{"id": 70172, "name": "Radar Target Selector Dial", "category": "Robot Parts", "subcategory": "part_radar", "shape": "Target Selector Dial", "geometry_key": "robot:part:part_radar:radar_selector_dial", "material": "painted", "finish": "robot", "color": "#d8cdb0", "diameter_mm": 128.0, "length_mm": 128.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 30.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 2, "crafting_purpose": "tool:part_radar:radar_selector_dial", "rest_mode": "side"},
+		{"id": 70173, "name": "Radar LED Beacon Module", "category": "Robot Parts", "subcategory": "part_radar", "shape": "LED Beacon Module", "geometry_key": "robot:part:part_radar:radar_led_module", "material": "painted", "finish": "robot", "color": "#55524c", "diameter_mm": 57.0, "length_mm": 133.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 45.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 3, "crafting_purpose": "tool:part_radar:radar_led_module", "rest_mode": "flat"},
+		{"id": 70174, "name": "Radar Left Antenna", "category": "Robot Parts", "subcategory": "part_radar", "shape": "Left Antenna", "geometry_key": "robot:part:part_radar:radar_left_antenna", "material": "painted", "finish": "robot", "color": "#a9aaa8", "diameter_mm": 36.0, "length_mm": 342.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 60.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 3, "crafting_purpose": "tool:part_radar:radar_left_antenna", "rest_mode": "long"},
+		{"id": 70175, "name": "Radar Right Antenna", "category": "Robot Parts", "subcategory": "part_radar", "shape": "Right Antenna", "geometry_key": "robot:part:part_radar:radar_right_antenna", "material": "painted", "finish": "robot", "color": "#8f8a80", "diameter_mm": 53.0, "length_mm": 322.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 70.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 3, "crafting_purpose": "tool:part_radar:radar_right_antenna", "rest_mode": "long"},
+		{"id": 70176, "name": "Radar Battery", "category": "Robot Parts", "subcategory": "part_radar", "shape": "Battery", "geometry_key": "robot:part:part_radar:battery", "material": "painted", "finish": "robot", "color": "#2f5a8a", "diameter_mm": 19.0, "length_mm": 65.0, "mesh_scale_mm": 1000.0, "visual_scale": 1.0, "thread_size": "", "thread_pitch_mm": 0.0, "weight_g": 47.0, "magnetic": true, "rarity": 3, "storage_category": "Robot Parts", "storage_box": "RS-part_radar", "spawn_count": 12, "crafting_purpose": "tool:part_radar:battery", "rest_mode": "long"}
+	]
+}

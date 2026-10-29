@@ -1,0 +1,112 @@
+{
+	"note": "Balance run stages (Tools/BalanceSim.cs). level: the workshop is sorted (order \"sets\", the default: whole destinations in a seeded order; \"parts\": single parts in a seeded order) until this level is reached (points come from the game's own level rules); restored_percent: sorted until this share of all parts is stored instead. robots: the Robot Workbench projects built at this stage (Sorting Arms are mounted on the first sockets). solo_*: one robot type alone (A/B tests of single upgrades; solo_uni adds a Retrobot and solo_hover a Unibot, the couriers' downstream / upstream partner).",
+	"early": {
+		"level": 6,
+		"robots": [
+			"retrobot",
+			"unibot"
+		]
+	},
+	"mid": {
+		"level": 12,
+		"robots": [
+			"retrobot",
+			"unibot",
+			"spiderbot",
+			"caterpillarbot",
+			"hoverbot"
+		]
+	},
+	"late": {
+		"level": 20,
+		"robots": [
+			"retrobot",
+			"unibot",
+			"spiderbot",
+			"caterpillarbot",
+			"hoverbot",
+			"hoverbot_2",
+			"sorting_arm",
+			"sorting_arm_2"
+		]
+	},
+	"level25": {
+		"level": 25,
+		"robots": [
+			"retrobot",
+			"unibot",
+			"spiderbot",
+			"caterpillarbot",
+			"hoverbot",
+			"hoverbot_2",
+			"sorting_arm",
+			"sorting_arm_2",
+			"hoverbot_3",
+			"sorting_arm_3"
+		]
+	},
+	"restored95": {
+		"restored_percent": 95,
+		"robots": [
+			"retrobot",
+			"unibot",
+			"spiderbot",
+			"caterpillarbot",
+			"hoverbot",
+			"hoverbot_2",
+			"sorting_arm",
+			"sorting_arm_2",
+			"hoverbot_3",
+			"sorting_arm_3"
+		],
+		"order": "parts"
+	},
+	"restored99": {
+		"restored_percent": 99,
+		"robots": [
+			"retrobot",
+			"unibot",
+			"spiderbot",
+			"caterpillarbot",
+			"hoverbot",
+			"hoverbot_2",
+			"sorting_arm",
+			"sorting_arm_2",
+			"hoverbot_3",
+			"sorting_arm_3"
+		],
+		"order": "parts"
+	},
+	"solo_cat": {
+		"level": 12,
+		"robots": [
+			"caterpillarbot"
+		]
+	},
+	"solo_spider": {
+		"level": 12,
+		"robots": [
+			"spiderbot"
+		]
+	},
+	"solo_retro": {
+		"level": 12,
+		"robots": [
+			"retrobot"
+		]
+	},
+	"solo_uni": {
+		"level": 12,
+		"robots": [
+			"unibot",
+			"retrobot"
+		]
+	},
+	"solo_hover": {
+		"level": 12,
+		"robots": [
+			"hoverbot",
+			"unibot"
+		]
+	}
+}

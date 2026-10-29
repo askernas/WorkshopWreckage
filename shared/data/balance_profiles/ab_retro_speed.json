@@ -1,0 +1,8 @@
+{
+	"note": "A/B: one upgrade alone (compare with control_no_upgrades on the same solo stage and seed).",
+	"buy": [
+		"retro_speed",
+		"retro_speed",
+		"retro_speed"
+	]
+}

@@ -1,0 +1,247 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace WorkshopWreckage
+{
+    /// <summary>Draws every visible item with Graphics.RenderMeshInstanced, one call
+    /// per shared geometry (and submesh), in chunks. Each logical instance owns one
+    /// slot; hiding an item zero-scales only that slot. Per-instance colour and PBR
+    /// parameters live in one GraphicsBuffer read by the item shader.</summary>
+    public class ItemRenderer : MonoBehaviour
+    {
+        const int Chunk = 500;
+        /// <summary>Parts smaller than this (bounding radius, m) don't cast shadows: their
+        /// shadows are barely visible but every group is drawn again per shadow cascade.</summary>
+        /// <summary>Part shadows (Settings, saved in PlayerPrefs "ww_part_shadows"): 0 = every part,
+        /// 1 = parts from ~14 cm across (default: the GPU budget on Massive), 2 = none (slower PCs).</summary>
+        public static int ShadowMode = UnityEngine.PlayerPrefs.GetInt("ww_part_shadows", 1);
+        public static readonly string[] ShadowModeNames = { "every part", "larger parts only", "off" };
+        static float ShadowMinRadius => ShadowMode == 0 ? 0.045f : ShadowMode == 1 ? 0.07f : float.MaxValue;
+
+        class Group
+        {
+            public MeshLibrary.Entry entry;
+            public Material[] mats;
+            public List<Matrix4x4[]> chunks = new();
+            public List<int> chunkCounts = new();
+            public List<MaterialPropertyBlock> blocks = new();
+            public List<Bounds> chunkBounds = new();   // tight per-chunk bounds so URP can cull per view / shadow pass
+            public float radius;
+            public bool external;   // drawn elsewhere: the pegboard's tools (Pegboard.ScatteredTools)
+        }
+
+        /// <summary>The visual sandbox's geometry quality: the mesh LOD for a geometry key at a size (largest world
+        /// extent of its instances, m). Null, as in the game, draws every part at MeshLibrary.LodWorld.</summary>
+        public static System.Func<string, float, int> WorldLod;
+
+        /// <summary>The visual sandbox's wear levels: an instance's skin condition (world, instance id, definition,
+        /// condition) -> condition. Null, as in the game, keeps the catalogue's condition.</summary>
+        public static System.Func<ItemWorld, int, ItemDefinition, float, float> SkinCondition;
+
+        public ItemWorld world;
+        readonly Dictionary<(string, bool), Group> _groups = new();
+        int[] _group;      // instance -> group index into _groupList
+        int[] _slot;       // instance -> slot within group
+        readonly List<Group> _groupList = new();
+        readonly HashSet<int> _hidden = new();
+        readonly Dictionary<int, Matrix4x4> _flying = new();
+        GraphicsBuffer _data;
+        Material _material, _skinMaterial;
+        public int VisibleCount { get; private set; }
+        public int GroupCount => _groupList.Count;
+
+        public void Build(ItemWorld w)
+        {
+            Release();
+            world = w;
+            _groups.Clear();
+            _groupList.Clear();
+            _hidden.Clear();
+            _flying.Clear();
+            if (_material == null)   // a rebuild (the visual sandbox's pile) keeps its materials and their slot copies
+            {
+                _material = new Material(ItemAppearance.Shader) { name = "ItemInstanced", enableInstancing = true };
+                _material.EnableKeyword("_WW_INSTANCED");
+                _material.SetTexture("_WearNoise", ItemAppearance.Noise);
+                _material.SetTexture("_Decals", ItemAppearance.Decals);
+                // skinned parts draw with their own variant, so neither look pays for the other's registers
+                _skinMaterial = new Material(_material) { name = "ItemInstancedSkin" };
+                _skinMaterial.EnableKeyword("_WW_SKIN");
+            }
+            _group = new int[w.Count];
+            _slot = new int[w.Count];
+            var members = new Dictionary<(string key, bool skin), List<int>>();
+            foreach (var inst in w.instances)
+            {
+                var def = w.DefOf(inst.id);
+                var key = (def.geometryKey, ItemSkins.Applies(def));
+                if (!members.TryGetValue(key, out var l)) members[key] = l = new List<int>();
+                l.Add(inst.id);
+            }
+            // Instances are laid out in the data buffer group by group, so each
+            // chunk's offset + instanceID addresses its own entries.
+            var data = new Vector4[w.Count * 4];   // per item: albedo, (metallic, roughness, wear, seed), skin A, skin B
+            int offset = 0;
+            foreach (var kv in members)
+            {
+                var g = new Group { entry = MeshLibrary.Get(kv.Key.key, MeshLibrary.LodWorld), external = kv.Key.key.StartsWith(Pegboard.ToolFactory.Prefix) };
+                g.radius = 0;
+                foreach (var id in kv.Value) g.radius = Mathf.Max(g.radius, g.entry.bounds.extents.magnitude * w.DefOf(id).worldScale);
+                if (WorldLod != null && !g.external)
+                {
+                    var bs = g.entry.bounds.size;
+                    float ext = Mathf.Max(bs.x, Mathf.Max(bs.y, bs.z)), size = 0;
+                    foreach (var id in kv.Value) size = Mathf.Max(size, ext * w.DefOf(id).worldScale);
+                    int lod = WorldLod(kv.Key.key, size);
+                    if (lod != MeshLibrary.LodWorld) g.entry = MeshLibrary.Get(kv.Key.key, lod);
+                }
+                g.mats = ItemAppearance.SlotMaterials(g.entry, kv.Key.skin ? _skinMaterial : _material);
+                var ids = kv.Value;
+                for (int c = 0; c < ids.Count; c += Chunk)
+                {
+                    int n = Mathf.Min(Chunk, ids.Count - c);
+                    g.chunks.Add(new Matrix4x4[n]);
+                    g.chunkCounts.Add(n);
+                    var mpb = new MaterialPropertyBlock();
+                    mpb.SetFloat("_ItemOffset", offset + c);
+                    g.blocks.Add(mpb);
+                    var b = new Bounds(w.instances[ids[c]].Position, Vector3.one * g.radius * 2);
+                    for (int k = c; k < c + n; k++) b.Encapsulate(new Bounds(w.instances[ids[k]].Position, Vector3.one * g.radius * 2));
+                    g.chunkBounds.Add(b);
+                }
+                for (int k = 0; k < ids.Count; k++)
+                {
+                    int id = ids[k];
+                    _group[id] = _groupList.Count;
+                    _slot[id] = k;
+                    var def = w.DefOf(id);
+                    var (albedo, custom) = ItemAppearance.Params(def);
+                    float jitter = 0.9f + 0.2f * Rand01(id);
+                    var lin = albedo * jitter;   // raw values, as Godot's instance colours
+                    if (ItemSkins.Applies(def)) lin = ItemSkins.Base(def, albedo) * (0.95f + 0.1f * Rand01(id));   // skins: linear colour
+                    // salvage workshop: most parts are used and worn; ~15 % are new (clean, still matte)
+                    bool fresh = Rand01(id * 31 + 5) < 0.15f;
+                    custom.z = fresh ? custom.z * 0.15f : Mathf.Clamp01(0.45f + custom.z * 0.8f + 0.25f * Rand01(id * 7 + 3));
+                    custom.w = Rand01(id * 13 + 1);
+                    float cond = ItemSkins.Applies(def) ? Mathf.Clamp01(ItemSkins.Condition(def) + 0.08f * (Rand01(id * 7 + 3) - 0.5f)) : custom.z;   // skins: the catalogue's condition, a little per instance
+                    if (SkinCondition != null && ItemSkins.Applies(def)) cond = SkinCondition(w, id, def, cond);
+                    var (sa, sb) = ItemSkins.For(def, cond);
+                    data[(offset + k) * 4] = new Vector4(lin.r, lin.g, lin.b, ItemAppearance.SurfaceClass(def));
+                    data[(offset + k) * 4 + 1] = custom;
+                    data[(offset + k) * 4 + 2] = sa;
+                    data[(offset + k) * 4 + 3] = sb;
+                }
+                offset += ids.Count;
+                _groups[kv.Key] = g;
+                _groupList.Add(g);
+            }
+            _data = new GraphicsBuffer(GraphicsBuffer.Target.Structured, data.Length, 16);
+            _data.SetData(data);
+            foreach (var g in _groupList) if (g.entry.materials == null) foreach (var m in g.mats) m.SetBuffer("_ItemData", _data);
+            foreach (var inst in w.instances) Refresh(inst.id);
+            Recount();
+            w.StateChanged += (inst, _) => { Refresh(inst.id); Recount(); };
+            w.TransformChanged += inst => Refresh(inst.id);
+        }
+
+        static float Rand01(int x)
+        {
+            unchecked
+            {
+                uint h = (uint)x * 2654435761u;
+                h ^= h >> 16;
+                h *= 2246822519u;
+                h ^= h >> 13;
+                return (h & 0xffff) / 65535f;
+            }
+        }
+
+        public bool Shows(ItemInstance inst)
+        {
+            if (_hidden.Contains(inst.id)) return false;
+            if (inst.state == ItemState.InWorld) return true;
+            return inst.state == ItemState.Stored && inst.owner.StartsWith("box:") && world.db.IsOpenKind(inst.owner.Substring(4));
+        }
+
+        public void Refresh(int id)
+        {
+            var inst = world.instances[id];
+            var g = _groupList[_group[id]];
+            int s = _slot[id];
+            bool flying = _flying.TryGetValue(id, out var fm);
+            bool show = flying || Shows(inst);
+            var m = flying ? fm : inst.transform;
+            g.chunks[s / Chunk][s % Chunk] = show ? m : Matrix4x4.TRS(inst.Position, Quaternion.identity, Vector3.zero);
+            if (show)
+            {
+                // items moved into storage or dropped elsewhere grow their chunk's bounds
+                var cb = g.chunkBounds[s / Chunk];
+                cb.Encapsulate(new Bounds(m.GetColumn(3), Vector3.one * g.radius * 2));
+                g.chunkBounds[s / Chunk] = cb;
+            }
+        }
+
+        public void SetHidden(int id, bool hidden)
+        {
+            if (hidden) _hidden.Add(id); else _hidden.Remove(id);
+            Refresh(id);
+            Recount();
+        }
+
+        public bool IsHidden(int id) => _hidden.Contains(id);
+
+        /// <summary>Draws an instance at m whatever its state or hidden flag (a part flying between the hand and where
+        /// it lands), with the same world mesh, skin and wear as when it lies there; null gives it back to its state.
+        /// False: drawn elsewhere (the pegboard's tools).</summary>
+        public bool Fly(int id, Matrix4x4? m)
+        {
+            if (_group == null || id < 0 || id >= _group.Length || _groupList[_group[id]].external) return false;
+            if (m is Matrix4x4 mm) _flying[id] = mm; else _flying.Remove(id);
+            Refresh(id);
+            return true;
+        }
+
+        public bool IsFlying(int id) => _flying.ContainsKey(id);
+
+        void Recount()
+        {
+            int n = 0;
+            foreach (var i in world.instances) if (Shows(i)) n++;
+            VisibleCount = n;
+        }
+
+        public Mesh WorldMeshFor(int id) => _groupList[_group[id]].entry.mesh;
+
+        void Update()
+        {
+            if (world == null) return;
+            foreach (var g in _groupList)
+            {
+                if (g.external) continue;
+                for (int c = 0; c < g.chunks.Count; c++)
+                {
+                    for (int sub = 0; sub < g.mats.Length; sub++)
+                    {
+                        var rp = new RenderParams(g.mats[sub])
+                        {
+                            worldBounds = g.chunkBounds[c],
+                            shadowCastingMode = g.radius >= ShadowMinRadius ? ShadowCastingMode.On : ShadowCastingMode.Off,
+                            receiveShadows = true,
+                            matProps = g.blocks[c],
+                        };
+                        Graphics.RenderMeshInstanced(rp, g.entry.mesh, sub, g.chunks[c], g.chunkCounts[c]);
+                    }
+                }
+            }
+        }
+
+        void Release()
+        {
+            _data?.Release();
+            _data = null;
+        }
+
+        void OnDestroy() => Release();
+    }
+}

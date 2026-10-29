@@ -1,0 +1,16 @@
+{
+	"version": 1,
+	"note": "Standard benchmark camera poses shared by the Godot and Unity implementations. Position in metres (eye), yaw/pitch in degrees; yaw 0 looks toward -Z (north), positive yaw turns left (counter-clockwise seen from above).",
+	"resolution": [1920, 1080],
+	"warmup_s": 1.5,
+	"measure_s": 5.0,
+	"picks_per_pose": 300,
+	"poses": [
+		{"name": "start_overview", "pos": [0.6, 1.65, 3.6], "yaw": 0, "pitch": -18},
+		{"name": "bench_heap", "pos": [-1.5, 1.7, -1.2], "yaw": -20, "pitch": -35},
+		{"name": "east_aisle", "pos": [5.5, 1.7, 2.5], "yaw": -60, "pitch": -12},
+		{"name": "high_overview", "pos": [9.5, 3.2, 6.8], "yaw": 40, "pitch": -22},
+		{"name": "shelving_close", "pos": [7.6, 1.55, -1.6], "yaw": -90, "pitch": -6},
+		{"name": "heap_closeup", "pos": [-2.2, 1.25, 3.6], "yaw": 0, "pitch": -40}
+	]
+}

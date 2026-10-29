@@ -1,0 +1,279 @@
+{
+	"version": 1,
+	"default_preset": "standard",
+	"note": "World presets and catalog-authoring parameters. Add a preset (or a custom one) here and run Workshop Wreckage > Author Catalogs in Unity to generate presets/<id>/.",
+	"presets": {
+		"standard": {
+			"label": "Standard",
+			"total_items": 4210,
+			"ordinary_definitions": 500,
+			"robot_part_items": 168,
+			"tool_part_items": 34,
+			"room": [
+				22,
+				15
+			],
+			"aisle_rows": 1,
+			"default_seed": 1912,
+			"tier": 0,
+			"scaling": {
+				"robot_capacity": 1.0,
+				"robot_speed": 1.0,
+				"tool_range": 1.0,
+				"tool_items": 1.0
+			}
+		},
+		"large": {
+			"label": "Large",
+			"total_items": 7114,
+			"ordinary_definitions": 750,
+			"robot_part_items": 168,
+			"tool_part_items": 34,
+			"room": [
+				27,
+				18
+			],
+			"aisle_rows": 3,
+			"default_seed": 1912,
+			"tier": 1,
+			"scaling": {
+				"robot_capacity": 1.25,
+				"robot_speed": 1.1,
+				"tool_range": 1.15,
+				"tool_items": 1.3
+			}
+		},
+		"massive": {
+			"label": "Massive",
+			"total_items": 10114,
+			"ordinary_definitions": 1000,
+			"robot_part_items": 168,
+			"tool_part_items": 34,
+			"room": [
+				32,
+				21
+			],
+			"aisle_rows": 5,
+			"default_seed": 1912,
+			"tier": 2,
+			"scaling": {
+				"robot_capacity": 1.5,
+				"robot_speed": 1.2,
+				"tool_range": 1.3,
+				"tool_items": 1.6
+			}
+		}
+	},
+	"authoring": {
+		"seed": 1,
+		"category_shares": {
+			"Screws": 0.16,
+			"Nuts": 0.08,
+			"Washers": 0.08,
+			"Gears": 0.1,
+			"Springs": 0.09,
+			"Bearings": 0.08,
+			"Shafts & Pins": 0.09,
+			"Electronics": 0.08,
+			"Specialty Parts": 0.12,
+			"Machine Parts": 0.12
+		},
+		"destination_preferences": {
+			"Screws": [
+				"drawer",
+				"metal_bin"
+			],
+			"Nuts": [
+				"drawer",
+				"metal_bin"
+			],
+			"Washers": [
+				"drawer",
+				"metal_bin"
+			],
+			"Gears": [
+				"metal_bin",
+				"wooden_crate",
+				"shelf_section"
+			],
+			"Springs": [
+				"metal_bin",
+				"cardboard_box",
+				"wooden_crate",
+				"shelf_section"
+			],
+			"Bearings": [
+				"cardboard_box",
+				"metal_bin",
+				"wooden_crate"
+			],
+			"Shafts & Pins": [
+				"metal_bin",
+				"wooden_crate",
+				"shelf_section"
+			],
+			"Electronics": [
+				"cardboard_box",
+				"drawer"
+			],
+			"Specialty Parts": [
+				"cardboard_box",
+				"metal_bin",
+				"wooden_crate",
+				"shelf_section"
+			],
+			"Machine Parts": [
+				"wooden_crate",
+				"shelf_section",
+				"floor_pallet"
+			]
+		},
+		"spawn_target": 10,
+		"spawn_ranges": {
+			"default": [
+				6,
+				10
+			],
+			"high_quantity": [
+				6,
+				18
+			],
+			"Machine Parts": [
+				4,
+				8
+			],
+			"Nuts": [
+				4,
+				10
+			],
+			"Washers": [
+				4,
+				10
+			]
+		},
+		"min_spawn": 3,
+		"max_spawn_default": 10,
+		"max_spawn_high_quantity": 25,
+		"high_quantity_categories": [
+			"Screws"
+		],
+		"default_box_capacity": 10,
+		"large_box_capacity": 25,
+		"visual_size_bands": {
+			"Screws": [
+				0.05,
+				0.16
+			],
+			"Nuts": [
+				0.035,
+				0.09
+			],
+			"Washers": [
+				0.04,
+				0.12
+			],
+			"Gears": [
+				0.08,
+				0.48
+			],
+			"Springs": [
+				0.07,
+				0.34
+			],
+			"Bearings": [
+				0.08,
+				0.26
+			],
+			"Shafts & Pins": [
+				0.12,
+				0.6
+			],
+			"Electronics": [
+				0.05,
+				0.14
+			],
+			"Specialty Parts": [
+				0.1,
+				0.4
+			],
+			"Machine Parts": [
+				0.25,
+				0.6
+			]
+		},
+		"kind_specs": {
+			"drawer": {
+				"inner": [
+					0.17,
+					0.4,
+					0.17
+				]
+			},
+			"cardboard_box": {
+				"inner": [
+					0.34,
+					0.4,
+					0.26
+				],
+				"slot_width": 0.38
+			},
+			"metal_bin": {
+				"inner": [
+					0.28,
+					0.42,
+					0.2
+				],
+				"slot_width": 0.31
+			},
+			"wooden_crate": {
+				"inner": [
+					0.52,
+					0.48,
+					0.3
+				],
+				"slot_width": 0.58
+			},
+			"shelf_section": {
+				"inner": [
+					0.6,
+					0.62,
+					0.44
+				]
+			},
+			"floor_pallet": {
+				"inner": [
+					0.72,
+					0.72,
+					0.9
+				]
+			}
+		},
+		"packing": 0.45,
+		"max_section_width": 0.9,
+		"drawer_cabinet": {
+			"rows": 6,
+			"cols": 6,
+			"width": 1.35,
+			"depth": 0.5,
+			"height": 2.0
+		},
+		"shelving": {
+			"width": 2.7,
+			"depth": 0.7,
+			"levels": [
+				0.1,
+				0.62,
+				1.14,
+				1.66,
+				2.18
+			],
+			"clearance": 0.48
+		},
+		"pallet_zone": {
+			"cols": 4,
+			"rows": 2,
+			"pitch": 0.77
+		}
+	},
+	"scaling_note": "Per-preset multipliers so larger workshops are richer rather than grindier (world sizes brief §7): robot carrying capacity and speed, collection tool range (magnet, Supermagnet, Area Sweep radius) and item counts (magnet per hold, Supermagnet and Area Sweep maximum). Balance target: Massive ~1.8x Standard's completion time; tune from telemetry."
+}

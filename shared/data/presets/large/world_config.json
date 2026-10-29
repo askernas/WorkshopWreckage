@@ -1,0 +1,1 @@
+{"version":2,"preset":"large","label":"Large","default_seed":1912,"total_items":7114,"ordinary_items":6912,"robot_part_items":168,"tool_part_items":34,"ordinary_definitions":750,"max_spawn_default":10,"max_spawn_high_quantity":25,"high_quantity_categories":["Screws"],"default_box_capacity":10,"large_box_capacity":25,"item_visual_scale":2,"room":[27,18],"aisle_rows":3}

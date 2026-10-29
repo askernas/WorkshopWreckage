@@ -1,0 +1,114 @@
+{
+  "_comment": "The workshop's name sign on the north wall (WorkshopSign.cs). Everything a designer can tune lives here; the game reads this file at start-up, so edits need no rebuild of the code (a fresh build or a copy of this file next to the build is enough). Distances in metres, colours [r, g, b] 0..1. Positions on the artwork are in artwork pixels (x from the left, y from the top) of resources/Workshop Wreckage Sign.png, so they stay correct whatever the sign's size on the wall.",
+
+  "artwork": {
+    "_comment": "The picture on the sign. To change it: replace resources/Workshop Wreckage Sign.png (black background, any size) and run  python tools/sign/make_sign_art.py --debug layers.png  which writes the cut-out texture (Resources/SignArt.png) and the sign split into depth layers (Resources/SignShape.txt: housing, recessed panel, letters, decoration); check layers.png, then re-measure the lamp and chain pixels below.",
+    "source": "resources/Workshop Wreckage Sign.png",
+    "face_smoothness": 0.3
+  },
+
+  "placement": {
+    "_comment": "width_m: the artwork's width on the wall (height follows the picture's proportions; 5.25 = 1.25x the first version, the largest that clears the pipes above and the bench blueprints below). offset_up_m: the sign's centre above the wall fixture's centre (3.7 m up the north wall).",
+    "width_m": 5.25,
+    "offset_up_m": 0.14
+  },
+
+  "depth": {
+    "_comment": "How far each layer of the artwork stands out, in metres from the back of the steel housing. back_from_wall_m: the gap between the housing and the wall (shadow line). housing_m: the box's depth (its front is the painted frame). panel_m: the dark backing, recessed into the housing. letters_m: the letters and gear O's, each moved out (+) or in (-) by its letter_offsets_m entry (W O R K S H O P, then W R E C K A G E) so they look bolted on one by one, not stamped out; keep letters_m + offset above housing_m. decoration_m: pipes and ornaments round the housing. side_shade: brightness of the letters' side walls (the paint, darker) 0..1.",
+    "back_from_wall_m": 0.03,
+    "housing_m": 0.12,
+    "panel_m": 0.09,
+    "letters_m": 0.18,
+    "letter_offsets_m": [0.03, 0.0, -0.025, 0.035, -0.01, 0.02, -0.03, 0.01,
+                         -0.02, 0.03, -0.035, 0.015, 0.0, 0.04, -0.015, 0.025],
+    "decoration_m": 0.11,
+    "side_shade": 0.5
+  },
+
+  "contact_shadow": {
+    "_comment": "A static dark shadow baked into the artwork (Resources/SignArt.png) on the panel and frame round each letter, so the letters stand off the backing without a real-time shadow. Costs nothing in the game: it is paint. Read by make_sign_art.py, so after a change re-run  python tools/sign/make_sign_art.py  and rebuild. strength: how dark right at a letter's edge, 0..1. drop / side: how far the shadow falls down / to the right, as a fraction of the letter's height off the panel (the light is above and in front). blur_px / blur_per_m: softness in artwork pixels, plus more for letters standing further out. halo: share of the shadow that also hugs the letter all round (contact darkening).",
+    "strength": 0.6,
+    "drop": 0.22,
+    "side": 0.04,
+    "blur_px": 3.0,
+    "blur_per_m": 60.0,
+    "halo": 0.45
+  },
+
+  "housing": {
+    "_comment": "The steel box. side_color / side_chips: its rusty side panels (paint colour, how much is chipped). hardware_color: seams, straps, lugs and bolts. Bolts sit every bolt_spacing_m along the exposed top and bottom.",
+    "side_color": [0.36, 0.2, 0.11],
+    "side_chips": 0.55,
+    "hardware_color": [0.3, 0.28, 0.26],
+    "bolt_radius_m": 0.011,
+    "bolt_spacing_m": 0.32
+  },
+
+  "chains": {
+    "_comment": "Two real chains from lugs on the housing's top to eye plates on the wall (the chains painted in the artwork are cut away by make_sign_art.py). x_px: where each lug sits (artwork pixels). rise_m: how far above the housing's top the wall eyes are (kept below the wall pipes).",
+    "x_px": [372, 1560],
+    "rise_m": 0.17,
+    "link_color": [0.42, 0.38, 0.34],
+    "plate_color": [0.3, 0.17, 0.09]
+  },
+
+  "lamps": [
+    {
+      "_comment": "The O in WORKSHOP: the brighter bulb, but a bad one: it flickers now and then.",
+      "x_px": 658, "y_px": 278,
+      "strength": 1.0,
+      "tint": [1.0, 0.8, 0.52],
+      "flickers": true
+    },
+    {
+      "_comment": "The O in SHOP: a slightly weaker, warmer bulb, steady.",
+      "x_px": 1515, "y_px": 290,
+      "strength": 0.84,
+      "tint": [1.0, 0.74, 0.44],
+      "flickers": false
+    }
+  ],
+
+  "lamp_look": {
+    "_comment": "Shared by both lamps, each scaled by its strength. glass_radius_px: the glass dome over the painted bulb (artwork pixels, so it follows the sign's size). glass_glow / core_glow: how hot the dome's edge and centre burn (emission; higher clips to white in the bloom). light_*: the real light each lamp throws into the room, distance_out_m in front of the letters.",
+    "glass_radius_px": 37,
+    "dome_height_m": 0.04,
+    "bezel_color": [0.6, 0.46, 0.24],
+    "glass_glow": 0.24,
+    "core_glow": 0.33,
+    "light_intensity": 0.09,
+    "light_range_m": 2.2,
+    "light_distance_out_m": 0.5
+  },
+
+  "flicker": {
+    "_comment": "The flickering lamp. Each pair is a random range [min, max]. A flicker burst comes every every_s seconds and lasts burst_s; inside it the bulb jumps to a new level every step_s, either fully on (full_on_chance) or dimmed to dim_level. drift: a slow wobble in each old lamp's brightness, independent per lamp (0.12 = ±6 %). Lamps stay steady in tests and screenshots.",
+    "first_after_s": [4, 14],
+    "every_s": [10, 30],
+    "burst_s": [0.2, 0.9],
+    "step_s": [0.03, 0.12],
+    "dim_level": [0.06, 0.55],
+    "full_on_chance": 0.3,
+    "drift": 0.12
+  },
+
+  "spotlight": {
+    "_comment": "A warm spot from above that models the letters (they cast soft shadows onto the recessed panel when shadows is true) and keeps the name readable. Placed above_m over the housing's top and out_m in front of the wall, aimed at aim_down_m below the sign's centre.",
+    "intensity": 1.3,
+    "color": [1.0, 0.8, 0.55],
+    "angle": 120,
+    "inner_angle": 80,
+    "range_m": 4.0,
+    "above_m": 0.4,
+    "out_m": 1.1,
+    "aim_down_m": 0.2,
+    "shadows": false,
+    "shadow_strength": 0.75
+  },
+
+  "ceiling_fixture": {
+    "_comment": "The fluorescent ceiling fixture that hung just in front of the sign hid its top from the floor and washed out its face: a fixture within within_m in front of the sign moves move_m further into the room.",
+    "move_m": 1.2,
+    "within_m": 3.0
+  }
+}
