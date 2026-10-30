@@ -263,7 +263,8 @@ namespace WorkshopWreckage
         }
 
         /// <summary>The pegboard slot under the crosshair (docs/PEGBOARD.md), unless something nearer is in the way.
-        /// Carrying a board tool, its own slot wins whenever the crosshair is near it.</summary>
+        /// Carrying a board tool, its own slot wins whenever the crosshair is near it; carrying a set piece,
+        /// whenever the crosshair is on its holder (the holder's whole region, mounted pieces included).</summary>
         string PegAim(Vector3 o, Vector3 dir, float envT, RaycastHit? hit)
         {
             var pb = game.builder?.pegboard;
@@ -413,7 +414,10 @@ namespace WorkshopWreckage
                     if (pb.WaitsForHolder(targetPeg) && HeldToolFor(targetPeg) >= 0)
                         return new TargetInfo { title = title, sub = sub, hint = MountHolderFirst(targetPeg), tone = -1 };
                     if (HeldToolFor(targetPeg) >= 0)
-                        return new TargetInfo { title = title, sub = sub, hint = "[LMB] " + pb.cfg.S("interaction", "prompt", "Hang {tool}").Replace("{tool}", tool.name), tone = 1 };
+                    {
+                        var on = pb.HolderOf(targetPeg) is string h ? " on the " + pb.cfg.toolById[pb.cfg.slotById[h].tool].name.ToLowerInvariant() : "";
+                        return new TargetInfo { title = title, sub = sub, hint = "[LMB] " + pb.cfg.S("interaction", "prompt", "Hang {tool}").Replace("{tool}", tool.name) + on, tone = 1 };
+                    }
                     if (held >= 0)
                         return new TargetInfo { title = title, sub = sub, hint = pb.cfg.S("interaction", "wrong_prompt", "{tool} doesn't belong here").Replace("{tool}", World.DefOf(held).displayName), tone = -1 };
                     return new TargetInfo { title = title, sub = sub, hint = $"Find the {tool.name.ToLowerInvariant()} to hang it here", tone = 0 };

@@ -18,6 +18,7 @@ namespace WorkshopWreckage.Pegboard
         readonly Dictionary<string, Matrix4x4> _slotLocal = new();       // board frame, snapped to the hole grid
         readonly Dictionary<string, ItemDefinition> _installed = new();  // slot -> the tool hung there
         readonly Dictionary<string, Bounds> _slotBounds = new();          // board frame, for aiming
+        readonly Dictionary<string, Bounds> _holderRegions = new();       // board frame: a holder and all its places, for aiming a set piece
         Transform _toolsRoot, _highlightRoot;
         bool _dirty;
         string _highlightSlot;
@@ -60,11 +61,24 @@ namespace WorkshopWreckage.Pegboard
         public Vector3 SlotCentre(string slot) => SlotWorld(slot).GetColumn(3);
 
         /// <summary>The slot whose painted outline (grown by aim_radius) the ray passes through, nearest first; or null.
-        /// `prefer` (the slot of the tool in hand) wins whenever it is within reach of the crosshair.</summary>
+        /// `prefer` (the slot of the tool in hand) wins whenever it is within reach of the crosshair. A set piece in
+        /// hand (a child slot) aims at its holder instead (docs/PEGBOARD.md "Tool sets"): anywhere on its own holder,
+        /// mounted pieces included, gives its own place; another holder gives that holder (a wrong place).</summary>
         public string SlotUnderRay(Ray worldRay, float maxDist, out float dist, string prefer = null)
         {
             dist = 0;
             var lr = new Ray(transform.InverseTransformPoint(worldRay.origin), transform.InverseTransformDirection(worldRay.direction).normalized);
+            float scale = Mathf.Max(1e-4f, transform.lossyScale.x);
+            if (prefer != null && cfg.slotById.TryGetValue(prefer, out var ps) && ps.IsChild)
+            {
+                var holder = HolderUnderRay(lr, maxDist / scale, out float ht);
+                if (holder != null)
+                {
+                    dist = ht * scale;
+                    return holder == ps.parent ? prefer : holder;
+                }
+                prefer = null;   // off every holder: the plain outlines, no pull towards its place
+            }
             float pz = cfg.PanelFront;
             if (Mathf.Abs(lr.direction.z) < 1e-4f) return null;
             float t = (pz - lr.origin.z) / lr.direction.z;
@@ -85,6 +99,29 @@ namespace WorkshopWreckage.Pegboard
             dist = t * transform.lossyScale.x;
             return best;
         }
+
+        /// <summary>The holder whose region (the holder and all its places, out to the panel) the board-frame ray
+        /// enters within maxT; overlapping regions go to the one the panel hit point is inside of / nearest to.</summary>
+        string HolderUnderRay(Ray lr, float maxT, out float entry)
+        {
+            entry = 0;
+            string best = null; float bestD = float.MaxValue, bestT = float.MaxValue;
+            float pz = cfg.PanelFront;
+            Vector3 onPanel = Mathf.Abs(lr.direction.z) < 1e-4f ? lr.origin : lr.GetPoint((pz - lr.origin.z) / lr.direction.z);
+            foreach (var kv in _holderRegions)
+            {
+                var b = kv.Value;
+                if (!b.IntersectRay(lr, out float t) || t > maxT) continue;
+                float dx = Mathf.Max(0, Mathf.Abs(onPanel.x - b.center.x) - b.extents.x), dy = Mathf.Max(0, Mathf.Abs(onPanel.y - b.center.y) - b.extents.y);
+                float d = dx * dx + dy * dy;
+                if (d < bestD - 1e-8f || Mathf.Abs(d - bestD) <= 1e-8f && t < bestT) { best = kv.Key; bestD = d; bestT = t; }
+            }
+            entry = bestT;
+            return best;
+        }
+
+        /// <summary>The holder slot a set piece's slot hangs on (null for a plain tool or a holder).</summary>
+        public string HolderOf(string slot) => cfg.slotById.TryGetValue(slot, out var s) ? s.parent : null;
 
         // ------------------------------------------------------------------ state
 
@@ -229,6 +266,17 @@ namespace WorkshopWreckage.Pegboard
                 for (int i = 0; i < 8; i++)
                     b.Encapsulate(m.MultiplyPoint3x4(ub.center + Vector3.Scale(ub.extents, new Vector3((i & 1) * 2 - 1, (i & 2) - 1, (i & 4) / 2 - 1))));
                 _slotBounds[s.id] = b;
+            }
+            // a holder's aiming region: the holder and every place on it, a little margin, back to the panel
+            float margin = cfg.F("interaction", "holder_margin", 0.02f);
+            _holderRegions.Clear();
+            foreach (var h in cfg.slots.Where(x => x.children.Count > 0))
+            {
+                var r = _slotBounds[h.id];
+                foreach (var c in h.children) r.Encapsulate(_slotBounds[c]);
+                r.Encapsulate(new Vector3(r.center.x, r.center.y, cfg.PanelFront));
+                r.Expand(new Vector3(margin * 2, margin * 2, 0));
+                _holderRegions[h.id] = r;
             }
         }
 

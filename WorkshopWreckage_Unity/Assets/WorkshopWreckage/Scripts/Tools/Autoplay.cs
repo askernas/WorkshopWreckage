@@ -2758,19 +2758,26 @@ namespace WorkshopWreckage
                   $"hung {hung0} -> {pb.Hung}, world {world0} -> {g.world.Count}, pieces up {deepSet.Concat(bitSet).Count(pb.IsOccupied)}");
             // the small pieces lie on open floor and can be aimed at and picked up like any part
             var feet = g.player.transform.position;
-            // an open floor spot near the player: nothing overhead (no bench or shelf over it)
+            // an open floor spot near the player: nothing overhead (no bench or shelf over it) and no other loose
+            // item within 35 cm (a part lying there took the aim: "aimed 0/6", 2026-10-30)
+            var small = new[] { "DS01", "BT01", "BT07", "BT10", "BT15", "HK01" };
+            var smallIds = small.Select(Tool).ToHashSet();
+            int Blocker(Vector3 c) => g.world.instances.Where(i => i.state == ItemState.InWorld && !smallIds.Contains(i.id))
+                .Where(i => Vector2.Distance(new Vector2(i.Position.x, i.Position.z), new Vector2(c.x, c.z)) < 0.35f && Mathf.Abs(i.Position.y - c.y) < 0.6f)
+                .Select(i => i.id).DefaultIfEmpty(-1).First();
             var spot = feet;
-            for (int k = 0; k < 64; k++)
+            bool clear = false;
+            for (int k = 0; k < 160 && !clear; k++)
             {
                 float ang = k * 47f * Mathf.Deg2Rad, rad = 0.8f + (k % 8) * 0.3f;
                 var cand = g.SafeDropPoint(feet + new Vector3(Mathf.Cos(ang), 0, Mathf.Sin(ang)) * rad, feet);
-                if (cand.y < 0.05f && !Physics.Raycast(cand + Vector3.up * 0.03f, Vector3.up, 2.5f)) { spot = cand; break; }
+                if (cand.y < 0.05f && !Physics.Raycast(cand + Vector3.up * 0.03f, Vector3.up, 2.5f) && Blocker(cand) < 0) { spot = cand; clear = true; }
             }
             int aimed = 0, picked = 0;
             bool input0 = it.enabledInput;
             it.enabledInput = true;   // automated runs hide the hover each frame; aiming needs it
             var sizes = new List<string>();
-            foreach (var slot in new[] { "DS01", "BT01", "BT07", "BT10", "BT15", "HK01" })
+            foreach (var slot in small)
             {
                 int id = Tool(slot);
                 var def = g.world.DefOf(id);
@@ -2784,14 +2791,14 @@ namespace WorkshopWreckage
                 yield return Frames(2);
                 it.UpdateTarget();
                 if (it.targetType == "item" && it.targetItem == id) aimed++;
-                string targetWas = $"{it.targetType} {it.targetItem}/{id} at {spot.x:0.00},{spot.y:0.00},{spot.z:0.00}";
+                string targetWas = $"{it.targetType} {(it.targetItem >= 0 && it.targetItem != id ? g.world.DefOf(it.targetItem).displayName + " " : "")}{it.targetItem}/{id} at {spot.x:0.00},{spot.y:0.00},{spot.z:0.00}";
                 if (slot == "DS01") yield return g.Capture(Path.Combine(outDir, "peg_small_aim.png"), 1);
                 if (it.Pickup(id, false) && g.inventory.Has(id)) picked++;
                 sizes.Add($"{def.displayName} {Mathf.Max(ub.x, ub.y, ub.z) * 100:0.0} cm (aim {targetWas})");
             }
             it.enabledInput = input0;
             Check("the smallest set pieces (deep socket, PH, slotted, Torx and hex bits, the 1.5 mm key) lying on the floor are targeted and picked up",
-                  aimed == 6 && picked == 6, $"aimed {aimed}/6, picked {picked}/6; {string.Join(", ", sizes)}");
+                  clear && aimed == 6 && picked == 6, $"clear spot {clear}; aimed {aimed}/6, picked {picked}/6; {string.Join(", ", sizes)}");
 
             // pegboard rewards (unlocks.json pegboard_rewards, docs/PEGBOARD.md "Rewards"): blueprints and Area Sweep
             var wb = g.workbench;
@@ -3845,8 +3852,130 @@ namespace WorkshopWreckage
             it.Primary();
             yield return Frames(2);
             Check("P6. the right tool in hand at its own slot hangs", pb.IsOccupied(Slot(t2)) && !inv.Has(t2) && pb.Hung == hung0 + 2 && inv.HeldId() == part, $"hung {pb.Hung}");
+
+            // H. a set piece aims at its holder (docs/PEGBOARD.md "Tool sets"): anywhere on its own mounted holder,
+            // mounted pieces included, hangs it in its own place; another holder, the wrong item in hand, a missing
+            // holder, its place taken or out of reach hangs nothing
+            int ToolIn(string slot) => g.world.instances.First(i => g.world.DefOf(i.id).IsPegboardTool && g.world.DefOf(i.id).PegSlot == slot).id;
+            var H = cfg.slots.First(x => x.children.Count >= 3 && !pb.IsOccupied(x.id) && !x.children.Any(pb.IsOccupied)
+                                         && g.world.instances[ToolIn(x.id)].state == ItemState.InWorld && x.children.All(c => g.world.instances[ToolIn(c)].state == ItemState.InWorld));
+            var H2 = cfg.slots.Where(x => x.children.Count > 0 && x.id != H.id && !pb.IsOccupied(x.id)).OrderBy(x => Vector3.Distance(pb.SlotCentre(x.id), pb.SlotCentre(H.id))).First();
+            string c1 = H.children[0], c3 = H.children[H.children.Count - 1], c2 = H.children[H.children.Count / 2];   // first and last place, one between
+            int holder = ToolIn(H.id), p1 = ToolIn(c1), p2 = ToolIn(c2), p3 = ToolIn(c3);
+            string sec = cfg.SectionOf(H.id).id;
+            int secHung0 = pb.SectionHung(sec);
+            IEnumerator AimAt(Vector3 at, float back)
+            {
+                LookFrom(at - pb.transform.forward * back + Vector3.down * 0.15f, at);
+                yield return Frames(2);
+                it.UpdateTarget();
+            }
+            string Name(int id) => g.world.DefOf(id).displayName;
+            string HoldName() => inv.HeldId() >= 0 ? Name(inv.HeldId()) : "nothing";
             Empty();
-            it.enabledInput = true;
+            int hungH = pb.Hung;
+
+            // H1. its holder not mounted: aiming at the holder's place says so, nothing hangs
+            Take(p1); Hold(p1);
+            yield return AimAt(pb.SlotCentre(H.id), 1.1f);
+            info = it.Describe();
+            string h1t = it.targetType + " " + it.targetPeg;
+            it.Primary();
+            yield return Frames(2);
+            Check($"H1. a set piece in hand ({Name(p1)}), its holder not mounted: the holder's place is the target, the hint says to mount it first, nothing hangs",
+                  h1t == "peg " + c1 && info.hint.StartsWith("Mount") && !pb.IsOccupied(c1) && inv.Has(p1) && pb.Hung == hungH,
+                  $"target {h1t}; hint '{info.hint}'; hung {pb.Hung - hungH}");
+
+            // the holder goes up
+            Take(holder); Hold(holder);
+            yield return Aim(H.id, 1.1f);
+            it.Primary();
+            yield return Frames(2);
+            bool mounted = pb.IsOccupied(H.id) && !inv.Has(holder);
+
+            // H2. the right piece, aimed at the far end of its mounted holder: its own place, then the next item in the order
+            Take(part);   // order: p1, part
+            Hold(p1);
+            yield return AimAt(pb.SlotCentre(c3), 1.1f);
+            info = it.Describe();
+            string h2t = it.targetType + " " + it.targetPeg;
+            it.Primary();
+            yield return Frames(2);
+            Check($"H2. the right piece in hand, aimed at the far end of its mounted holder ({cfg.toolById[H.tool].name}): it hangs in its own place, not the one aimed at; the next item in the order comes up",
+                  mounted && h2t == "peg " + c1 && info.tone == 1 && info.hint.Contains(" on the ") && pb.IsOccupied(c1) && !inv.Has(p1) && !pb.IsOccupied(c3) && inv.HeldId() == part,
+                  $"holder up {mounted}; target {h2t} (own {c1}, aimed {c3}); hint '{info.hint}'; hung {pb.IsOccupied(c1)}; in hand after: {HoldName()}");
+
+            // H3. a partly filled holder is still the target: aimed at the piece just mounted
+            Take(p2); Hold(p2);
+            yield return AimAt(pb.SlotCentre(c1), 1.1f);
+            string h3t = it.targetType + " " + it.targetPeg;
+            it.Primary();
+            yield return Frames(2);
+            Check("H3. a partly filled holder is still a target: aimed at a mounted piece, the next piece hangs in its own place",
+                  h3t == "peg " + c2 && pb.IsOccupied(c2) && !inv.Has(p2) && pb.IsOccupied(c1), $"target {h3t} (own {c2}); hung {pb.IsOccupied(c2)}");
+
+            // H4. the right piece aimed at another (the nearest) holder: that holder is the target, nothing hangs
+            Take(p3); Hold(p3);   // order: part, p3
+            yield return AimAt(pb.SlotCentre(H2.id), 1.1f);
+            info = it.Describe();
+            string h4t = it.targetType + " " + it.targetPeg;
+            it.Primary();
+            yield return Frames(2);
+            Check($"H4. the right piece aimed at another holder ({cfg.toolById[H2.tool].name}, the nearest): that holder is the target, nothing hangs",
+                  h4t == "peg " + H2.id && info.tone != 1 && !pb.IsOccupied(c3) && inv.Has(p3) && !pb.IsOccupied(H2.id),
+                  $"target {h4t}; hint '{info.hint}'; hung {pb.IsOccupied(c3)}");
+
+            // H5. the wrong item in hand, the piece further in the inventory: aimed at its holder, nothing hangs
+            Hold(part);
+            yield return AimAt(pb.SlotCentre(H.id), 1.1f);
+            it.Primary();
+            yield return Frames(2);
+            Check("H5. the wrong item in hand, the right piece further in the inventory: aimed at its holder, nothing hangs",
+                  !pb.IsOccupied(c3) && inv.Has(p3) && inv.Has(part), $"in hand {HoldName()}; hung {pb.IsOccupied(c3)}");
+
+            // H6. its place already taken (set up directly on the board): no second piece goes up
+            pb.Install(c3, g.world.DefOf(p3));
+            int hungTaken = pb.Hung;
+            Hold(p3);
+            yield return AimAt(pb.SlotCentre(H.id), 1.1f);
+            it.Primary();
+            yield return Frames(2);
+            bool h6 = pb.Hung == hungTaken && inv.Has(p3) && !g.storage.Stored(Pegboard.PegboardConfig.DestPrefix + c3).Contains(p3);
+            pb.Remove(c3);
+            Check("H6. the piece's place already taken: nothing hangs, the piece stays in hand", h6 && !pb.IsOccupied(c3), $"hung {hungTaken} -> {pb.Hung}; in inventory {inv.Has(p3)}");
+
+            // H7. out of reach: the holder is not targeted
+            yield return AimAt(pb.SlotCentre(H.id), it.Reach + 1.5f);
+            string far7 = it.targetType;
+            it.Primary();
+            yield return Frames(2);
+            Check("H7. the right piece and its holder, out of reach: not targeted, nothing hangs", far7 != "peg" && !pb.IsOccupied(c3) && inv.Has(p3), $"target '{far7}' from {it.Reach + 1.5f:0.0} m");
+
+            // H8. back in reach, aimed at the holder's centre: it hangs; the section counts it, rewards follow the board
+            yield return AimAt(pb.SlotCentre(H.id), 1.1f);
+            it.Primary();
+            yield return Frames(2);
+            var rw = g.pegRewards;
+            bool rewardsMatch = rw.Milestones.All(ms => rw.Met(ms, pb) == ms.unlocks.All(rw.Has));
+            Check($"H8. aimed at the holder's centre, the piece hangs; the {sec} section counts holder and pieces, rewards match the board",
+                  pb.IsOccupied(c3) && !inv.Has(p3) && pb.SectionHung(sec) == secHung0 + 4 && pb.Hung == hungH + 4 && rewardsMatch && g.PegboardGuard(false).Count == 0,
+                  $"hung {pb.Hung - hungH}; section {sec} {secHung0} -> {pb.SectionHung(sec)}/{pb.SectionTotal(sec)}; rewards match {rewardsMatch}; granted [{string.Join(", ", rw.Granted)}]");
+
+            // H9. save/load keeps the holder and its pieces
+            string PegState() { var b = g.builder.pegboard; return $"{b.Hung}|{b.SectionHung(sec)}|{string.Join(",", b.Occupied.OrderBy(x => x))}|{string.Join(",", g.pegRewards.Granted.OrderBy(x => x))}"; }
+            var pegBefore = PegState();
+            g.SaveGame("autotest_pegholder");
+            g.StartWorld(g.world.seed, null);
+            g.LoadGame("autotest_pegholder");
+            g.player.enabled = false;
+            yield return Frames(4);
+            var pegAfter = PegState();
+            Check("H9. the holder and its pieces hung by aiming at the holder survive save/load (board, section, rewards)",
+                  pegBefore == pegAfter && g.builder.pegboard.IsOccupied(c3), pegBefore == pegAfter ? $"same: {pegBefore.Split('|')[0]} hung" : $"{pegBefore}  vs  {pegAfter}");
+            File.Delete(SaveSystem.PathOf("autotest_pegholder"));
+            inv = g.inventory;
+            Empty();
+            g.interaction.enabledInput = true;
         }
 
         (Vector3 eye, Vector3 target) AimPoint(string dest)
