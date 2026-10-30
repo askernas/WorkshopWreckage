@@ -63,18 +63,17 @@ namespace WorkshopWreckage
         };
     }
 
-    /// <summary>What the player carries. Early on every part is its own slot, in the
-    /// order it was picked up (you sort your pockets yourself); the Parts Organiser skill
-    /// (stacking) groups identical parts into stacks ordered by category and name.</summary>
+    /// <summary>What the player carries, in the order it was picked up (Sort Inventory re-orders it). The hotbar
+    /// shows exactly that order; copies of a part lying next to each other share one slot (×n), which never moves
+    /// anything (placement rules 2026-10-30, docs/SKILL_REVAMP.md §1.6; the Parts Organiser purchase is retired).
+    /// The hand always holds one instance.</summary>
     public class Inventory
     {
         public readonly ItemWorld world;
         public int capacity = 10;
         public readonly List<int> items = new();
         public int heldDef = -1;
-        /// <summary>Parts Organiser: identical parts stack, stacks sorted by type.</summary>
-        public bool stacking;
-        int _heldSlot = -1;   // without stacking: the held instance
+        int _heldSlot = -1;   // the held instance
         public event Action Changed;
 
         /// <summary>Battery pockets (playtest 2026-10-26): Part Radar batteries ride in their own pockets
@@ -97,59 +96,65 @@ namespace WorkshopWreckage
             if (!HasRoomFor(id) || Has(id)) return false;
             if (isBattery(id)) { batteries.Add(id); Changed?.Invoke(); return true; }
             items.Add(id);
-            if (heldDef < 0) { heldDef = world.instances[id].defId; _heldSlot = id; }
+            if (HeldId() < 0) { heldDef = world.instances[id].defId; _heldSlot = id; }
             Changed?.Invoke();
             return true;
         }
 
+        /// <summary>Takes a part out. If it was the one in hand, the hand takes the next part in the inventory
+        /// order, whatever its kind (the part that moved up into its place; after the last, the first): placement
+        /// never skips ahead to a part that fits (placement rules 2026-10-30). In a slot of several copies that is
+        /// the next copy, so the slot is worked through before the next one comes up.</summary>
         public void Remove(int id)
         {
             if (batteries.Remove(id)) { Changed?.Invoke(); return; }
-            items.Remove(id);
-            if (_heldSlot == id) _heldSlot = -1;
-            if (heldDef >= 0 && (stacking ? IdsOf(heldDef).Count == 0 : _heldSlot < 0))
+            int at = items.IndexOf(id);
+            if (at < 0) return;
+            items.RemoveAt(at);
+            if (_heldSlot == id)
             {
-                // the hand takes the next part (the same kind if there is one)
-                var same = IdsOf(heldDef);
-                if (!stacking && same.Count > 0) _heldSlot = same[^1];
-                else if (items.Count > 0) { _heldSlot = items[^1]; heldDef = world.instances[_heldSlot].defId; }
-                else heldDef = -1;
+                if (items.Count == 0) { heldDef = -1; _heldSlot = -1; }
+                else { _heldSlot = items[at < items.Count ? at : 0]; heldDef = world.instances[_heldSlot].defId; }
             }
             Changed?.Invoke();
         }
 
         public List<int> IdsOf(int def) => items.Where(i => world.instances[i].defId == def).ToList();
 
-        /// <summary>Hotbar slots: one per part (pickup order) or, with stacking, one per definition.</summary>
+        /// <summary>The same parts in a new order (Sort Inventory). Anything not in `order` keeps its place at the end;
+        /// nothing is added or lost.</summary>
+        public void Reorder(List<int> order)
+        {
+            var rest = items.Where(i => !order.Contains(i)).ToList();
+            var keep = order.Where(items.Contains).Distinct().ToList();
+            items.Clear();
+            items.AddRange(keep);
+            items.AddRange(rest);
+        }
+
+        /// <summary>Hotbar slots in the inventory order: copies of a part next to each other share a slot, so the
+        /// slots read off in a row are exactly the inventory. Sort Inventory brings copies together.</summary>
         public List<(int defId, List<int> ids)> Stacks()
         {
-            if (!stacking) return items.Select(i => (world.instances[i].defId, new List<int> { i })).ToList();
-            var o = new List<(int, List<int>)>();
-            var idx = new Dictionary<int, int>();
+            var o = new List<(int defId, List<int> ids)>();
             foreach (var id in items)
             {
                 int d = world.instances[id].defId;
-                if (!idx.TryGetValue(d, out var k)) { idx[d] = k = o.Count; o.Add((d, new List<int>())); }
-                o[k].Item2.Add(id);
+                if (o.Count > 0 && o[^1].defId == d) o[^1].ids.Add(id);
+                else o.Add((d, new List<int> { id }));
             }
-            return o.OrderBy(x => world.db.Get(x.Item1).category).ThenBy(x => world.db.Get(x.Item1).displayName).ToList();
+            return o;
         }
 
-        public int HeldId()
-        {
-            if (heldDef < 0) return -1;
-            if (!stacking) return items.Contains(_heldSlot) ? _heldSlot : -1;
-            var l = IdsOf(heldDef);
-            return l.Count > 0 ? l[^1] : -1;
-        }
+        public int HeldId() => items.Contains(_heldSlot) ? _heldSlot : -1;
 
-        /// <summary>Holds a part of this definition (the newest one picked up).</summary>
+        /// <summary>Holds a part of this definition (the first one in the inventory order).</summary>
         public void Select(int def)
         {
             var l = IdsOf(def);
             if (l.Count == 0) return;
             heldDef = def;
-            _heldSlot = l[^1];
+            _heldSlot = l[0];
             Changed?.Invoke();
         }
 
@@ -159,11 +164,11 @@ namespace WorkshopWreckage
             var s = Stacks();
             if (k < 0 || k >= s.Count) return;
             heldDef = s[k].defId;
-            _heldSlot = s[k].ids[^1];
+            _heldSlot = s[k].ids[0];
             Changed?.Invoke();
         }
 
-        int HeldSlotIndex(List<(int defId, List<int> ids)> s) => Math.Max(0, stacking ? s.FindIndex(x => x.defId == heldDef) : s.FindIndex(x => x.ids.Contains(_heldSlot)));
+        int HeldSlotIndex(List<(int defId, List<int> ids)> s) => Math.Max(0, s.FindIndex(x => x.ids.Contains(_heldSlot)));
 
         public void Cycle(int dir)
         {
@@ -172,7 +177,7 @@ namespace WorkshopWreckage
             SelectSlot(((HeldSlotIndex(s) + dir) % s.Count + s.Count) % s.Count);
         }
 
-        public bool IsHeldSlot((int defId, List<int> ids) slot) => stacking ? slot.defId == heldDef : slot.ids.Contains(HeldId());
+        public bool IsHeldSlot((int defId, List<int> ids) slot) => slot.ids.Contains(HeldId());
     }
 
     /// <summary>Discovery, counts, zones, milestones (port of ProgressTracker.gd).</summary>

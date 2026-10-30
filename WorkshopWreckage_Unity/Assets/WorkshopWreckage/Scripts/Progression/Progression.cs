@@ -7,11 +7,13 @@ namespace WorkshopWreckage
     /// <summary>One skill from progression.json.</summary>
     public class SkillDef
     {
-        public string id, name, group, status;
-        public int unlockLevel, cost;
+        public string id, name, group, status, description;
+        public int cost;
         public List<string> requires = new();
         public Dictionary<string, double> effects = new();
         public bool Active => status == "active";
+        /// <summary>Taken out of the shop (skill revamp 2026-10-30): not listed, not bought, not counted.</summary>
+        public bool Retired => status == "retired";
     }
 
     /// <summary>One robot upgrade from progression.json robot_upgrades (model level:
@@ -27,23 +29,27 @@ namespace WorkshopWreckage
         public List<string> requires = new();
         public string exclusive = "";
         public bool Active => status == "active";
-        /// <summary>Earliest player level for buying rank `rank` (0-based) — unlocks.json robot_upgrades, by stat.</summary>
-        public int LevelFor(int rank) => Unlocks.UpgradeLevel(stat, rank);
         public int CostOf(int rank) => costPerRank.Count == 0 ? 1 : costPerRank[Math.Min(rank, costPerRank.Count - 1)];
     }
 
     /// <summary>Player levels, skills and XP. Engine independent (no UnityEngine):
     /// all numbers come from shared/data/progression.json, the game only reports
-    /// events. The level comes only from completed storage destinations (one point per
-    /// destination, once per game, whoever stored the last copy); XP is still counted
-    /// as a score but never raises the level. Anti-exploit: sorting XP is granted once
+    /// events. The level comes only from completed storage destinations (each counts once
+    /// per game, whoever stored the last copy); every level-up gives one skill point for the
+    /// shared pool (skills and robot upgrades, no level requirements; docs/SKILL_REVAMP.md).
+    /// XP is still counted as a score but never raises the level. Anti-exploit: sorting XP is granted once
     /// per instance, discovery once per definition, every other reward once per key.</summary>
     public class Progression
     {
         public readonly int maxLevel;
-        readonly double _curveBase, _curveExp, _presetScale, _destCoef, _destExp, _destReference;
+        readonly double _curveBase, _curveExp, _presetScale, _destExp, _completionAtMax;
         readonly int _pointsPerLevel;
-        readonly Dictionary<int, int> _bonusPoints = new();
+        /// <summary>The point budget (progression.json levels.point_budget): the share of all buyable steps one
+        /// playthrough pays for, and its version (preliminary values are versioned; a save made under another
+        /// version is migrated).</summary>
+        public readonly double budgetFraction;
+        public readonly string budgetVersion;
+        public const int SaveVersion = 3;
         readonly Dictionary<string, double> _rewards = new();
         public readonly List<SkillDef> skills = new();
         public readonly Dictionary<string, object> supermagnet;
@@ -62,24 +68,21 @@ namespace WorkshopWreckage
         int[] _levelStart;
 
         public event Action<int> LeveledUp;                 // new level
-        public event Action<int> MidLevelPoints;            // halfway through this level: points earned
         public event Action<long, string> XpGained;         // amount, reason
 
         public Progression(Dictionary<string, object> cfg, string preset)
         {
             var lv = Json.Obj(cfg["levels"]);
-            maxLevel = Json.Int(lv, "max_level", 25);
             var curve = Json.Obj(lv["xp_curve"]);
             _curveBase = Json.Num(curve, "base", 60);
             _curveExp = Json.Num(curve, "exponent", 1.5);
             var dc = Json.Obj(lv.GetValueOrDefault("destination_curve")) ?? new Dictionary<string, object>();
-            _destCoef = Json.Num(dc, "coefficient", 0.8);
-            _destExp = Json.Num(dc, "exponent", 1.2);
-            _destReference = Json.Num(dc, "reference_destinations", 500);
+            _destExp = Json.Num(dc, "exponent", 0.8);
+            _completionAtMax = Json.Num(dc, "completion_at_max", 0.85);
             _pointsPerLevel = Json.Int(lv, "skill_points_per_level", 1);
-            _midPoints = Json.Int(lv, "mid_level_skill_points", 0);
-            foreach (var kv in Json.Obj(lv.GetValueOrDefault("bonus_skill_points")) ?? new Dictionary<string, object>())
-                _bonusPoints[int.Parse(kv.Key)] = (int)(double)kv.Value;
+            var pb = Json.Obj(lv.GetValueOrDefault("point_budget")) ?? new Dictionary<string, object>();
+            budgetFraction = Json.Num(pb, "fraction_of_steps", 0.475);
+            budgetVersion = Json.Str(pb, "version", "prelim-1");
             foreach (var kv in Json.Obj(cfg["xp_rewards"])) _rewards[kv.Key] = (double)kv.Value;
             _presetScale = Json.Num(Json.Obj(cfg.GetValueOrDefault("preset_xp_scale")) ?? new Dictionary<string, object>(), preset, 1.0);
             foreach (var o in Json.Arr(cfg["skills"]))
@@ -88,7 +91,7 @@ namespace WorkshopWreckage
                 var s = new SkillDef
                 {
                     id = Json.Str(d, "id"), name = Json.Str(d, "name"), group = Json.Str(d, "group"), status = Json.Str(d, "status", "planned"),
-                    unlockLevel = Unlocks.Skill(Json.Str(d, "id")), cost = Json.Int(d, "cost", 1),
+                    cost = Json.Int(d, "cost", 1), description = Json.Str(d, "description"),
                     requires = Json.Arr(d.GetValueOrDefault("requires")).Select(x => x.ToString()).ToList(),
                 };
                 foreach (var kv in Json.Obj(d["effects"])) s.effects[kv.Key] = (double)kv.Value;
@@ -113,7 +116,24 @@ namespace WorkshopWreckage
             }
             var rs = Json.Obj(cfg.GetValueOrDefault("respec")) ?? new Dictionary<string, object>();
             respecLevel = Json.Str(rs, "status", "planned") == "active" ? Unlocks.Respec : int.MaxValue;
+            // one point per level-up: the max level is the budget + 1
+            maxLevel = PointBudget / Math.Max(1, _pointsPerLevel) + 1;
         }
+
+        /// <summary>Every buyable step: each level of an active player skill and each rank of an active robot upgrade
+        /// (an exclusive group, e.g. Completion Strategist, counts once). Retired and planned ones are not counted.</summary>
+        public int BuyableSteps
+        {
+            get
+            {
+                var groups = new HashSet<string>();
+                int robot = robotUpgrades.Where(u => u.Active && (u.exclusive == "" || groups.Add(u.exclusive))).Sum(u => u.maxRank);
+                return skills.Count(s => s.Active) + robot;
+            }
+        }
+
+        /// <summary>The points one playthrough earns: round(fraction × buyable steps) (preliminary, docs/SKILL_REVAMP.md).</summary>
+        public int PointBudget => (int)Math.Round(budgetFraction * BuyableSteps, MidpointRounding.AwayFromZero);
 
         // ------------------------------------------------------------------ robot upgrades
 
@@ -135,7 +155,6 @@ namespace WorkshopWreckage
             if (!robotOperational) return "Build the robot first";
             int r = RankOf(id);
             if (r >= u.maxRank) return "Maximum rank";
-            if (level < u.LevelFor(r)) return $"Requires level {u.LevelFor(r)}";
             var missing = u.requires.Where(x => RankOf(x) == 0).ToList();
             if (missing.Count > 0) return "Requires " + string.Join(", ", missing.Select(x => Upgrade(x)?.name ?? x));
             if (u.exclusive != "" && robotUpgrades.FirstOrDefault(o => o.exclusive == u.exclusive && o.robot != u.robot && RankOf(o.id) > 0) is RobotUpgradeDef taken)
@@ -154,10 +173,10 @@ namespace WorkshopWreckage
             return true;
         }
 
-        /// <summary>Respec: every point spent on robot upgrades back (from respecLevel).</summary>
-        public int RefundRobotUpgrades()
+        /// <summary>Respec: every point spent on robot upgrades back (from respecLevel; `dev`: the debug respec, any level).</summary>
+        public int RefundRobotUpgrades(bool dev = false)
         {
-            if (level < respecLevel) return 0;
+            if (level < respecLevel && !dev) return 0;
             int refund = 0;
             foreach (var kv in upgradeRanks)
             {
@@ -174,11 +193,12 @@ namespace WorkshopWreckage
         /// <summary>Points spent on player skills and robot upgrades, at what each one cost.</summary>
         public int SkillPointsSpent => unlocked.Sum(id => Skill(id)?.cost ?? 0) + upgradeRanks.Sum(kv => Enumerable.Range(0, kv.Value).Sum(r => Upgrade(kv.Key)?.CostOf(r) ?? 0));
 
-        /// <summary>Full respec (from respecLevel): every player skill and robot upgrade back at exactly what it
-        /// cost, so points spent + points to spend never changes (no points are created). Returns the refund.</summary>
-        public int RespecAll()
+        /// <summary>Full respec (from respecLevel; `dev`: the free debug respec, F8 with debug_mode): every player skill
+        /// and robot upgrade back at exactly what it cost, so points spent + points to spend never changes (no points
+        /// are created). Returns the refund.</summary>
+        public int RespecAll(bool dev = false)
         {
-            if (level < respecLevel) return 0;
+            if (level < respecLevel && !dev) return 0;
             int refund = 0;
             foreach (var id in unlocked.ToList())
             {
@@ -188,7 +208,7 @@ namespace WorkshopWreckage
                 unlocked.Remove(id);
             }
             skillPoints += refund;
-            return refund + RefundRobotUpgrades();
+            return refund + RefundRobotUpgrades(dev);
         }
 
         /// <summary>A robot type's stat after its upgrades: add (base + ranks * effect),
@@ -219,7 +239,6 @@ namespace WorkshopWreckage
             foreach (var s in skills)
             {
                 if (!ids.Add(s.id)) e.Add($"Skill '{s.id}' is defined twice");
-                if (s.unlockLevel < 1 || s.unlockLevel > maxLevel) e.Add($"Skill '{s.id}': unlock_level {s.unlockLevel} outside 1..{maxLevel}");
                 if (s.cost < 0) e.Add($"Skill '{s.id}': negative cost");
             }
             foreach (var s in skills)
@@ -227,7 +246,7 @@ namespace WorkshopWreckage
                 {
                     var req = skills.FirstOrDefault(x => x.id == r);
                     if (req == null) e.Add($"Skill '{s.id}' requires unknown skill '{r}'");
-                    else if (req.unlockLevel > s.unlockLevel) e.Add($"Skill '{s.id}' (level {s.unlockLevel}) requires '{r}' which unlocks later (level {req.unlockLevel})");
+                    else if (s.Active && !req.Active) e.Add($"Skill '{s.id}' requires '{r}', which cannot be bought ({req.status})");
                 }
             var uids = new HashSet<string>();
             foreach (var u in robotUpgrades)
@@ -237,53 +256,40 @@ namespace WorkshopWreckage
                 if (u.costPerRank.Count != u.maxRank) e.Add($"Robot upgrade '{u.id}': cost_per_rank needs {u.maxRank} entries");
                 if (!new[] { "add", "percent", "rank" }.Contains(u.mode)) e.Add($"Robot upgrade '{u.id}': unknown mode '{u.mode}'");
             }
-            int points = Enumerable.Range(2, maxLevel - 1).Sum(PointsAt);
-            int total = skills.Sum(s => s.cost);
-            if (points < total * 0.6) e.Add($"Only {points} skill points over {maxLevel} levels for {total} points of skills");
+            if (budgetFraction <= 0 || budgetFraction >= 1) e.Add($"point_budget.fraction_of_steps {budgetFraction} must be between 0 and 1");
+            if (PointBudget >= BuyableSteps) e.Add($"{PointBudget} points for {BuyableSteps} buyable steps: everything could be maxed");
             return e;
         }
 
-        int PointsAt(int lvl) => _pointsPerLevel + _bonusPoints.GetValueOrDefault(lvl);
-        int _midPoints;
-
-        /// <summary>Completions at which level `l` pays its mid-level points: halfway to the next level
-        /// (rounded up), or -1 when the step is a single completion (no halfway).</summary>
-        int MidLevelAt(int l) => l >= maxLevel || DestinationsForLevel(l + 1) - DestinationsForLevel(l) < 2 ? -1
-            : (DestinationsForLevel(l) + DestinationsForLevel(l + 1) + 1) / 2;
-
-        /// <summary>Pays mid_level_skill_points for every level whose halfway mark is passed, once each
-        /// (kept in the once-rewards, so a reload never pays twice and an older save is paid up).</summary>
-        void GrantMidLevelPoints(bool announce)
-        {
-            if (_midPoints <= 0) return;
-            for (int l = 1; l <= level; l++)
-            {
-                int at = MidLevelAt(l);
-                if (at < 0 || DestinationsCompleted < at || !_onceRewarded.Add("mid:" + l)) continue;
-                skillPoints += _midPoints;
-                if (announce && l == level) MidLevelPoints?.Invoke(_midPoints);
-            }
-        }
-
-        /// <summary>Sets the world's completable destination count (scales the level curve).</summary>
+        /// <summary>Sets the world's completable destination count (the level curve is fitted to it).</summary>
         public void SetDestinationTotal(int n)
         {
             destinationTotal = Math.Max(1, n);
             _levelStart = null;
         }
 
-        /// <summary>Completed destinations needed to reach `lvl` (level 1: 0, level 2: 1).</summary>
+        /// <summary>Completed destinations needed to reach `lvl` (level 1: 0, level 2: 1). The step from L to L+1 is
+        /// max(1, round(c·(L−1)^exponent)), with c fitted (bisection) so the max level needs completion_at_max of
+        /// this world's destinations: the curve follows the real destination count and the budget.</summary>
         public int DestinationsForLevel(int lvl)
         {
             if (_levelStart == null)
             {
-                double scale = destinationTotal / _destReference;
-                _levelStart = new int[maxLevel + 2];
-                for (int l = 2; l <= maxLevel; l++)
-                    _levelStart[l] = _levelStart[l - 1] + (l == 2 ? 1 : Math.Max(1, (int)Math.Round(scale * _destCoef * Math.Pow(l - 1, _destExp))));
-                _levelStart[maxLevel + 1] = int.MaxValue;
+                int target = (int)Math.Round(_completionAtMax * destinationTotal);
+                double lo = 0, hi = 1000;
+                for (int i = 0; i < 60; i++) { double mid = (lo + hi) / 2; if (CurveStarts(mid)[maxLevel] >= target) hi = mid; else lo = mid; }
+                _levelStart = CurveStarts(hi);
             }
             return _levelStart[Math.Clamp(lvl, 1, maxLevel + 1)];
+        }
+
+        int[] CurveStarts(double c)
+        {
+            var start = new int[maxLevel + 2];
+            for (int l = 2; l <= maxLevel; l++)
+                start[l] = start[l - 1] + (l == 2 ? 1 : Math.Max(1, (int)Math.Round(c * Math.Pow(l - 1, _destExp))));
+            start[maxLevel + 1] = int.MaxValue;
+            return start;
         }
 
         /// <summary>The level that `completed` destinations earn.</summary>
@@ -382,10 +388,9 @@ namespace WorkshopWreckage
             while (level < maxLevel && DestinationsCompleted >= DestinationsForLevel(level + 1))
             {
                 level++;
-                skillPoints += PointsAt(level);
+                skillPoints += _pointsPerLevel;
                 LeveledUp?.Invoke(level);
             }
-            GrantMidLevelPoints(true);
         }
 
         public void OnZoneRestored(int zone, int percentStep)
@@ -435,7 +440,7 @@ namespace WorkshopWreckage
             var s = Skill(id);
             if (s == null) return "Unknown skill";
             if (unlocked.Contains(id)) return "Already unlocked";
-            if (level < s.unlockLevel) return $"Requires level {s.unlockLevel}";
+            if (!s.Active) return s.Retired ? "No longer available" : "Coming in a later milestone";
             var missing = s.requires.Where(r => !unlocked.Contains(r)).ToList();
             if (missing.Count > 0) return "Requires " + string.Join(", ", missing.Select(r => Skill(r)?.name ?? r));
             if (skillPoints < s.cost) return $"Needs {s.cost} skill point{(s.cost == 1 ? "" : "s")}";
@@ -455,14 +460,17 @@ namespace WorkshopWreckage
 
         public bool Has(string effect) => Effect(effect) > 0;
 
-        static readonly Dictionary<string, int> RetiredSkills = new() { ["filter_material"] = 1, ["filter_category"] = 1 };
-        /// <summary>Robot AI ranks replaced by the design v1.0 intelligence upgrades: their cost per rank, refunded on load.</summary>
-        static readonly Dictionary<string, int[]> RetiredUpgrades = new() { ["retro_targeting"] = new[] { 1, 1 }, ["uni_coordination"] = new[] { 1, 2 }, ["hover_fleet"] = new[] { 1, 1, 1 } };
+        /// <summary>Set by Load when the save was made under an older skill system or point budget (save version below
+        /// 3, or another budget_version): every purchase was reset and the earned points given back as unspent ones.
+        /// The game backs the file up, re-saves it and tells the player once. Null otherwise.</summary>
+        public string migratedFrom;
+        public int migratedPoints;
 
         // ------------------------------------------------------------------ save
 
         public Dictionary<string, object> ToDict() => new()
         {
+            ["version"] = (double)SaveVersion, ["budget_version"] = budgetVersion,
             ["level"] = (double)level, ["xp"] = (double)xp, ["fraction"] = _fraction, ["skill_points"] = (double)skillPoints,
             ["unlocked"] = unlocked.Select(x => (object)x).ToList(),
             ["sort_rewarded"] = _sortRewarded.Select(x => (object)(double)x).ToList(),
@@ -480,18 +488,15 @@ namespace WorkshopWreckage
             _fraction = Json.Num(d, "fraction");
             skillPoints = Json.Int(d, "skill_points");
             unlocked.Clear(); _sortRewarded.Clear(); _discoverRewarded.Clear(); _onceRewarded.Clear();
+            migratedFrom = null; migratedPoints = 0;
             foreach (var x in Json.Arr(d.GetValueOrDefault("unlocked"))) unlocked.Add(x.ToString());
-            // skills taken out of the tree (2026-10-25: the glove's filters gave way to its levels) give their points back
-            foreach (var kv in RetiredSkills) if (unlocked.Remove(kv.Key)) skillPoints += kv.Value;
             foreach (var x in Json.Arr(d.GetValueOrDefault("sort_rewarded"))) _sortRewarded.Add((int)(double)x);
             foreach (var x in Json.Arr(d.GetValueOrDefault("discover_rewarded"))) _discoverRewarded.Add((int)(double)x);
             foreach (var x in Json.Arr(d.GetValueOrDefault("once"))) _onceRewarded.Add(x.ToString());
             upgradeRanks.Clear();
             foreach (var kv in Json.Obj(d.GetValueOrDefault("robot_upgrades")) ?? new Dictionary<string, object>())
             {
-                int rank = (int)(double)kv.Value;
-                if (RetiredUpgrades.TryGetValue(kv.Key, out var cost)) { for (int r = 0; r < rank && r < cost.Length; r++) skillPoints += cost[r]; continue; }
-                upgradeRanks[kv.Key] = rank;
+                upgradeRanks[kv.Key] = (int)(double)kv.Value;
             }
             completedDestinations.Clear();
             if (d.ContainsKey("completed_destinations"))
@@ -499,9 +504,26 @@ namespace WorkshopWreckage
             else   // a save from the XP levels: its completed sets become the points; nothing earned is taken away
                 foreach (var k in _onceRewarded) if (k.StartsWith("def:")) completedDestinations.Add(int.Parse(k.Substring(4)));
             int earned = LevelFor(DestinationsCompleted);
-            for (int l = level + 1; l <= earned; l++) skillPoints += PointsAt(l);
-            level = Math.Max(level, earned);
-            GrantMidLevelPoints(false);
+            int version = Json.Int(d, "version", 2);
+            string budget = Json.Str(d, "budget_version", "");
+            if (version < SaveVersion || budget != budgetVersion)
+            {
+                // migration A (skill revamp): the level comes again from the completed destinations, every skill and
+                // robot upgrade bought is reset, and the points earned are given as unspent points (old spent points are
+                // never added on top). Robots, blueprints and the pegboard are not touched here.
+                migratedFrom = version < SaveVersion ? $"save version {version}" : $"point budget {(budget == "" ? "?" : budget)}";
+                unlocked.Clear();
+                upgradeRanks.Clear();
+                level = earned;
+                skillPoints = (level - 1) * _pointsPerLevel;
+                migratedPoints = skillPoints;
+                return;
+            }
+            // unknown ids (a skill or upgrade taken out of the data) are dropped and refunded one point per step
+            foreach (var id in unlocked.Where(id => Skill(id) == null).ToList()) { unlocked.Remove(id); skillPoints += 1; }
+            foreach (var id in upgradeRanks.Keys.Where(id => Upgrade(id) == null).ToList()) { skillPoints += upgradeRanks[id]; upgradeRanks.Remove(id); }
+            for (int l = level + 1; l <= Math.Min(earned, maxLevel); l++) skillPoints += _pointsPerLevel;
+            level = Math.Clamp(Math.Max(level, earned), 1, maxLevel);
         }
     }
 

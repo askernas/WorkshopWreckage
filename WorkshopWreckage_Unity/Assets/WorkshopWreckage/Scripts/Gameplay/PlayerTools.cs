@@ -13,7 +13,8 @@ namespace WorkshopWreckage
     /// "skill_tuning"): Magnetic Glove (1: copies of the magnetic part in your first slot fly to you,
     /// as many as the glove's level I-X), Parts Scanner (2: highlights unsorted copies of the part in
     /// hand and its destination), Supermagnet (3: exact-match attraction of the held part's
-    /// definition), Area Sweep (4). Every usable skill recharges after use. All of them move real items into the inventory: never sorted
+    /// definition), Area Sweep (4, the full pegboard's bonus), Part Sense (5), Sort Inventory (6) and Automatic
+    /// Storage Delivery (7; skill revamp 2026-10-30, docs/SKILL_REVAMP.md). Every usable skill recharges after use. All of them move real items into the inventory: never sorted
     /// parts, never parts reserved or carried by robots, never robot components, and
     /// never more than the free inventory space. Collected parts still have to be
     /// delivered to their destinations by hand.</summary>
@@ -52,7 +53,7 @@ namespace WorkshopWreckage
         public static readonly (string id, string name, Key letter)[] Usable =
         {
             ("magnetic_glove", "Magnetic Glove", Key.B), ("scanner", "Parts Scanner", Key.V), ("supermagnet", "Supermagnet", Key.X), ("area_sweep", "Area Sweep", Key.N),
-            ("part_sense", "Part Sense", Key.None),
+            ("part_sense", "Part Sense", Key.None), ("sort_inventory", "Sort Inventory", Key.None), ("storage_delivery", "Storage Delivery", Key.None),
         };
 
         /// <summary>The skill's level: 0 = not learned.</summary>
@@ -61,8 +62,10 @@ namespace WorkshopWreckage
             "magnetic_glove" => MagnetLevel,
             "scanner" => P.Has("scan_radius_m") ? 1 : 0,
             "supermagnet" => P.Has("supermagnet") ? 1 : 0,
-            "area_sweep" => P.Has("area_collect_radius_m") || g.pegRewards.Has("area_sweep") ? 1 : 0,   // the skill, or the full pegboard's free bonus
-            "part_sense" => (int)P.Effect("part_sense"),   // ranks I-V
+            "area_sweep" => g.pegRewards.Has("area_sweep") ? 1 : 0,   // the full pegboard's free bonus (the skill is retired)
+            "part_sense" => (int)P.Effect("part_sense"),   // levels I-X
+            "sort_inventory" => (int)P.Effect("sort_inventory"),
+            "storage_delivery" => (int)P.Effect("storage_delivery"),
             _ => 0,
         };
 
@@ -78,9 +81,9 @@ namespace WorkshopWreckage
         public int Slot(string id) => (int)Tuned(id, "slot", 1, System.Array.FindIndex(Usable, u => u.id == id) + 1);
         public float CooldownOf(string id) => id == "area_sweep" && SweepFromBoard ? g.pegRewards.SweepCooldown : Tuned(id, "cooldown_s", Level(id), 10);
 
-        /// <summary>Area Sweep from the full pegboard (unlocks.json pegboard_rewards.area_sweep), not the skill: its own
-        /// radius, cooldown and limit, the same for every preset.</summary>
-        bool SweepFromBoard => !P.Has("area_collect_radius_m") && g.pegRewards.Has("area_sweep");
+        /// <summary>Area Sweep comes only from the full pegboard (unlocks.json pegboard_rewards.area_sweep): its own
+        /// radius, cooldown and limit, the same for every preset, no levels, no points.</summary>
+        bool SweepFromBoard => g.pegRewards.Has("area_sweep");
         public float CooldownLeft(string id) => Mathf.Max(0, _ready.GetValueOrDefault(id) - Time.time);
 
         /// <summary>False (with a message) while the skill recharges.</summary>
@@ -101,15 +104,17 @@ namespace WorkshopWreckage
             "supermagnet" => Supermagnet(),
             "area_sweep" => AreaSweep(),
             "part_sense" => PartSense(),
+            "sort_inventory" => SortInventory(),
+            "storage_delivery" => StorageDelivery(),
             _ => 0,
         };
 
-        /// <summary>The bar's name for a skill, with the glove's level: "Magnetic Glove III".</summary>
+        /// <summary>The bar's name for a skill, with its level: "Magnetic Glove III", "Part Sense X".</summary>
         public string NameOf(string id)
         {
             var n = System.Array.Find(Usable, u => u.id == id).name;
             int lv = Level(id);
-            return id == "magnetic_glove" && lv > 0 ? $"{n} {Roman(lv)}" : n;
+            return id != "scanner" && id != "supermagnet" && id != "area_sweep" && lv > 0 ? $"{n} {Roman(lv)}" : n;
         }
 
         static string Roman(int n) => n switch { 1 => "I", 2 => "II", 3 => "III", 4 => "IV", 5 => "V", 6 => "VI", 7 => "VII", 8 => "VIII", 9 => "IX", 10 => "X", _ => n.ToString() };
@@ -211,34 +216,96 @@ namespace WorkshopWreckage
         float _senseUntil;
         Material _senseMat;
 
-        /// <summary>The nearest robot parts lying in the workshop glow faintly for duration_s; the rank sets
-        /// how many (parts), how long and the cooldown (unlocks.json skill_tuning).</summary>
+        /// <summary>The nearest robot parts lying within range glow for duration_s (2 s at every level); the level sets
+        /// the range, how many parts and the cooldown (unlocks.json skill_tuning.part_sense). Nothing in range: no
+        /// cooldown.</summary>
         public int PartSense()
         {
-            if (!P.Has("part_sense")) { g.hud.OnFeedback("You need the Robot Part Sense skill (K → Skills)", false); return 0; }
-            if (!Ready("part_sense", "Robot Part Sense")) return 0;
+            if (!P.Has("part_sense")) { g.hud.OnFeedback("You need the Part Sense skill (K → Skills)", false); return 0; }
+            if (!Ready("part_sense", "Part Sense")) return 0;
             var me = g.player.transform.position;
             int rank = Level("part_sense"), want = Mathf.Max(1, (int)Tuned("part_sense", "parts", rank, 1));
+            float range = Tuned("part_sense", "range_m", rank, 2);
             var found = new List<(float d, int id)>();
             foreach (var inst in g.world.instances)
             {
                 if (inst.state != ItemState.InWorld || !g.world.DefOf(inst.id).IsRobotComponent || g.robotReserved.Contains(inst.id)) continue;
-                found.Add(((inst.Position - me).sqrMagnitude, inst.id));
+                float d = (inst.Position - me).sqrMagnitude;
+                if (d <= range * range) found.Add((d, inst.id));
             }
-            if (found.Count == 0) { g.hud.OnFeedback("Robot Part Sense: no robot parts left lying around", false); return 0; }
+            if (found.Count == 0) { g.hud.OnFeedback($"Part Sense: no robot parts within {range:0} m", false); return 0; }
             found.Sort((a, b) => a.d.CompareTo(b.d));
             senseIds.Clear();
             for (int i = 0; i < want && i < found.Count; i++) senseIds.Add(found[i].id);
             senseId = senseIds[0];
-            _senseUntil = Time.time + Tuned("part_sense", "duration_s", rank, 5);
+            _senseUntil = Time.time + Tuned("part_sense", "duration_s", rank, 2);
             Recharge("part_sense");
             Sfx.Play("discover", null, -10, 0);
             float near = Mathf.Sqrt(found[0].d);
-            g.hud.OnFeedback(senseIds.Count == 1 ? $"Robot Part Sense: something glows {near:0} m away"
-                                                 : $"Robot Part Sense: {senseIds.Count} parts glow, the nearest {near:0} m away", true);
+            g.hud.OnFeedback(senseIds.Count == 1 ? $"Part Sense: something glows {near:0} m away"
+                                                 : $"Part Sense: {senseIds.Count} parts glow, the nearest {near:0} m away", true);
             g.telemetry?.SkillUsed("part_sense");
             return 1;
         }
+
+        // ---------------------------------------------------------------- sort inventory, storage delivery
+
+        /// <summary>Sort Inventory: the whole inventory in storage-area order (the storage unit of each part's
+        /// destination), then by part type, copies of one type together; otherwise the order stays as it was
+        /// (a stable sort). Parts with no storage place (robot parts, tools) go last. Cooldown per level
+        /// (skill_tuning.sort_inventory). The hotbar shows the same order, and after a placement the hand takes the
+        /// next part in it, so a sorted group comes up one by one.</summary>
+        public int SortInventory()
+        {
+            if (!P.Has("sort_inventory")) { g.hud.OnFeedback("You need the Sort Inventory skill (K → Skills)", false); return 0; }
+            if (!Ready("sort_inventory", "Sort Inventory")) return 0;
+            if (Inv.items.Count < 2) { g.hud.OnFeedback("Sort Inventory: nothing to sort", false); return 0; }
+            Inv.Reorder(SortedInventory(Inv.items));
+            Recharge("sort_inventory");
+            g.hud.OnFeedback($"Inventory sorted by storage area ({Inv.items.Count} parts)", true);
+            g.telemetry?.SkillUsed("sort_inventory");
+            return 1;
+        }
+
+        /// <summary>The order Sort Inventory gives: storage area, then part type (name, then definition), stable.</summary>
+        public List<int> SortedInventory(IEnumerable<int> ids) => ids
+            .OrderBy(id => AreaOf(id) == null ? 1 : 0).ThenBy(id => AreaOf(id) ?? "", System.StringComparer.Ordinal)
+            .ThenBy(id => g.world.DefOf(id).displayName, System.StringComparer.Ordinal).ThenBy(id => g.world.DefOf(id).id).ToList();
+
+        /// <summary>A part's storage area: the storage unit its destination belongs to (null: no storage place).</summary>
+        public string AreaOf(int id)
+        {
+            var box = g.world.DefOf(id).storageBox;
+            return !string.IsNullOrEmpty(box) && g.db.boxes.TryGetValue(box, out var b) ? Json.Str(b, "unit") : null;
+        }
+
+        /// <summary>Automatic Storage Delivery (placement rules 2026-10-30): the same check as a click (the part in hand,
+        /// its own storage place under the crosshair, within reach, with room). Then the kind and the place are fixed,
+        /// and up to `level` parts of that kind are stored (skill_tuning.storage_delivery max_items), the one in hand
+        /// counted, the rest from anywhere in the inventory, never more than there is room for. If the check fails,
+        /// nothing happens and the skill does not recharge; storing by hand works during the cooldown. (The old
+        /// robot handover on H is Request Pickup.)</summary>
+        public int StorageDelivery()
+        {
+            if (!P.Has("storage_delivery")) { g.hud.OnFeedback("You need the Automatic Storage Delivery skill (K → Skills)", false); return 0; }
+            if (!Ready("storage_delivery", "Storage Delivery")) return 0;
+            var it = g.interaction;
+            var r = it.CanPlaceHeld(out int held);
+            if (held < 0) { g.hud.OnFeedback("Storage Delivery: hold the part you want to store", false); return 0; }
+            if (it.targetType != "dest") { g.hud.OnFeedback($"Storage Delivery: aim at the place for {g.world.DefOf(held).displayName}", false); return 0; }
+            if (r != StorageSystem.Result.Ok) { g.hud.OnFeedback("Storage Delivery: " + g.storage.ResultText(r, it.targetDest, held), false); return 0; }
+            int lv = Level("storage_delivery"), max = Mathf.Max(1, (int)Tuned("storage_delivery", "max_items", lv, lv));
+            string dest = it.targetDest;   // fixed for this use, like the kind
+            var ids = it.SameKindAsHeld(dest, held, max);
+            int n = ids.Count(id => it.Deposit(dest, id));
+            if (n == 0) return 0;
+            Recharge("storage_delivery");
+            lastDelivered = n;
+            g.hud.OnFeedback($"Storage Delivery: {n} part{(n == 1 ? "" : "s")} stored", true);
+            g.telemetry?.SkillUsed("storage_delivery");
+            return n;
+        }
+        public int lastDelivered;
 
         void DrawSense()
         {

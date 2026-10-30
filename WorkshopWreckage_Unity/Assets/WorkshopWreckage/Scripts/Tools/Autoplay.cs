@@ -263,6 +263,31 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "skills")
+            {
+                yield return SkillChecks();   // QA: the skill revamp (docs/SKILL_REVAMP.md): points, costs, the four skills, respec, save/load
+                Finish();
+                yield break;
+            }
+            if (section == "pegplace")
+            {
+                yield return PegPlacementChecks();   // QA: placement rules 2026-10-30 on the pegboard
+                Finish();
+                yield break;
+            }
+            if (section == "placement")
+            {
+                g.progression.skillPoints += 5;
+                yield return PlacementChecks();   // QA: placement rules 2026-10-30 (click and Automatic Storage Delivery)
+                Finish();
+                yield break;
+            }
+            if (section == "skillmigrate")
+            {
+                yield return SkillMigrateChecks(g.args.GetValueOrDefault("apslot", "premig_slot1"));   // QA: migration A on a copy of an older save
+                Finish();
+                yield break;
+            }
             if (section == "respec")
             {
                 yield return RespecChecks();   // QA: full respec, upgrade previews, robot telemetry (skill progression spec §6-8)
@@ -358,7 +383,7 @@ namespace WorkshopWreckage
             yield return Frames(15);
             Check("pile shrinks one item per pickup", g.renderer.VisibleCount == visibleBefore - picked, $"visible {visibleBefore} -> {g.renderer.VisibleCount}");
             Check("inventory holds every picked item", g.inventory.Count == picked && w.CountInState(ItemState.Carried) == picked, $"inventory {g.inventory.Count}, carried {w.CountInState(ItemState.Carried)}");
-            Check("you start with 10 pockets and no automatic stacking (every part its own slot)", g.inventory.capacity == 10 && !g.inventory.stacking && g.inventory.Stacks().Count == g.inventory.Count && picked == 10,
+            Check("you start with 10 pockets; the hotbar shows the inventory order (copies side by side share a slot)", g.inventory.capacity == 10 && g.inventory.Stacks().SelectMany(s => s.ids).SequenceEqual(g.inventory.items) && picked == 10,
                   $"capacity {g.inventory.capacity}, {g.inventory.Stacks().Count} slots for {g.inventory.Count} parts");
             yield return g.Capture(Path.Combine(outDir, "01_after_pickups.png"), 5);
             g.hud.SetHudVisible(true);
@@ -703,51 +728,10 @@ namespace WorkshopWreckage
                     if (g.interaction.targetType == "item") shown++;
                     yield return g.Capture(Path.Combine(outDir, $"34_outline_{n++}_{g.world.DefOf(p.id).displayName.Replace(' ', '_').Replace('/', '_')}_{dist:0.00}m.png"), 2);
                 }
-            // robot part afterglow (playtest 2026-10-26): looking away from a robot part makes it blink once
-            var rp = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsRobotPart && i.Position.y < 0.4f)
-                .OrderBy(i => (i.Position - eye).sqrMagnitude).FirstOrDefault();
-            if (rp != null)
-            {
-                bool keep = Interaction.Afterglow;
-                // a skill (playtest 2026-10-28): without it, nothing blinks even with the setting on
-                bool hadSkill = g.progression.Has("part_afterglow");
-                if (hadSkill) g.progression.RespecAll();
-                IEnumerator AimAway(bool on)
-                {
-                    Interaction.Afterglow = on;
-                    var from = rp.Position + new Vector3(0.6f, 0.75f, 0.5f).normalized * 0.7f;
-                    LookFrom(from, rp.Position);
-                    yield return Frames(2);
-                    g.interaction.UpdateTarget();
-                    yield return Frames(1);
-                    LookFrom(from, from + Vector3.up);   // look at the ceiling: nothing aimed
-                    yield return Frames(1);
-                    g.interaction.UpdateTarget();
-                }
-                yield return AimAway(true);
-                bool noSkillNone = g.interaction.afterglowId < 0;
-                var glow = g.progression.skills.FirstOrDefault(s => s.id == "part_afterglow");
-                LevelTo(Mathf.Max(2, glow?.unlockLevel ?? 2));
-                g.progression.skillPoints = Mathf.Max(g.progression.skillPoints, glow?.cost ?? 1);
-                bool bought = g.UnlockSkill("part_afterglow");
-                yield return AimAway(true);
-                bool started = g.interaction.afterglowId == rp.id;
-                var fromPos = rp.Position + new Vector3(0.6f, 0.75f, 0.5f).normalized * 0.9f;
-                LookFrom(fromPos, rp.Position + Vector3.Cross(Vector3.up, rp.Position - fromPos).normalized * 0.35f + Vector3.up * 0.1f);   // watch it beside the crosshair
-                float t0 = Time.time;
-                while (Time.time - t0 < Interaction.AfterglowTime * 0.45f) yield return null;
-                bool aimedOff = g.interaction.targetItem != rp.id;
-                yield return g.Capture(Path.Combine(outDir, "36_afterglow_blink.png"), 1);
-                while (Time.time - t0 < Interaction.AfterglowTime + 0.2f) yield return null;
-                bool ended = g.interaction.afterglowId < 0;
-                yield return AimAway(false);
-                bool offNone = g.interaction.afterglowId < 0;
-                Interaction.Afterglow = keep;
-                Check("the afterglow is a skill (Part Afterglow): without it nothing blinks; bought, a robot part blinks once after the crosshair leaves it, and stops; with the setting off, nothing (screenshot 36)",
-                      noSkillNone && bought && started && ended && offNone,
-                      $"{g.world.DefOf(rp.id).displayName}: before the skill none {noSkillNone}, bought {bought} (cost {glow?.cost}, level {glow?.unlockLevel}), started {started}, still unaimed while watched {aimedOff}, ended {ended}, off: none {offNone}");
-            }
-            else Check("with the afterglow on, a robot part blinks once after the crosshair leaves it", false, "no robot part lying in the world");
+            // the Part Afterglow skill is retired (skill revamp 2026-10-30): it can't be bought, so nothing blinks
+            var glow = g.progression.Skill("part_afterglow");
+            Check("Part Afterglow is retired: not buyable, no afterglow", glow != null && glow.Retired && !g.UnlockSkill("part_afterglow") && !g.interaction.AfterglowOn,
+                  $"status {glow?.status}, afterglow on {g.interaction.AfterglowOn}");
             g.interaction.enabledInput = false;
             Check("the aimed-at part shows its highlight (screenshots 34_outline_*)", shown >= 4, $"{shown} of 6 aimed shots show a highlight");
         }
@@ -1611,7 +1595,8 @@ namespace WorkshopWreckage
             var pr = g.progression;
             pr.level = pr.maxLevel;
             pr.skillPoints = 99;
-            foreach (var s in pr.skills.Where(s => s.Active).OrderBy(s => s.unlockLevel)) g.UnlockSkill(s.id);
+            foreach (var s in pr.skills.Where(s => s.Active)) g.UnlockSkill(s.id);
+            g.pegRewards.GrantAll(new[] { "area_sweep" });   // Area Sweep is the full pegboard's bonus only (skill revamp)
             Check("tool skills unlock (levels, points, prerequisites)", pr.Has("bulk_pickup_count") && pr.Has("magnet_level") && pr.Has("scan_radius_m") && pr.Has("supermagnet"),
                   $"{pr.unlocked.Count} skills, inventory capacity {g.inventory.capacity}");
             Check("Inventory Manifest reveals the totals of discovered parts", pr.Has("reveal_totals") && g.progress.discovered.All(g.progress.revealed.Contains),
@@ -1702,12 +1687,18 @@ namespace WorkshopWreckage
             old["unlocked"] = ((List<object>)old["unlocked"]).Concat(new object[] { "filter_material", "filter_category" }).ToList();
             int pts = pr.skillPoints;
             pr.Load(old);
-            // Robot Part Sense (playtest 2026-10-26): the nearest robot part glows faintly for 5 s, then 90 s recharge
+            // Part Sense I (skill revamp 2026-10-30): the nearest robot part within 2 m glows for 2 s, then 90 s recharge
             {
                 g.tools.ResetState();
-                var higher = new[] { "part_sense_2", "part_sense_3", "part_sense_4", "part_sense_5" }.Where(pr.unlocked.Contains).ToList();
-                foreach (var s in higher) pr.unlocked.Remove(s);   // rank I, which this check is about
+                var higher = Enumerable.Range(2, 9).Select(k => $"part_sense_{k}").Where(pr.unlocked.Contains).ToList();
+                foreach (var s in higher) pr.unlocked.Remove(s);   // level I, which this check is about
                 int rank = g.tools.Level("part_sense");
+                var pme0 = g.player.transform.position;
+                var close = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsRobotComponent && !g.robotReserved.Contains(i.id))
+                    .OrderBy(i => (i.Position - pme0).sqrMagnitude).First();
+                var stand = close.Position + Vector3.right * 0.8f; stand.y = 0;
+                g.player.Teleport(stand);   // within level I's 2 m
+                yield return Frames(2);
                 int sensed = g.tools.PartSense();
                 int sid = g.tools.senseId;
                 var pme = g.player.transform.position;
@@ -1721,11 +1712,12 @@ namespace WorkshopWreckage
                     yield return g.Capture(Path.Combine(outDir, "38_part_sense.png"), 2);
                 }
                 float t0 = Time.time;
-                while (Time.time - t0 < 5.3f) yield return null;
-                Check("Robot Part Sense (key 5): the nearest robot part glows for 5 s, then the skill recharges 90 s (screenshot 38)",
+                while (Time.time - t0 < 2.3f) yield return null;
+                Check("Part Sense I (key 5): the nearest robot part within 2 m glows for 2 s, then the skill recharges 90 s (screenshot 38)",
                       rank == 1 && sensed == 1 && nearest != null && sid == nearest.id && g.tools.senseId < 0 && Mathf.Abs(cdS - 90) < 0.5f && g.tools.Slot("part_sense") == 5,
-                      $"rank {rank}; glowing {(sid >= 0 ? g.world.DefOf(sid).displayName : "none")} (nearest {nearest?.id}), after 5 s {g.tools.senseId}, cooldown {cdS:0.0} s");
+                      $"rank {rank}; glowing {(sid >= 0 ? g.world.DefOf(sid).displayName : "none")} (nearest {nearest?.id}), after 2 s {g.tools.senseId}, cooldown {cdS:0.0} s");
                 foreach (var s in higher) pr.unlocked.Add(s);
+                g.player.Teleport(pme0);
                 g.tools.ResetState();
             }
             Check("the glove has ten levels (I-X, level X: 10 parts, 30 s); a save with the retired filter skills refunds their points",
@@ -1744,7 +1736,7 @@ namespace WorkshopWreckage
             yield return new WaitForSeconds(2.5f);
             Check("Area Sweep collects the loose parts around you (overflow to the sorting tray)", swept > 0 && g.inventory.Count - b0 == swept - g.tools.lastToTray, $"{swept} parts swept, inventory +{g.inventory.Count - b0}, tray +{g.tools.lastToTray} (capacity {g.inventory.capacity}, now {g.inventory.Count})");
 
-            // Automatic Storage Delivery: a robot fetches the player's load and stores it
+            // Request Pickup (H; called Automatic Storage Delivery before the skill revamp): a robot fetches the player's load and stores it
             // (from open floor by the start: the feature, not a robot squeezing into a heap)
             g.player.Teleport(Shared.Pos(g.layout.spawn.x, 0, g.layout.spawn.z));
             yield return Frames(2);
@@ -1766,7 +1758,7 @@ namespace WorkshopWreckage
             }
             Time.timeScale = 1;
             int storedByRobot = handed.Count(i => g.world.instances[i].state == ItemState.Stored);
-            Check("Automatic Storage Delivery: a robot takes your parts and delivers them", g.inventory.Count < handed.Count && handed.Any(Delivered),
+            Check("Request Pickup (formerly Automatic Storage Delivery): a robot takes your parts and delivers them", g.inventory.Count < handed.Count && handed.Any(Delivered),
                   $"{hm}; {handed.Count - g.inventory.Count} taken, {storedByRobot} stored, {handed.Count(i => g.world.instances[i].state == ItemState.InWorld)} piled so far");
 
             // Task Coordination: a robot works only inside its zone
@@ -2723,11 +2715,11 @@ namespace WorkshopWreckage
                   && tipVerts.Distinct().Count() == tipVerts.Count && deepSet.All(sl => Tall(sl) > 2.2f) && Tall("SO01") < 1.9f,
                   $"tip vertices {string.Join("/", tipVerts)}; deep height/width {Tall("DS01"):0.00}..{Tall("DS10"):0.00}, standard {Tall("SO01"):0.00}");
             int ds3 = Tool("DS03"), ds7 = Tool("DS07"), sk3 = Tool("SK03"), bt5 = Tool("BT05"), sk8 = Tool("SK08");
-            Take(ds3);
+            Take(ds3); g.inventory.Select(g.world.instances[ds3].defId);   // in hand: only the held tool counts (placement rules 2026-10-30)
             yield return AimAtSlot("DS03");
             var deepHint = it.Describe().hint;
             bool deepRefused = !it.HangTool(ds3);
-            Take(bt5);
+            Take(bt5); g.inventory.Select(g.world.instances[bt5].defId);
             yield return AimAtSlot("BT05");
             var bitHint = it.Describe().hint;
             bool bitRefused = !it.HangTool(bt5);
@@ -3162,6 +3154,9 @@ namespace WorkshopWreckage
 
         IEnumerator PegMigrateChecks(string slot)
         {
+            // load a copy: loading re-saves an older save (the skill migration), and the fixture must stay as it is
+            File.Copy(SaveSystem.PathOf(slot), SaveSystem.PathOf("autotest_pegmig"), true);
+            slot = "autotest_pegmig";
             RobotWorkbench.QaIgnoreToolRequirements = false;
             var save = SaveSystem.Read(slot);
             var hungBefore = Json.Obj(save?.GetValueOrDefault("storage"))?.Where(kv => kv.Key.StartsWith("PB-") && Json.Arr(kv.Value).Count > 0).Select(kv => kv.Key).ToList() ?? new List<string>();
@@ -3250,21 +3245,20 @@ namespace WorkshopWreckage
             yield return Frames(2);
             bool waits = !radar.assembled && !radar.HasPlans && parts.All(id => wb.PoolContents().Contains(id)) && last.Contains("blueprint locked");
             Check("radar parts go into the robot parts pool; without the plans the radar is not built",
-                  parts.Count == PartRadarModel.Parts.Length && allOffered && waits && plans != null && plans.cost == 2,
-                  $"{parts.Count} part types, offered at the bench {allOffered}, assembled {radar.assembled}, pool {wb.PoolContents().Count}; plans cost {plans?.cost}; \"{last}\"");
+                  parts.Count == PartRadarModel.Parts.Length && allOffered && waits && plans != null && plans.Retired && !g.UnlockSkill("part_radar_plans"),
+                  $"{parts.Count} part types, offered at the bench {allOffered}, assembled {radar.assembled}, pool {wb.PoolContents().Count}; plans skill {plans?.status}; \"{last}\"");
             g.OpenWorkbench("retrobot");
             yield return Frames(4);
             yield return g.Capture(Path.Combine(outDir, "radar_bench_screen.png"), 2);
             g.SetState("play");
             var pr = g.progression;
-            LevelTo(Mathf.Max(2, plans?.unlockLevel ?? 2));
-            g.progression.skillPoints = Mathf.Max(g.progression.skillPoints, 2);
             int sp = g.progression.skillPoints;
-            bool bought = g.UnlockSkill("part_radar_plans");
+            g.pegRewards.GrantAll(new[] { "part_radar" });   // the first tool on the pegboard (the Part Radar Plans skill is retired)
+            radar.TryAssemble();
             yield return Frames(2);
-            Check("buying the Part Radar plans (2 skill points) builds it from the pool at once",
-                  bought && radar.assembled && g.progression.skillPoints == sp - 2 && !parts.Any(id => wb.PoolContents().Contains(id)),
-                  $"bought {bought}, assembled {radar.assembled}, points {sp} → {g.progression.skillPoints}");
+            Check("the Part Radar blueprint (from the pegboard) builds it from the pool at once, no points",
+                  radar.HasPlans && radar.assembled && g.progression.skillPoints == sp && !parts.Any(id => wb.PoolContents().Contains(id)),
+                  $"assembled {radar.assembled}, points {sp} → {g.progression.skillPoints}");
 
             // battery pockets: 3 of their own, beside full hands; the Tool Belt adds 3
             var inv = g.inventory;
@@ -3274,7 +3268,7 @@ namespace WorkshopWreckage
             int took = bats.Count(id => { var before = inv.Batteries; Take(id); return inv.Batteries > before; });
             bool three = inv.IsFull && took == 3 && inv.Batteries == 3 && inv.Parts == inv.capacity;
             pr.level = pr.maxLevel; pr.skillPoints = 99;
-            g.UnlockSkill("pockets_1"); g.UnlockSkill("pockets_2");
+            g.UnlockSkill("pockets_1"); g.UnlockSkill("tool_belt");
             int took2 = bats.Skip(3).Count(id => { var before = inv.Batteries; Take(id); return inv.Batteries > before; });
             Check("batteries ride in their own 3 pockets beside full hands; the Tool Belt adds 3 more",
                   three && took2 == 3 && inv.batteryPockets == 6 && inv.Batteries == 6,
@@ -3356,6 +3350,501 @@ namespace WorkshopWreckage
 
         /// <summary>Full respec gives back exactly what was spent and loses nothing carried; the previews show
         /// "now → after" within the limits; a robot's measured record survives a save.</summary>
+        /// <summary>Skill revamp 2026-10-30 (docs/SKILL_REVAMP.md): the shared point pool, one point per level, no level
+        /// requirements, cost 1, Part Sense / Deeper Pockets / Sort Inventory / Automatic Storage Delivery, the retired
+        /// skills, Request Pickup, the dev respec and save/load.</summary>
+        IEnumerator SkillChecks()
+        {
+            var pr = g.progression;
+            var t = g.tools;
+            var it = g.interaction;
+            g.player.enabled = false;
+            foreach (var r in g.robots) r.enabled = false;
+            var active = pr.skills.Where(s => s.Active).ToList();
+            var groups = new HashSet<string>();
+            int robotSteps = pr.robotUpgrades.Where(u => u.Active && (u.exclusive == "" || groups.Add(u.exclusive))).Sum(u => u.maxRank);
+            int steps = active.Count + robotSteps;
+            Check("a new game: level 1, 0 points; the budget is round(47.5 % of the buyable steps), max level = budget + 1 (preliminary)",
+                  pr.level == 1 && pr.skillPoints == 0 && pr.unlocked.Count == 0 && pr.BuyableSteps == steps && pr.PointBudget == (int)System.Math.Round(0.475 * steps, System.MidpointRounding.AwayFromZero)
+                  && pr.maxLevel == pr.PointBudget + 1 && pr.budgetVersion == "prelim-2" && pr.Validate().Count == 0,
+                  $"level {pr.level}, {pr.skillPoints} points; {active.Count} player steps + {robotSteps} robot steps = {steps}; budget {pr.PointBudget}, max level {pr.maxLevel}; problems: {string.Join("; ", pr.Validate())}");
+            int total = pr.destinationTotal;
+            int atMax = pr.DestinationsForLevel(pr.maxLevel);
+            var at = new[] { 0.25, 0.5, 0.75 }.Select(f => pr.DestinationsForLevel(1 + (int)System.Math.Round(f * pr.PointBudget))).ToList();
+            Check("the curve: the first point after the first completed place, early points fast, the max level at ~85 % of this world's places",
+                  pr.DestinationsForLevel(2) == 1 && System.Math.Abs(atMax - 0.85 * total) <= 0.02 * total && at[0] < 0.15 * total,
+                  $"{total} places; 25/50/75 % of the points at {string.Join("/", at)} places; max level {pr.maxLevel} at {atMax} ({100.0 * atMax / total:0.0} %)");
+            LevelTo(6);
+            Check("every level-up gives exactly one point (no halfway points, no bonuses)", pr.level == 6 && pr.skillPoints == 5, $"level {pr.level}, {pr.skillPoints} points");
+            var firsts = active.Where(s => s.requires.Count == 0 && s.id != "auto_delivery").ToList();
+            Check("no skill has a level requirement: every first level can be bought at level 6 with a point",
+                  firsts.All(s => pr.CanUnlock(s.id) == ""), string.Join(", ", firsts.Where(s => pr.CanUnlock(s.id) != "").Select(s => $"{s.id}: {pr.CanUnlock(s.id)}")));
+            Check("every buyable level costs 1 (Request Pickup keeps its 3 for now); robot ranks all cost 1",
+                  active.All(s => s.cost == (s.id == "auto_delivery" ? 3 : 1)) && pr.robotUpgrades.All(u => Enumerable.Range(0, u.maxRank).All(r => u.CostOf(r) == 1)),
+                  string.Join(", ", active.Where(s => s.cost != 1).Select(s => $"{s.id} {s.cost}")));
+            var retired = new[] { "part_afterglow", "part_radar_plans", "area_collection" };
+            Check("Part Radar Plans, Area Sweep (the skill) and Part Afterglow are out of the shop: retired, not buyable, not counted",
+                  retired.All(id => pr.Skill(id) != null && pr.Skill(id).Retired && pr.CanUnlock(id) != "" && !g.UnlockSkill(id)) && !g.radar.HasPlans && t.Level("area_sweep") == 0,
+                  string.Join(", ", retired.Select(id => $"{id}: {pr.CanUnlock(id)}")));
+            Check("levels are bought in order: Deeper Pockets III needs II", pr.CanUnlock("pockets_3").StartsWith("Requires") && pr.CanUnlock("part_sense_2").StartsWith("Requires"), pr.CanUnlock("pockets_3"));
+            // a robot upgrade needs no level, only its robot built
+            var pj = g.workbench.P("retrobot");
+            foreach (var id in g.workbench.PartIds(pj)) { Take(id); it.DepositStation(id); }
+            g.workbench.InstallAll(pj);
+            var retro = g.workbench.RobotOf(pj);
+            retro.SetOperational();
+            int sp = pr.skillPoints;
+            bool upg = g.BuyRobotUpgrade("retro_persistence") && g.BuyRobotUpgrade("retro_strategist") == false && g.BuyRobotUpgrade("retro_set") && g.BuyRobotUpgrade("retro_strategist");
+            Check("robot upgrades share the pool and have no level requirement (Local Persistence, Set Awareness, Completion Strategist at level 6), 1 point per rank",
+                  upg && pr.skillPoints == sp - 3 && pr.RankOf("retro_strategist") == 1, $"points {sp} -> {pr.skillPoints}; {pr.CanBuyUpgrade("retro_persistence", true)}");
+
+            // Deeper Pockets I-X: 10 -> 20, battery pockets untouched; the Tool Belt keeps its 3 battery pockets
+            pr.skillPoints = 100;
+            int cap0 = g.inventory.capacity, bat0 = g.inventory.batteryPockets;
+            var caps = new List<int>();
+            for (int k = 1; k <= 10; k++) { g.UnlockSkill(k == 1 ? "pockets_1" : $"pockets_{k}"); caps.Add(g.inventory.capacity); }
+            bool beltOk = g.UnlockSkill("tool_belt") && g.inventory.batteryPockets == bat0 + 3 && g.inventory.capacity == 20;
+            Check("Deeper Pockets I-X: 10 parts, +1 per level, 20 at X; battery pockets kept (3, the Tool Belt +3)",
+                  cap0 == 10 && caps.SequenceEqual(Enumerable.Range(11, 10)) && bat0 == 3 && beltOk,
+                  $"{cap0} -> {string.Join(",", caps)}; batteries {bat0} -> {g.inventory.batteryPockets}");
+            bool overflow = !g.UnlockSkill("pockets_10");
+            Check("Deeper Pockets stops at X", overflow && pr.CanUnlock("pockets_10") == "Already unlocked", pr.CanUnlock("pockets_10"));
+
+            // Part Sense: range, parts, 2 s, cooldown per level; nothing in range costs no cooldown
+            var sense = new[] { (1, 2f, 1, 90f), (5, 6f, 3, 50f), (10, 15f, 8, 15f) };
+            Check("Part Sense data: range/parts/cooldown per level from the table, 2 s glow at every level",
+                  sense.All(x => Mathf.Approximately(PlayerTools.Tuned("part_sense", "range_m", x.Item1, 0), x.Item2) && (int)PlayerTools.Tuned("part_sense", "parts", x.Item1, 0) == x.Item3
+                                 && Mathf.Approximately(PlayerTools.Tuned("part_sense", "cooldown_s", x.Item1, 0), x.Item4))
+                  && Enumerable.Range(1, 10).All(l => Mathf.Approximately(PlayerTools.Tuned("part_sense", "duration_s", l, 0), 2)),
+                  string.Join("; ", Enumerable.Range(1, 10).Select(l => $"{l}: {PlayerTools.Tuned("part_sense", "range_m", l, 0)} m {PlayerTools.Tuned("part_sense", "parts", l, 0)} p {PlayerTools.Tuned("part_sense", "cooldown_s", l, 0)} s")));
+            g.UnlockSkill("part_sense");
+            var comps = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsRobotComponent && !g.robotReserved.Contains(i.id)).ToList();
+            var target = comps.OrderBy(i => (i.Position - g.player.transform.position).sqrMagnitude).First();
+            // a spot with no robot part within 2 m: nothing happens and the skill does not recharge
+            Vector3 far = Vector3.zero; bool foundFar = false;
+            for (int k = 0; k < 400 && !foundFar; k++)
+            {
+                var c = Shared.Pos(Random.Range(-8f, 8f), 0, Random.Range(-8f, 8f));
+                if (comps.All(i => (i.Position - c).sqrMagnitude > 3.5f * 3.5f)) { far = c; foundFar = true; }
+            }
+            g.player.Teleport(far);
+            yield return Frames(2);
+            int none = t.PartSense();
+            bool noCd = t.CooldownLeft("part_sense") == 0;
+            var near = target.Position + Vector3.right * 0.8f; near.y = 0;
+            g.player.Teleport(near);
+            yield return Frames(2);
+            int used = t.PartSense();
+            bool glows = t.senseIds.Contains(target.id) && t.senseIds.Count == 1 && Mathf.Abs(t.CooldownLeft("part_sense") - 90) < 1;
+            float t0 = Time.time;
+            while (Time.time - t0 < 1.0f) yield return null;
+            bool stillOn = t.senseIds.Count > 0;
+            while (Time.time - t0 < 2.3f) yield return null;
+            bool off = t.senseIds.Count == 0;
+            Check("Part Sense I: no robot part within 2 m → nothing, no cooldown; within range → the nearest glows for 2 s, then 90 s cooldown",
+                  foundFar && none == 0 && noCd && used == 1 && glows && stillOn && off,
+                  $"far spot {foundFar}: used {none}, cooldown {noCd}; near ({(target.Position - near).magnitude:0.0} m): used {used}, glows {glows}, at 1 s {stillOn}, at 2.3 s off {off}");
+            for (int k = 2; k <= 10; k++) g.UnlockSkill($"part_sense_{k}");
+            t.ResetState();
+            int inRange = comps.Count(i => (i.Position - g.player.transform.position).sqrMagnitude <= 15 * 15);
+            t.PartSense();
+            Check("Part Sense X: up to 8 parts within 15 m, cooldown 15 s", t.Level("part_sense") == 10 && t.senseIds.Count == Mathf.Min(8, inRange) && Mathf.Abs(t.CooldownLeft("part_sense") - 15) < 1,
+                  $"level {t.Level("part_sense")}, {t.senseIds.Count} glow of {inRange} in range, cooldown {t.CooldownLeft("part_sense"):0}");
+
+            // Sort Inventory: storage area, then type, same type together, otherwise stable
+            g.player.Teleport(Shared.Pos(g.layout.spawn.x, 0, g.layout.spawn.z));
+            foreach (var id in g.inventory.items.ToList()) { g.inventory.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); }
+            var pool = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart && !g.world.DefOf(i.id).IsToolItem && !g.world.DefOf(i.id).IsPegboardTool
+                                                     && !g.robotReserved.Contains(i.id) && t.AreaOf(i.id) != null).ToList();
+            var twoKinds = pool.GroupBy(i => i.defId).Where(gr => gr.Count() >= 2).Take(3).SelectMany(gr => gr.Take(2)).ToList();
+            var mixed = twoKinds.Concat(pool.Where(i => !twoKinds.Contains(i)).GroupBy(i => t.AreaOf(i.id)).Take(6).Select(gr => gr.First())).ToList();
+            var rng = new System.Random(7);
+            mixed = mixed.OrderBy(_ => rng.Next()).ToList();
+            foreach (var i in mixed) Take(i.id);
+            var before = g.inventory.items.ToList();
+            g.UnlockSkill("sort_inventory_1");
+            int sorted = t.SortInventory();
+            var after = g.inventory.items.ToList();
+            string Key(int id) => t.AreaOf(id) + "|" + g.world.DefOf(id).displayName + "|" + g.world.DefOf(id).id;
+            bool areaOrder = after.Zip(after.Skip(1), (a, b) => string.CompareOrdinal(Key(a), Key(b)) <= 0).All(x => x);
+            bool together = after.GroupBy(id => g.world.instances[id].defId).All(gr => { var ix = gr.Select(id => after.IndexOf(id)).ToList(); return ix.Max() - ix.Min() == ix.Count - 1; });
+            bool stable = after.GroupBy(id => g.world.instances[id].defId).All(gr => gr.SequenceEqual(before.Where(gr.Contains)));
+            Check("Sort Inventory I: the whole inventory by storage area, then type; same type together, otherwise stable; nothing lost; 30 s cooldown",
+                  sorted == 1 && before.Count >= 8 && after.Count == before.Count && after.All(before.Contains) && areaOrder && together && stable && Mathf.Abs(t.CooldownLeft("sort_inventory") - 30) < 1,
+                  $"{before.Count} parts; areas {string.Join(" ", after.Select(t.AreaOf))}; order ok {areaOrder}, together {together}, stable {stable}, cooldown {t.CooldownLeft("sort_inventory"):0}");
+            Check("Sort Inventory cooldowns per level: 30 28 26 24 22 20 17 14 12 10", Enumerable.Range(1, 10).Select(l => (int)PlayerTools.Tuned("sort_inventory", "cooldown_s", l, 0)).SequenceEqual(new[] { 30, 28, 26, 24, 22, 20, 17, 14, 12, 10 }), "");
+            Check("Sort Inventory while recharging does nothing", t.SortInventory() == 0, "");
+
+            // Automatic Storage Delivery and the placement rules (2026-10-30): their own section, run here too
+            yield return PlacementChecks();
+            g.player.enabled = false;
+            var other = pool.First(i => i.state == ItemState.InWorld);
+            Take(other.id);
+            Check("the skill bar shows Part Sense, Sort Inventory and Storage Delivery on keys 5, 6 and 7",
+                  t.Slot("part_sense") == 5 && t.Slot("sort_inventory") == 6 && t.Slot("storage_delivery") == 7 && PlayerTools.Usable.Select(u => t.Slot(u.id)).Distinct().Count() == PlayerTools.Usable.Length, "");
+
+            // Request Pickup: the old robot handover, separate in name and key
+            var rp = pr.Skill("auto_delivery");
+            Check("Request Pickup (H) is the old robot handover: its own name, cost 3, still needs Robot Task Coordination",
+                  rp.name == "Request Pickup" && rp.cost == 3 && rp.requires.SequenceEqual(new[] { "robot_coordination" }) && g.RobotHandover().Contains("Request Pickup"), g.RobotHandover());
+
+            // the skill menu
+            g.SetState("paused");
+            g.hud.OpenSub("skills");
+            yield return g.Capture(Path.Combine(outDir, "skills_menu.png"), 6);
+            var menu = string.Join(" | ", g.hud.GetComponentsInChildren<UnityEngine.UI.Text>().Select(x => x.text));
+            Check("the skill menu shows the shared points, level / max, now → next, the cost and that not everything can be maxed",
+                  menu.Contains("skill points") && menu.Contains("level 10 / 10") && menu.Contains("level 0 / 10") && menu.Contains("Next:") && menu.Contains("(1 pt)") && menu.Contains("can't max everything")
+                  && !menu.Contains("Part Radar Plans") && !menu.Contains("Part Afterglow") && !menu.Contains("Lv "),
+                  menu.Length > 400 ? menu.Substring(0, 400) : menu);
+            g.SetState("play");
+
+            // the normal respec is closed; the dev respec (F8, debug mode) refunds everything at what it cost
+            int spent = pr.SkillPointsSpent, all = pr.skillPoints + spent;
+            int normal = g.Respec();
+            int dev = g.Respec(true);
+            Check("no free respec in the menu; the dev respec gives every point back, none created; nothing carried is lost",
+                  normal == 0 && dev == spent && pr.skillPoints == all && pr.unlocked.Count == 0 && pr.RanksBought == 0 && g.inventory.capacity == 10 && g.inventory.Has(other.id),
+                  $"normal {normal}; dev {dev} of {spent}; points {pr.skillPoints} of {all}");
+
+            // save and load keep the new system as it is: no migration
+            g.UnlockSkill("part_sense"); g.UnlockSkill("pockets_1"); g.BuyRobotUpgrade("retro_speed");
+            int pts = pr.skillPoints, lvl = pr.level;
+            var had = pr.unlocked.OrderBy(x => x).ToList();
+            g.SaveGame("autotest_skills");
+            int toasts = g.hud.toastLog.Count;
+            g.LoadGame("autotest_skills");
+            yield return Frames(5);
+            pr = g.progression;
+            Check("save and load keep level, points, skills and robot ranks; a current save is not migrated",
+                  pr.level == lvl && pr.skillPoints == pts && pr.unlocked.OrderBy(x => x).SequenceEqual(had) && pr.RankOf("retro_speed") == 1 && pr.migratedFrom == null
+                  && !g.hud.toastLog.Skip(toasts).Any(x => x.Contains("NEW SKILL SYSTEM")) && g.inventory.capacity == 11,
+                  $"level {pr.level}/{lvl}, points {pr.skillPoints}/{pts}, skills {string.Join(",", pr.unlocked)}");
+            File.Delete(SaveSystem.PathOf("autotest_skills"));
+        }
+
+        /// <summary>Skill revamp migration A on a copy of an older save (--apslot, default premig_slot1; the fixture itself
+        /// is never written): level recomputed from completed destinations, purchases reset, the earned points unspent,
+        /// robots / blueprints / pegboard / carried parts kept, a backup, one notice, and no second migration.</summary>
+        IEnumerator SkillMigrateChecks(string fixture)
+        {
+            const string slot = "autotest_skillmig";
+            var raw = Json.Obj(Json.Parse(File.ReadAllText(SaveSystem.PathOf(fixture))));
+            File.Copy(SaveSystem.PathOf(fixture), SaveSystem.PathOf(slot), true);
+            var backups = Path.Combine(SaveSystem.Dir, "backup");
+            foreach (var f in Directory.Exists(backups) ? Directory.GetFiles(backups, slot + ".*") : new string[0]) File.Delete(f);
+            var rp = Json.Obj(raw["progression"]);
+            int oldLevel = Json.Int(rp, "level", 1), oldPoints = Json.Int(rp, "skill_points"), oldSkills = Json.Arr(rp.GetValueOrDefault("unlocked")).Count;
+            var opBefore = (Json.Obj(raw.GetValueOrDefault("robots")) ?? new Dictionary<string, object>()).Where(kv => Json.Bool(Json.Obj(kv.Value), "operational")).Select(kv => kv.Key).OrderBy(x => x).ToList();
+            var inv0 = Json.Obj(raw["inventory"]);
+            int invBefore = Json.Arr(inv0.GetValueOrDefault("items")).Count + Json.Arr(inv0.GetValueOrDefault("batteries")).Count;   // batteries are saved apart
+            int toasts = g.hud.toastLog.Count;
+            g.LoadGame(slot);
+            yield return Frames(5);
+            var pr = g.progression;
+            var said = g.hud.toastLog.Skip(toasts).ToList();
+            int earned = pr.LevelFor(pr.DestinationsCompleted);
+            Check("an older save is migrated once: level from its completed destinations, every purchase reset, the earned points (level − 1) unspent, old spent points not added",
+                  Json.Int(rp, "version", 2) < Progression.SaveVersion && pr.level == earned && pr.skillPoints == pr.level - 1 && pr.unlocked.Count == 0 && pr.RanksBought == 0,
+                  $"{fixture}: before level {oldLevel}, {oldPoints} points, {oldSkills} skills; now level {pr.level} ({pr.DestinationsCompleted} of {pr.destinationTotal} destinations), {pr.skillPoints} points");
+            var opAfter = g.robots.Where(r => r.Operational).Select(r => r.id).OrderBy(x => x).ToList();
+            Check("built robots, blueprints and the pegboard are kept; no carried part is lost even over the new capacity",
+                  opAfter.SequenceEqual(opBefore) && g.inventory.Parts + g.inventory.Batteries == invBefore && g.workbench.projects.Where(g.workbench.Operational).All(g.workbench.Unlocked),
+                  $"robots {string.Join(",", opBefore)} -> {string.Join(",", opAfter)}; carried {invBefore} -> {g.inventory.Parts} parts + {g.inventory.Batteries} batteries (capacity {g.inventory.capacity}); hung {g.builder.pegboard.Hung}");
+            var bak = Directory.Exists(backups) ? Directory.GetFiles(backups, slot + ".pre-skills-*.json") : new string[0];
+            var now = Json.Obj(Json.Parse(File.ReadAllText(SaveSystem.PathOf(slot))));
+            Check("a backup of the file as it was, the slot saved again at once in the new version, one clear notice",
+                  bak.Length == 1 && File.ReadAllText(bak[0]) == File.ReadAllText(SaveSystem.PathOf(fixture)) && Json.Int(Json.Obj(now["progression"]), "version") == Progression.SaveVersion
+                  && said.Count(x => x.Contains("NEW SKILL SYSTEM") && x.Contains($"level {pr.level}") && x.Contains($"{pr.skillPoints} skill point")) == 1,
+                  $"backups {bak.Length}; saved version {Json.Int(Json.Obj(now["progression"]), "version")}; said: {string.Join(" | ", said)}");
+            g.SetState("paused");
+            g.hud.OpenSub("skills");
+            yield return g.Capture(Path.Combine(outDir, "skillmig_menu.png"), 6);
+            g.SetState("play");
+            int pts = pr.skillPoints;
+            toasts = g.hud.toastLog.Count;
+            g.LoadGame(slot);
+            yield return Frames(5);
+            pr = g.progression;
+            var bak2 = Directory.GetFiles(backups, slot + ".pre-skills-*.json");
+            Check("loading it again does not migrate again: same points, no new backup, no notice",
+                  pr.migratedFrom == null && pr.skillPoints == pts && bak2.Length == 1 && !g.hud.toastLog.Skip(toasts).Any(x => x.Contains("NEW SKILL SYSTEM")), $"points {pts} -> {pr.skillPoints}, backups {bak2.Length}");
+            File.Delete(SaveSystem.PathOf(slot));
+            if (File.Exists(SaveSystem.PathOf(slot) + ".bak")) File.Delete(SaveSystem.PathOf(slot) + ".bak");
+            foreach (var f in bak2) File.Delete(f);
+        }
+
+        /// <summary>Placement rules 2026-10-30 (docs/SKILL_REVAMP.md §1.6): a click and Automatic Storage Delivery both
+        /// need the right part in hand and its own storage place under the crosshair, within reach and with room; the
+        /// inventory is never searched for something that fits. A click stores the part in hand only, then the hand
+        /// takes the next part in the inventory order; ASD stores up to its level of the held part's kind, the held one
+        /// counted, from anywhere in the inventory; Sort Inventory sets the order the hotbar shows and the hand follows.</summary>
+        IEnumerator PlacementChecks()
+        {
+            var pr = g.progression;
+            var t = g.tools;
+            var it = g.interaction;
+            var inv = g.inventory;
+            g.player.enabled = false;
+            foreach (var r in g.robots) r.enabled = false;
+            it.enabledInput = false;
+            pr.skillPoints += 20;
+            t.ResetState();
+            void Empty() { foreach (var id in inv.items.ToList()) { inv.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); } }
+            void Hold(int id) => inv.SelectSlot(inv.Stacks().FindIndex(s => s.ids.Contains(id)));
+            bool Ordinary(ItemInstance i) => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart && !g.world.DefOf(i.id).IsToolItem && !g.world.DefOf(i.id).IsPegboardTool
+                                              && !g.robotReserved.Contains(i.id) && t.AreaOf(i.id) != null && g.db.boxes.ContainsKey(g.world.DefOf(i.id).storageBox);
+            int Room(string b) => g.db.BoxCapacity(b) - g.storage.Stored(b).Count;
+            Empty();
+            // the kind K: the most loose copies its storage place has room for (a drawer, so it can be aimed at)
+            var kinds = g.world.instances.Where(Ordinary).GroupBy(i => i.defId)
+                .Select(gr => (def: gr.Key, box: g.world.DefOf(gr.First().id).storageBox, n: gr.Count()))
+                .Where(k => g.units[Json.Str(g.db.boxes[k.box], "unit")].type == "drawer_cabinet" && g.StraysIn(k.box).Count == 0)
+                .OrderByDescending(k => Mathf.Min(k.n, Room(k.box))).ToList();
+            var K = kinds[0];
+            var O = kinds.First(k => k.box != K.box && k.n >= 3);
+            string destK = K.box, destO = O.box;
+            int NextK() { var i = g.world.instances.First(x => x.defId == K.def && Ordinary(x)); Take(i.id); return i.id; }
+            int NextO() { var i = g.world.instances.First(x => x.defId == O.def && Ordinary(x)); Take(i.id); return i.id; }
+            int StoredK() => g.storage.Stored(destK).Count;
+            bool Free() => t.CooldownLeft("storage_delivery") == 0;
+            Check("placement test set-up: a kind with enough loose copies and room (and a second kind with its own place)", Mathf.Min(K.n, Room(destK)) >= 10,
+                  $"K {g.db.Get(K.def).displayName} → {destK}: {K.n} loose, room {Room(destK)}; O {g.db.Get(O.def).displayName} → {destO}");
+            if (!pr.Has("storage_delivery")) g.UnlockSkill("storage_delivery_1");
+
+            // 1. the wrong part in hand, the right one further in: neither a click nor ASD stores anything
+            int o1 = NextO(), k1 = NextK();
+            Hold(o1);
+            yield return AimAtDest(destK);
+            it.UpdateTarget();
+            int s0 = StoredK();
+            it.Primary();
+            int asd1 = t.StorageDelivery();
+            yield return Frames(5);
+            Check("1. wrong part in hand, the right one further in the inventory: no click placement and no ASD, no cooldown",
+                  it.targetType == "dest" && it.targetDest == destK && StoredK() == s0 && inv.Has(k1) && inv.Has(o1) && asd1 == 0 && Free(),
+                  $"aimed {it.targetType} {it.targetDest}; stored {s0} -> {StoredK()}; ASD {asd1}, cooldown {t.CooldownLeft("storage_delivery"):0}");
+
+            // 2. the right part in hand, the wrong place under the crosshair
+            Hold(k1);
+            yield return AimAtDest(destO);
+            it.UpdateTarget();
+            int sO = g.storage.Stored(destO).Count;
+            it.Primary();
+            int asd2 = t.StorageDelivery();
+            yield return Frames(5);
+            Check("2. right part in hand, wrong place under the crosshair: nothing stored, no cooldown",
+                  it.targetDest == destO && g.storage.Stored(destO).Count == sO && StoredK() == s0 && inv.Has(k1) && asd2 == 0 && Free(), $"ASD {asd2}");
+
+            // 3. the right part and place, but out of reach, or the place full
+            var front = AimPoint(destK);
+            var away = front.eye + (front.eye - front.target).normalized * 3.5f;
+            LookFrom(away, front.target);
+            yield return Frames(3);
+            it.UpdateTarget();
+            string farType = it.targetType;
+            int asd3 = t.StorageDelivery();
+            bool farOk = farType != "dest" && asd3 == 0 && Free() && StoredK() == s0;
+            float dist = (away - front.target).magnitude;
+            var box = g.db.boxes[destK];
+            var cap0 = box.GetValueOrDefault("capacity");
+            box["capacity"] = (double)StoredK();   // full, for this check only
+            yield return AimAtDest(destK);
+            it.UpdateTarget();
+            it.Primary();
+            int asd3b = t.StorageDelivery();
+            yield return Frames(5);
+            bool fullOk = StoredK() == s0 && inv.Has(k1) && asd3b == 0 && Free();
+            if (cap0 == null) box.Remove("capacity"); else box["capacity"] = cap0;
+            Check("3. right part and place, but out of reach or the place full: nothing stored, no cooldown",
+                  farOk && fullOk, $"{dist:0.0} m away (reach {it.Reach:0.0}): target {farType}, ASD {asd3}; full: ASD {asd3b}, stored {s0} -> {StoredK()}");
+
+            // 4. a click stores the part in hand only; the hand then takes the next part in the order, whatever it is
+            Empty();
+            k1 = NextK(); o1 = NextO(); int k2 = NextK();   // order K, O, K
+            Hold(k1);
+            yield return AimAtDest(destK);
+            it.UpdateTarget();
+            it.Primary();
+            yield return Frames(15);
+            int heldAfter = inv.HeldId();
+            it.UpdateTarget();
+            it.Primary();   // O in hand: refused, the K further in is not taken
+            yield return Frames(15);
+            Check("4. a click stores exactly the part in hand, then the next in the inventory order comes up (no skipping to a part that fits)",
+                  StoredK() == s0 + 1 && !inv.Has(k1) && heldAfter == o1 && inv.Has(o1) && inv.Has(k2) && StoredK() == s0 + 1,
+                  $"stored {s0} -> {StoredK()}; in hand after: {(heldAfter >= 0 ? g.world.DefOf(heldAfter).displayName : "nothing")} (expected {g.db.Get(O.def).displayName})");
+
+            // 5. ASD I counts the part in hand and stores one; 8. a click still works during its cooldown
+            Hold(k2);
+            int k3 = NextK();
+            it.UpdateTarget();
+            int s5 = StoredK();
+            int asd5 = t.StorageDelivery();
+            yield return Frames(15);
+            bool five = asd5 == 1 && StoredK() == s5 + 1 && !inv.Has(k2) && inv.Has(k3) && Mathf.Abs(t.CooldownLeft("storage_delivery") - 90) < 1;
+            Hold(k3);
+            it.UpdateTarget();
+            it.Primary();
+            yield return Frames(15);
+            Check("5. ASD I: the part in hand counts, one part stored, no more; cooldown 90 s", five, $"ASD {asd5}, stored {s5} -> {s5 + asd5}");
+            Check("8. a click stores while ASD recharges", !inv.Has(k3) && StoredK() == s5 + 2 && t.CooldownLeft("storage_delivery") > 80 && t.StorageDelivery() == 0, $"stored {StoredK() - s5} of 2");
+
+            // 6. ASD III takes more of the held kind from anywhere in the inventory, the held one counted, up to 3
+            g.UnlockSkill("storage_delivery_2"); g.UnlockSkill("storage_delivery_3");
+            t.ResetState();
+            Empty();
+            int a1 = NextK(); int b1 = NextO(); int a2 = NextK(); int b2 = NextO(); int a3 = NextK(); int a4 = NextK();   // K O K O K K
+            Hold(a2);
+            yield return AimAtDest(destK);
+            it.UpdateTarget();
+            int s6 = StoredK();
+            int asd6 = t.StorageDelivery();
+            yield return Frames(15);
+            Check("6. ASD III after a valid aim: the held part and two more of its kind from elsewhere in the inventory (3 = its level), other kinds untouched, cooldown 70 s",
+                  asd6 == 3 && StoredK() == s6 + 3 && !inv.Has(a2) && !inv.Has(a1) && !inv.Has(a3) && inv.Has(a4) && inv.Has(b1) && inv.Has(b2) && Mathf.Abs(t.CooldownLeft("storage_delivery") - 70) < 1,
+                  $"ASD {asd6}; left: {string.Join(", ", inv.items.Select(i => g.world.DefOf(i).displayName))}");
+
+            // 7. Sort Inventory sets the real order: the hotbar shows it and a sorted group comes up one by one
+            t.ResetState();
+            Empty();
+            int c1 = NextK(); int d1 = NextO(); int c2 = NextK(); int d2 = NextO(); int c3 = NextK();   // K O K O K
+            if (!pr.Has("sort_inventory")) g.UnlockSkill("sort_inventory_1");
+            t.SortInventory();
+            var order = inv.items.ToList();
+            bool barSame = inv.Stacks().SelectMany(s => s.ids).SequenceEqual(order);
+            bool barStacked = inv.Stacks().Select(s => s.defId).SequenceEqual(order.Select(i => g.world.instances[i].defId).Distinct());   // one slot per sorted group
+            var ks = order.Where(i => g.world.instances[i].defId == K.def).ToList();
+            bool grouped = order.IndexOf(ks[^1]) - order.IndexOf(ks[0]) == ks.Count - 1;
+            Hold(ks[0]);
+            yield return AimAtDest(destK);
+            var held7 = new List<int>();
+            for (int k = 0; k < 3; k++)
+            {
+                it.UpdateTarget();
+                held7.Add(inv.HeldId());
+                it.Primary();
+                yield return Frames(15);
+            }
+            int afterGroup = inv.HeldId();
+            Check("7. Sort Inventory: the hotbar shows the sorted order, each group in one slot; clicks store the K group one by one, then the next kind comes up",
+                  barSame && barStacked && grouped && held7.SequenceEqual(ks) && !ks.Any(inv.Has) && afterGroup >= 0 && g.world.instances[afterGroup].defId == O.def,
+                  $"order {string.Join(" ", order.Select(i => g.world.instances[i].defId == K.def ? "K" : "O"))}; bar same {barSame}, stacked {barStacked}; stored {held7.Count(i => !inv.Has(i))} of {ks.Count}");
+            int e1 = NextK(); NextK();
+            Hold(e1);
+            it.UpdateTarget();
+            Check("no Store all at a storage place: with two that fit, the hint offers [LMB] only", it.Describe().hint == "[LMB] Store here", it.Describe().hint);
+            Empty();
+            t.ResetState();
+            it.enabledInput = true;
+        }
+
+        /// <summary>Placement rules 2026-10-30 on the pegboard (docs/PEGBOARD.md): only the tool in hand is hung, at its
+        /// own slot within reach; the inventory is never searched for a tool that fits; no G "Hang all"; the next item
+        /// in the inventory order comes up. The first-tool reward still comes with the first click.</summary>
+        IEnumerator PegPlacementChecks()
+        {
+            var it = g.interaction;
+            var inv = g.inventory;
+            var pb = g.builder.pegboard;
+            var cfg = pb.cfg;
+            g.player.enabled = false;
+            foreach (var r in g.robots) r.enabled = false;
+            it.enabledInput = false;
+            void Empty() { foreach (var id in inv.items.ToList()) { inv.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); } }
+            void Hold(int id) => inv.SelectSlot(inv.Stacks().FindIndex(s => s.ids.Contains(id)));
+            string Slot(int id) => g.world.DefOf(id).PegSlot;
+            bool Plain(ItemDefinition d) => !cfg.slotById[d.PegSlot].IsChild && cfg.slotById[d.PegSlot].children.Count == 0;   // not a set's holder or piece
+            IEnumerator Aim(string slot, float back)
+            {
+                var at = pb.SlotCentre(slot);
+                LookFrom(at - pb.transform.forward * back + Vector3.down * 0.15f, at);
+                yield return Frames(2);
+                it.UpdateTarget();
+            }
+            Empty();
+            var loose = g.world.instances.Where(i => i.state == ItemState.InWorld && g.world.DefOf(i.id).IsPegboardTool && Plain(g.world.DefOf(i.id)) && !pb.IsOccupied(g.world.DefOf(i.id).PegSlot)).ToList();
+            int t1 = loose[0].id;
+            int t2 = loose.First(i => Vector3.Distance(pb.SlotCentre(Slot(i.id)), pb.SlotCentre(Slot(t1))) > 0.6f).id;   // away from t1's aim assist
+            int part = g.world.instances.First(i => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsPegboardTool && !g.world.DefOf(i.id).IsRobotPart
+                                                     && !g.world.DefOf(i.id).IsToolItem && !g.robotReserved.Contains(i.id)).id;
+            int hung0 = pb.Hung;
+            bool firstFree = !g.pegRewards.Has("part_radar");
+
+            // P1. the wrong item in hand (a part, then another tool), the right tool further in: a click hangs nothing
+            Take(part); Take(t2); Take(t1);   // order: part, t2, t1
+            Hold(part);
+            yield return Aim(Slot(t1), 1.1f);
+            string aimed = it.targetType + " " + it.targetPeg;
+            it.Primary();
+            yield return Frames(2);
+            bool p1a = it.targetType == "peg" && it.targetPeg == Slot(t1) && pb.Hung == hung0 && inv.Has(t1) && inv.Has(part);
+            Hold(t2);
+            yield return Aim(Slot(t1), 1.1f);
+            var info = it.Describe();
+            it.Primary();
+            yield return Frames(2);
+            bool p1b = it.targetPeg == Slot(t1) && info.tone == -1 && pb.Hung == hung0 && inv.Has(t1) && inv.Has(t2);
+            Check("P1. wrong item in hand (a part, or another tool), the right tool further in the inventory: a click hangs nothing",
+                  p1a && p1b, $"aimed {aimed}; part {p1a}, other tool {p1b} (hint '{info.hint}'); hung {hung0} -> {pb.Hung}");
+
+            // P2. G at the pegboard: no Hang all
+            Hold(t1);
+            yield return Aim(Slot(t1), 1.1f);
+            info = it.Describe();
+            it.DepositAll();
+            yield return Frames(2);
+            Check("P2. no G Hang all: G at the board hangs nothing; the hint offers [LMB] only",
+                  pb.Hung == hung0 && inv.Has(t1) && inv.Has(t2) && info.tone == 1 && info.hint.StartsWith("[LMB]") && !info.hint.Contains("[G]"), $"hint '{info.hint}', hung {pb.Hung}");
+
+            // P3. the right tool and slot, but out of reach
+            yield return Aim(Slot(t1), it.Reach + 1.5f);
+            string far = it.targetType;
+            it.Primary();
+            yield return Frames(2);
+            Check("P3. right tool in hand, its slot out of reach: not targeted, nothing hung", far != "peg" && pb.Hung == hung0 && inv.Has(t1), $"target '{far}' from {it.Reach + 1.5f:0.0} m");
+
+            // P4. a click hangs exactly the tool in hand, then the next item in the order comes up (no skip to a tool)
+            Empty();
+            Take(t1); Take(part); Take(t2);   // order: t1, part, t2
+            Hold(t1);
+            int said0 = g.hud.toastLog.Count;
+            yield return Aim(Slot(t1), 1.1f);
+            it.Primary();
+            yield return Frames(2);
+            int next = inv.HeldId();
+            var said = g.hud.toastLog.Skip(said0).ToList();
+            yield return Aim(Slot(t2), 1.1f);
+            it.Primary();   // the part in hand: t2 further in is not hung
+            yield return Frames(2);
+            Check("P4. a click hangs only the tool in hand, then the next item in the inventory order is in hand (no skip to the other tool)",
+                  pb.IsOccupied(Slot(t1)) && !inv.Has(t1) && pb.Hung == hung0 + 1 && next == part && !pb.IsOccupied(Slot(t2)) && inv.Has(t2),
+                  $"hung {g.world.DefOf(t1).displayName}: {pb.IsOccupied(Slot(t1))}; in hand after: {(next >= 0 ? g.world.DefOf(next).displayName : "nothing")}; t2 hung {pb.IsOccupied(Slot(t2))}");
+            if (firstFree)
+                Check("P5. the first tool hung by a click still unlocks the Part Radar blueprint once",
+                      g.pegRewards.Has("part_radar") && g.radar.HasPlans && said.Count(t => t.Contains("Blueprint unlocked: Part Radar")) == 1, string.Join(" | ", said));
+
+            // P6. the next tool after a hang: the right one in hand at its slot hangs
+            Hold(t2);
+            yield return Aim(Slot(t2), 1.1f);
+            it.Primary();
+            yield return Frames(2);
+            Check("P6. the right tool in hand at its own slot hangs", pb.IsOccupied(Slot(t2)) && !inv.Has(t2) && pb.Hung == hung0 + 2 && inv.HeldId() == part, $"hung {pb.Hung}");
+            Empty();
+            it.enabledInput = true;
+        }
+
+        (Vector3 eye, Vector3 target) AimPoint(string dest)
+        {
+            var d = g.db.boxes[dest];
+            var u = g.units[Json.Str(d, "unit")];
+            Vector3 target = u.type == "drawer_cabinet" ? (Vector3)u.FrontWorld(u.SlotOf(dest)).GetColumn(3)
+                : (Vector3)u.DestWorld(dest).GetColumn(3) + Vector3.up * Mathf.Min(StorageUnit.Inner(d).y, 0.25f) * 0.5f;
+            var eye = target + (-u.transform.forward).normalized * 1.0f;
+            eye.y = Mathf.Clamp(target.y + 0.35f, 0.9f, 1.75f);
+            return (eye, target);
+        }
+
         IEnumerator RespecChecks()
         {
             var wb = g.workbench;
@@ -3368,12 +3857,12 @@ namespace WorkshopWreckage
             pr.level = 12;
             pr.skillPoints = 30;   // QA: a budget to spend; the check is that respec neither creates nor loses any
             int total = pr.skillPoints + pr.SkillPointsSpent;
-            foreach (var s in new[] { "pockets_1", "pockets_2", "quick_hands", "robot_coordination", "destination_orders" }) g.UnlockSkill(s);
+            foreach (var s in new[] { "pockets_1", "pockets_2", "tool_belt", "quick_hands", "robot_coordination", "destination_orders" }) g.UnlockSkill(s);
             foreach (var u in new[] { "retro_capacity", "retro_capacity", "retro_speed" }) g.BuyRobotUpgrade(u);
             Check("previews: the next rank shows now → after", g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_speed"), 2).Contains("→")
                   && g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_persistence"), 1).Contains("m"), g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_speed"), 2));
             Check("previews: a capped stat says so", g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_reach"), 3).Contains("→"), g.hud.UpgradePreview(pr, retro, pr.Upgrade("retro_reach"), 3));
-            // a full inventory (15 with both pockets) and a robot carrying a full load of 3
+            // a full inventory (12 with two pocket levels) and a robot carrying a full load of 3
             var loose = g.world.instances.Where(i => i.state == ItemState.InWorld && g.db.CanRobotCarry(i.defId) && !g.world.DefOf(i.id).IsRobotPart).Select(i => i.id).Take(18).ToList();
             foreach (var id in loose.Take(g.inventory.capacity)) Take(id);
             int held = g.inventory.Count;
@@ -3382,7 +3871,7 @@ namespace WorkshopWreckage
             int mods = g.world.instances.Count(i => i.state == ItemState.Installed);
             retro.preferDef = g.world.instances[loose[0]].defId; retro.orderState = "WORKING";   // a lasting order (Destination Orders)
             int spent = pr.SkillPointsSpent;
-            int back = g.Respec();
+            int back = g.Respec(true);   // the dev respec (F8): the menu has none (skill revamp)
             Check("respec: every point back, none created", back == spent && pr.SkillPointsSpent == 0 && pr.skillPoints == total, $"spent {spent}, back {back}, now {pr.skillPoints} of {total}");
             Check("respec: skills and upgrades are gone, their effects too", pr.unlocked.Count == 0 && pr.RanksBought == 0 && g.inventory.capacity == 10 && retro.Capacity == 1,
                   $"{pr.unlocked.Count} skills, {pr.RanksBought} ranks, inventory {g.inventory.capacity}, Retrobot capacity {retro.Capacity}");
@@ -3391,9 +3880,8 @@ namespace WorkshopWreckage
                   $"inventory {g.inventory.Count}/{g.inventory.capacity} (had {held}), Retrobot carries {retro.carried.Count}/{retro.Capacity}");
             Check("respec: robot modules stay installed; a lasting order without Destination Orders ends", g.world.instances.Count(i => i.state == ItemState.Installed) == mods && retro.orderState == "",
                   $"installed {mods} -> {g.world.instances.Count(i => i.state == ItemState.Installed)}, order '{retro.orderState}'");
-            Check("respec: prerequisites hold again (Tool Belt needs Deeper Pockets)", pr.CanUnlock("pockets_2") != "" && pr.CanUnlock("pockets_1") == "", pr.CanUnlock("pockets_2"));
-            pr.level = 11;
-            Check("respec: closed below the respec level", g.Respec() == 0 && pr.respecLevel == 12, $"respec level {pr.respecLevel}");
+            Check("respec: levels are bought in order again (Deeper Pockets II needs I)", pr.CanUnlock("pockets_2") != "" && pr.CanUnlock("pockets_1") == "", pr.CanUnlock("pockets_2"));
+            Check("respec: no free respec in the menu at any level (only the dev respec)", g.Respec() == 0 && pr.respecLevel == int.MaxValue, $"respec level {pr.respecLevel}");
             // telemetry: real counts, saved with the robot
             retro.stats.Picked(load[0], 10); retro.stats.Dropped(load[0], g.world.instances[load[0]].defId, 22, false); retro.stats.Tick(30, "WORKING"); retro.stats.Tick(10, "STAGING FULL");
             g.SaveGame("autotest_respec");
@@ -3515,12 +4003,11 @@ namespace WorkshopWreckage
             g.SetState("paused");
             g.hud.OpenSub("settings");
             yield return g.Capture(Path.Combine(outDir, "tray_settings.png"), 6);
-            // the skills screen: a skill with ranks is one row (its rank, the next rank's cost); levels 2-12 pay
-            // 2 points each, 3 at 5 and 10, plus a point halfway through every level of 2+ completions
-            int pts0 = g.progression.skillPoints;
+            // the skills screen: a skill with levels is one row; every level-up pays exactly one point (skill revamp)
+            int pts0 = g.progression.skillPoints, lv0 = g.progression.level;
             LevelTo(12);
             int gained = g.progression.skillPoints - pts0;
-            Check("skill points are also paid halfway between levels", gained > 24, $"levels 1-12 paid {gained} points (24 without the halfway points)");
+            Check("every level-up pays exactly one skill point", gained == 12 - lv0, $"levels {lv0}-12 paid {gained} points");
             foreach (var id in new[] { "magnet_1", "magnet_2", "magnet_3", "part_sense", "part_sense_2" }) g.UnlockSkill(id);
             g.hud.OpenSub("skills");
             yield return g.Capture(Path.Combine(outDir, "tray_skills.png"), 6);
@@ -3777,8 +4264,8 @@ namespace WorkshopWreckage
                   $"{pr.destinationTotal} on the curve, {g.CompletableDestinations()} completable");
             // P-08: level 25 at 414 of 500 on Standard
             if (standard)
-                Check("P-08: level 25 needs 414 completed destinations on Standard", pr.LevelFor(414) == 25 && pr.LevelFor(413) == 24, $"413 -> {pr.LevelFor(413)}, 414 -> {pr.LevelFor(414)} (of {pr.destinationTotal})");
-
+                Check("P-08: the max level needs ~85 % of the completed destinations (preliminary curve)", System.Math.Abs(pr.DestinationsForLevel(pr.maxLevel) - 0.85 * pr.destinationTotal) <= 0.02 * pr.destinationTotal,
+                      $"max level {pr.maxLevel} at {pr.DestinationsForLevel(pr.maxLevel)} of {pr.destinationTotal}");
             // R-01/R-02: robot intelligence is bought, never given by the player's level
             var retro = g.robots.First(r => r.type == "retrobot");
             // a started destination whose last copy lies within Retrobot's reach, stored by Retrobot itself
@@ -3831,7 +4318,7 @@ namespace WorkshopWreckage
                 int before = pr.skillPoints;
                 pr.upgradeRanks["retro_persistence"] = 2;   // 1 + 1 points
                 pr.skillPoints -= 2;
-                int back = pr.RefundRobotUpgrades();
+                int back = pr.RefundRobotUpgrades(true);   // the dev refund: the normal one is closed (skill revamp)
                 Check("E-04: a robot respec returns exactly the robot points invested", back == 2 && pr.skillPoints == before && pr.RanksBought == 0, $"{back} back, {pr.skillPoints} (was {before})");
             }
             // E-06: the inventory audit accounts for every remaining part, wherever it is
@@ -4028,8 +4515,8 @@ namespace WorkshopWreckage
             var cfgRobots = Robot.AllConfig();
             int maxBp = wb.projects.Where(p => p.after == null).Max(p => p.level), maxCraft = wb.projects.Max(p => p.level);
             int dests = g.CompletableDestinations();
-            Check("every blueprint level is reachable by completing destinations (robots by 75% of them, crafted Hoverbots and level 25 by 85%)",
-                  pr.DestinationsForLevel(maxBp) <= dests * 0.75 && pr.DestinationsForLevel(maxCraft) <= dests * 0.85 && pr.DestinationsForLevel(pr.maxLevel) <= dests * 0.85,
+            Check("every blueprint level is reachable by completing destinations (robots by 75% of them, crafted Hoverbots and the max level by about 85%)",
+                  pr.DestinationsForLevel(maxBp) <= dests * 0.75 && pr.DestinationsForLevel(maxCraft) <= dests * 0.85 && pr.DestinationsForLevel(pr.maxLevel) <= dests * 0.87,
                   $"{g.presetId}: {dests} destinations; level {maxBp} at {pr.DestinationsForLevel(maxBp)}, level {maxCraft} at {pr.DestinationsForLevel(maxCraft)}, level {pr.maxLevel} at {pr.DestinationsForLevel(pr.maxLevel)}");
 
             // let him work on his own (sped up), photographing a pick-up and a carry
@@ -4566,7 +5053,7 @@ namespace WorkshopWreckage
             for (int k = 0; k < 50; k++) f.OnZoneRestored(k, 25);
             bool sortsNoLevel = f.level == 1 && f.xp > 0;
             f.OnDefinitionCompleted(-1, 3);
-            bool firstGivesTwo = f.level == 2 && f.skillPoints == 2;
+            bool firstGivesTwo = f.level == 2 && f.skillPoints == 1;
             f.OnDefinitionCompleted(-1, 3);
             bool once = f.DestinationsCompleted == 1;
             var inc = Enumerable.Range(2, f.maxLevel - 1).Select(l => f.DestinationsForLevel(l) - f.DestinationsForLevel(l - 1)).ToList();
@@ -4580,12 +5067,13 @@ namespace WorkshopWreckage
             var legacy = Json.Obj(Json.Parse(saved));
             legacy.Remove("completed_destinations");
             legacy["level"] = 3.0;
+            legacy.Remove("version");
             var m = FreshProgression();
             m.Load(legacy);
             bool migrated = m.DestinationsCompleted == f.DestinationsCompleted && m.level == f.level;
             Check("levels come only from destinations: 5000 single sorts give level 1, the first completion level 2, the curve rises, points survive save/load and old saves",
                   sortsNoLevel && firstGivesTwo && once && rising && roundTrip && migrated,
-                  $"sorts only: level {(sortsNoLevel ? 1 : 0)}; first completion -> level 2 with 2 points {firstGivesTwo}; once {once}; increments {string.Join(" ", inc)}; round trip {roundTrip}; legacy {migrated} (level {m.level})");
+                  $"sorts only: level {(sortsNoLevel ? 1 : 0)}; first completion -> level 2 with 1 point {firstGivesTwo}; once {once}; increments {string.Join(" ", inc)}; round trip {roundTrip}; legacy {migrated} (level {m.level})");
         }
 
         IEnumerator MigrationChecks()

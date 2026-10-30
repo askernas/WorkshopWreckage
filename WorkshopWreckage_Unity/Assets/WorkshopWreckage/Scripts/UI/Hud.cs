@@ -310,7 +310,7 @@ namespace WorkshopWreckage
             MakeButton(m, "Load Game", () => ShowSub("load"));
             MakeButton(m, "Settings", () => ShowSub("settings"));
             MakeButton(m, "Quit", Application.Quit);
-            _mainTitleBits.Add(Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel select · 1-9 skills (glove, scan, supermagnet, sweep) · K skills · U robots · R/T/H/J robots · Tab log · F5/F9 save/load", 14, Muted, 40).gameObject);
+            _mainTitleBits.Add(Para(m, "WASD move · Q/E turn · Shift sprint · Ctrl crouch · Left mouse pick up / store · G store all\nF inspect · Z drop · Wheel select · 1-9 skills (glove, scan, supermagnet, sweep, sense, sort, delivery) · K skills · U robots · R/T/J robots · H request pickup · Tab log · F5/F9 save/load", 14, Muted, 40).gameObject);
 
             var ng = Screen("newgame", 560);
             Title(ng, "NEW GAME", 34);
@@ -601,13 +601,7 @@ namespace WorkshopWreckage
             Reg(SliderRow(cl, "Field of view", 60, 100, GameSettings.Fov, v => { GameSettings.Fov = Mathf.Round(v); GameSettings.ControlsChanged(_g); }, v => $"{Mathf.RoundToInt(v)}"), () => GameSettings.Fov);
             Reg(ToggleRow(cl, "Invert mouse Y", GameSettings.InvertY, on => { GameSettings.InvertY = on; GameSettings.ControlsChanged(_g); }), () => GameSettings.InvertY);
             Para(cr, "HELP", 18, Brass, 26);
-            Reg(ToggleRow(cr, "Robot part afterglow", Interaction.Afterglow, on =>
-            {
-                Interaction.Afterglow = on;
-                PlayerPrefs.SetInt("ww_part_afterglow", on ? 1 : 0);
-                PlayerPrefs.Save();
-            }), () => Interaction.Afterglow);
-            Para(cr, "A robot part you looked at blinks once after you look away (once you have the Part Afterglow skill).", 15, Muted, 22).alignment = TextAnchor.MiddleLeft;
+            // (the "Robot part afterglow" setting is gone with the Part Afterglow skill: skill revamp 2026-10-30)
             Reg(ToggleRow(cr, "Show performance stats  [F3]", false, on => _debug.transform.parent.gameObject.SetActive(on)), () => _debug.transform.parent.gameObject.activeSelf);
 
             var bottom = HRow(st, 44, 12);
@@ -971,40 +965,89 @@ namespace WorkshopWreckage
         Text _skillHeader;
         RectTransform _skillList;
 
-        /// <summary>Skill tree from progression.json. Planned skills are listed (so the
-        /// progression is visible) but cannot be unlocked until they are implemented.</summary>
+        /// <summary>Set when a save was migrated to the new skill system (Game.MigrateSkills): the skill menu says so.</summary>
+        public bool migrationNotice;
+
+        /// <summary>Redraws the skill or robot screen if it is open (after the F8 dev respec).</summary>
+        public void RefreshOpenScreen()
+        {
+            if (_screen == "skills") RefreshSkills();
+            else if (_screen == "robots") RefreshRobots();
+        }
+
+        /// <summary>Skill menu (skill revamp 2026-10-30, docs/SKILL_REVAMP.md): the shared points, and per skill its
+        /// level / max, what it does now and at the next level, and the cost. Nothing has a level requirement; the
+        /// levels of a skill are bought in order. Retired skills are not listed; planned ones are, but cannot be bought.</summary>
         void RefreshSkills()
         {
             var pr = _g.progression;
             if (pr == null) return;
-            _skillHeader.text = $"{pr.LevelText}   ·   {pr.skillPoints} skill point{(pr.skillPoints == 1 ? "" : "s")}";
+            _skillHeader.text = $"{pr.LevelText}   ·   <b>{pr.skillPoints} skill point{(pr.skillPoints == 1 ? "" : "s")}</b> (shared with robot upgrades)";
             foreach (Transform c in _skillList) Destroy(c.gameObject);
-            // a skill with ranks is one row: its rank now and the next one to buy (not a line per rank)
-            foreach (var chain in SkillChains(pr.skills).OrderBy(c => (c.FirstOrDefault(s => !pr.unlocked.Contains(s.id)) ?? c[^1]).unlockLevel))   // by the level of the next rank
+            Para(_skillList, $"Each level-up gives 1 point; each skill level costs 1. A whole playthrough gives about {pr.PointBudget} points for {pr.BuyableSteps} skill levels and robot upgrades, "
+                             + "so you can't max everything: choose. (Preliminary balance.)", 14, Muted, 40);
+            if (migrationNotice) Para(_skillList, "Your save was moved to the new skill system: level recomputed from completed storage places, all points back to spend.", 14, GoodC, 40);
+            foreach (var chain in SkillChains(pr.skills.Where(s => !s.Retired).ToList()))
             {
                 int have = chain.TakeWhile(s => pr.unlocked.Contains(s.id)).Count();
                 var next = have < chain.Count ? chain[have] : null;
-                string why = next == null ? "" : next.Active ? pr.CanUnlock(next.id) : "coming in a later milestone";
-                string name = RankBase(chain[0].name), label;
-                if (chain.Count == 1)
-                    label = $"Lv {next?.unlockLevel ?? chain[0].unlockLevel,2}  {name}  —  {(next == null ? "UNLOCKED" : why == "" ? $"unlock ({next.cost} pt)" : why)}";
-                else
-                {
-                    string rank = have == 0 ? "not learned" : $"rank {have} / {chain.Count}";
-                    string step = next == null ? "MAX" : $"{(have == 0 ? "learn" : "upgrade")} to rank {have + 1} ({next.cost} pt){(RankBase(next.name) != name ? $": {next.name}" : "")}";
-                    label = $"Lv {next?.unlockLevel ?? chain[^1].unlockLevel,2}  {name}  ·  {rank}  —  {(next == null || why == "" ? step : $"rank {have + 1}: {why}")}";
-                }
-                var b = MakeButton(_skillList, label, () => { if (next != null && _g.UnlockSkill(next.id)) RefreshSkills(); });
-                b.interactable = next != null && next.Active && why == "";
+                string why = next == null ? "" : pr.CanUnlock(next.id);
+                string name = RankBase(chain[0].name);
+                string state = next == null ? "MAX" : why == "" ? $"{(have == 0 ? "learn" : "upgrade")} ({next.cost} pt)" : why;
+                var b = MakeButton(_skillList, $"{name}   ·   level {have} / {chain.Count}   —   {state}", () => { if (next != null && _g.UnlockSkill(next.id)) RefreshSkills(); });
+                b.interactable = next != null && why == "";
                 b.GetComponent<LayoutElement>().preferredHeight = 30;
+                string now = have == 0 ? "not learned" : SkillEffect(chain, have);
+                var d = Para(_skillList, $"Now: {now}" + (next != null ? $"   →   <color={Hex(GoodC)}>Next: {SkillEffect(chain, have + 1)}</color>" : ""), 13, Muted, 18);
+                d.alignment = TextAnchor.UpperLeft;
             }
-            RespecButton(_skillList, RefreshSkills);
-            if (pr.level < pr.respecLevel) Para(_skillList, $"Respec (every skill and robot upgrade back at what it cost) opens at level {pr.respecLevel}.", 13, Muted, 18);
+        }
+
+        /// <summary>What a skill does at `level` (1-based), for the skill menu.</summary>
+        string SkillEffect(List<SkillDef> chain, int level)
+        {
+            string Cd(string id) => $"every {PlayerTools.Tuned(id, "cooldown_s", level, 0):0} s";
+            var s = chain[Mathf.Clamp(level, 1, chain.Count) - 1];
+            if (s.effects.ContainsKey("part_sense"))
+            {
+                int n = (int)PlayerTools.Tuned("part_sense", "parts", level, 1);
+                return $"{PlayerTools.Tuned("part_sense", "range_m", level, 2):0} m, {n} part{(n == 1 ? "" : "s")} glow{(n == 1 ? "s" : "")} {PlayerTools.Tuned("part_sense", "duration_s", level, 2):0} s, {Cd("part_sense")}";
+            }
+            if (s.effects.ContainsKey("inventory_capacity")) return $"carry {Game.BaseInventory + chain.Take(level).Sum(x => (int)x.effects["inventory_capacity"])} parts";
+            if (s.effects.ContainsKey("sort_inventory")) return $"sort the inventory by storage area, {Cd("sort_inventory")}";
+            if (s.effects.ContainsKey("storage_delivery"))
+            {
+                int n = (int)PlayerTools.Tuned("storage_delivery", "max_items", level, level);
+                return $"store up to {n} matching part{(n == 1 ? "" : "s")} into the storage place you aim at, {Cd("storage_delivery")}";
+            }
+            if (s.effects.ContainsKey("magnet_level"))
+                return $"pulls up to {PlayerTools.Tuned("magnetic_glove", "pull_items", level, level):0} part(s) within {PlayerTools.Tuned("magnetic_glove", "range_m", level, 1.5f):0.0} m, {Cd("magnetic_glove")}";
+            if (s.effects.ContainsKey("battery_pockets")) return $"+{s.effects["battery_pockets"]:0} battery pockets";
+            return SkillBlurb(s);
+        }
+
+        /// <summary>A one-line description of a single skill (its data description, else its effects).</summary>
+        static string SkillBlurb(SkillDef s)
+        {
+            if (!string.IsNullOrEmpty(s.description)) return s.description;
+            return s.id switch
+            {
+                "quick_hands" => "faster pickup",
+                "inventory_manifest" => "shows how many of each part exist",
+                "long_reach" => $"+{s.effects.GetValueOrDefault("reach_m"):0.0} m reach",
+                "bulk_pickup" => "picking a part also takes copies around it",
+                "scanner_1" => "V / 2: highlights loose copies of the part in hand and its storage place",
+                "scanner_2" => "wider scan that also shows what remains",
+                "supermagnet" => "X / 3: pulls loose copies of the held part",
+                "robot_coordination" => "J: a robot works around a spot you aim at",
+                "robot_coordination_2" => "more command slots, faster robots",
+                _ => string.Join(", ", s.effects.Select(kv => $"{kv.Key.Replace('_', ' ')} {kv.Value:0.##}")),
+            };
         }
 
         /// <summary>The skills grouped into rank chains: a skill whose only requirement is the previous skill
-        /// and which raises one of the same effects is its next rank (Magnetic Glove I-X, Robot Part Sense I-V,
-        /// Deeper Pockets → Tool Belt).</summary>
+        /// and which raises one of the same effects is its next level (Magnetic Glove I-X, Part Sense I-X,
+        /// Deeper Pockets I-X, Sort Inventory I-X, Automatic Storage Delivery I-X).</summary>
         static List<List<SkillDef>> SkillChains(List<SkillDef> skills)
         {
             SkillDef NextOf(SkillDef a)

@@ -1257,12 +1257,13 @@ namespace WorkshopWreckage
             return robots.Where(r => r.Active && r.Mobile).OrderBy(r => (r.transform.position - p).sqrMagnitude).FirstOrDefault();
         }
 
-        /// <summary>H (Automatic Storage Delivery): the nearest free robot comes over,
-        /// takes what you carry and stores it.</summary>
+        /// <summary>H (Request Pickup, skill "auto_delivery"; until the skill revamp of 2026-10-30 it was called
+        /// Automatic Storage Delivery, a name that now belongs to the usable skill on key 7): the nearest free robot
+        /// comes over, takes what you carry and stores it.</summary>
         public string RobotHandover()
         {
             string msg;
-            if (!progression.Has("auto_delivery")) msg = "You need the Automatic Storage Delivery skill (Esc → Skills)";
+            if (!progression.Has("auto_delivery")) msg = "You need the Request Pickup skill (K → Skills)";
             else if (inventory.Count == 0) msg = "You aren't carrying anything";
             else
             {
@@ -1381,14 +1382,9 @@ namespace WorkshopWreckage
             progress.Discovered += id => GameEvents.Raise(GameEventKind.PartDiscovered, "player", "", id, db.Get(id).CategoryName);
             progression.LeveledUp += lv =>
             {
-                hud.Toast($"Level {lv}!  Skill points earned (Esc → Skills)", true);
+                hud.Toast($"Level {lv}!  +1 skill point (K → Skills)", true);
                 Sfx.Play("milestone", null, -4);
                 telemetry.LevelReached(lv, playTime, progress.sortedTotal);
-            };
-            progression.MidLevelPoints += n =>
-            {
-                hud.Toast($"Halfway to level {progression.level + 1}!  +{n} skill point{(n == 1 ? "" : "s")} (Esc → Skills)", true);
-                Sfx.Play("milestone", null, -10);
             };
             // XP is earned only for meaningful, non-repeatable progress (see progression.json)
             storage.Deposited += (box, id) =>
@@ -1428,7 +1424,6 @@ namespace WorkshopWreckage
             inventory.capacity = BaseInventory + (int)progression.Effect("inventory_capacity");
             inventory.batteryPockets = BaseBatteryPockets + (int)progression.Effect("battery_pockets");
             inventory.isBattery = id => world.DefOf(id).IsRadarBattery;
-            inventory.stacking = progression.Has("inventory_stacking");
             interaction.reachBonus = (float)progression.Effect("reach_m");
         }
 
@@ -1447,16 +1442,16 @@ namespace WorkshopWreckage
         /// refunded skills were running stops safely. Nothing carried is lost: a smaller inventory keeps what it
         /// holds (it only takes no more), robots finish delivering a load larger than their new capacity, and
         /// installed robot modules stay where they are.</summary>
-        public int Respec()
+        public int Respec(bool dev = false)
         {
-            int n = progression.RespecAll();
+            int n = progression.RespecAll(dev);
             if (n <= 0) return 0;
             ApplySkills();
             int slots = (int)progression.Effect("robot_command_slots");
             foreach (var r in robots.Where(r => r.zoneCenter.HasValue).Skip(slots).ToList()) r.AssignZone(null);
             if (!progression.Has("destination_orders")) foreach (var r in robots.Where(r => r.orderState != "").ToList()) r.CancelOrder();
             telemetry.SkillUsed("respec");
-            hud.Toast($"Respec: {n} skill points back to spend", true);
+            hud.Toast(dev ? $"DEV respec (F8, debug only): {n} skill points back to spend" : $"Respec: {n} skill points back to spend", true);
             return n;
         }
 
@@ -1595,9 +1590,39 @@ namespace WorkshopWreckage
                 SetState("play");
                 if (fromBackup) hud.Toast($"The file of '{name}' was damaged: its backup from {Json.Str(d, "saved_at").Replace('T', ' ')} was loaded", true);
                 hud.Toast("Loaded: " + name + (migrationReport != "" ? $"  ·  converted to the current parts catalog: {migrationReport}" : ""), migrationReport != "");
+                if (progression.migratedFrom != null) MigrateSkills(slot, name);
                 var bad = UnreachableParts();
                 if (bad.Count > 0) Debug.LogWarning($"[integrity] {bad.Count} unreachable part(s) after load (Esc: Recover unreachable parts)");
             }
+        }
+
+        /// <summary>The one-time skill-revamp migration (option A, docs/SKILL_REVAMP.md): Progression.Load has reset the
+        /// purchases and given the earned points back. The file as it was is copied to saves/backup first, then the
+        /// slot is saved again at once (so the next load does not migrate it again), and the player is told once.
+        /// Robots, blueprints and the pegboard are untouched; carried parts stay even over the new capacity.</summary>
+        void MigrateSkills(string slot, string name)
+        {
+            string from = progression.migratedFrom, backup = "";
+            try
+            {
+                var src = SaveSystem.PathOf(slot);
+                if (File.Exists(src))
+                {
+                    var dir = Path.Combine(SaveSystem.Dir, "backup");
+                    Directory.CreateDirectory(dir);
+                    backup = Path.Combine(dir, $"{slot}.pre-skills-{progression.budgetVersion}.{DateTime.Now:yyyyMMdd_HHmmss}.json");
+                    File.Copy(src, backup, false);
+                }
+            }
+            catch (Exception e) { Debug.LogError("[save] skill migration backup failed: " + e.Message); backup = ""; }
+            bool saved = backup != "" && SaveGame(slot, name, true);
+            Debug.Log($"[save] skills migrated ({from}): level {progression.level}, {progression.migratedPoints} points; backup {(backup == "" ? "NONE" : backup)}; re-saved {saved}");
+            if (inventory.Parts > inventory.capacity) Debug.Log($"[save] carrying {inventory.Parts} parts over the new capacity {inventory.capacity}: kept, no more taken");
+            hud.Toast($"NEW SKILL SYSTEM · Your level is recomputed from {progression.DestinationsCompleted} completed storage places: level {progression.level}. "
+                      + $"Every skill and robot upgrade was reset; you have {progression.migratedPoints} skill point{(progression.migratedPoints == 1 ? "" : "s")} to spend (K). "
+                      + "Robots, blueprints and the pegboard are unchanged." + (inventory.Parts > inventory.capacity ? $" You keep all {inventory.Parts} parts you carry ({inventory.capacity} fit now)." : ""), true);
+            progression.migratedFrom = null;
+            hud.migrationNotice = true;
         }
 
         // ---------------------------------------------------------------- storage
@@ -1852,6 +1877,12 @@ namespace WorkshopWreckage
             else if (kb.hKey.wasPressedThisFrame && state == "play") RobotHandover();
             else if (kb.jKey.wasPressedThisFrame && state == "play") RobotZone();
             else if (kb.f9Key.wasPressedThisFrame && (state == "play" || state == "paused")) LoadGame(SaveSystem.Quick);
+            else if (kb.f8Key.wasPressedThisFrame && Unlocks.DebugMode && (state == "play" || state == "paused"))
+            {
+                // dev only (debug_mode): a free respec at any level, apart from the skill menu and the real respec rules
+                if (Respec(true) == 0) hud.OnFeedback("DEV respec (F8): nothing to refund", false);
+                hud.RefreshOpenScreen();
+            }
             if (state == "play" && Cursor.lockState != CursorLockMode.Locked && Mouse.current.leftButton.wasPressedThisFrame) Cursor.lockState = CursorLockMode.Locked;
         }
 

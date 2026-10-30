@@ -32,8 +32,9 @@ namespace WorkshopWreckage
         public SortingArm targetArm;   // targetType "arm": one standing on the floor
         public int targetItem = -1;
         /// <summary>Robot part afterglow (playtest 2026-10-26): a robot part blinks once after the crosshair leaves it,
-        /// so it is easier to spot again. A skill bought with skill points ("part_afterglow", playtest 2026-10-28: not
-        /// from the start); this Settings preference (PlayerPrefs "ww_part_afterglow") can turn it off once bought.</summary>
+        /// so it is easier to spot again. It was the skill "part_afterglow" (playtest 2026-10-28), retired in the skill
+        /// revamp (2026-10-30): it can no longer be bought, so this is off; Part Sense's 2 s glow replaces it. The
+        /// Settings preference (PlayerPrefs "ww_part_afterglow") is kept but hidden.</summary>
         public static bool Afterglow = PlayerPrefs.GetInt("ww_part_afterglow", 1) == 1;
         public bool AfterglowOn => Afterglow && game.progression != null && game.progression.Has("part_afterglow");
         public const float AfterglowTime = 0.9f;
@@ -148,7 +149,7 @@ namespace WorkshopWreckage
                 return;
             }
             _repeatT -= Time.deltaTime;
-            if (lmbDown) { _repeatT = Repeat * 2.5f; Primary(); }
+            if (lmbDown) { _repeatT = Repeat * 2.5f; Primary(); }   // one part per placement: the one in hand
             else if (lmbHeld && _repeatT <= 0) { _repeatT = Repeat; Primary(true); }
             if (kb.gKey.wasPressedThisFrame) DepositAll();
             // X take off / V apply: only in workbench mode now (playtest 2026-10-28), on the bench screen
@@ -274,14 +275,12 @@ namespace WorkshopWreckage
             return slot;
         }
 
-        /// <summary>The board tool you carry that belongs in a slot (the held one first), or -1.</summary>
-        int CarriedToolFor(string slot)
+        /// <summary>The tool in hand if it belongs in this slot, else -1. The inventory is never searched for a tool
+        /// that fits (placement rules 2026-10-30, docs/PEGBOARD.md).</summary>
+        int HeldToolFor(string slot)
         {
-            var dest = Pegboard.PegboardConfig.DestPrefix + slot;
             int held = Inv.HeldId();
-            if (held >= 0 && World.DefOf(held).storageBox == dest) return held;
-            foreach (var id in Inv.items) if (World.DefOf(id).storageBox == dest) return id;
-            return -1;
+            return held >= 0 && World.DefOf(held).storageBox == Pegboard.PegboardConfig.DestPrefix + slot ? held : -1;
         }
 
         /// <summary>The crosshair left a robot part lying in the world: it blinks once.</summary>
@@ -319,7 +318,7 @@ namespace WorkshopWreckage
         void ShowHover()
         {
             HideHover();
-            game.builder?.pegboard?.Highlight(targetType == "peg" && !game.builder.pegboard.IsOccupied(targetPeg) && CarriedToolFor(targetPeg) >= 0 ? targetPeg : null);
+            game.builder?.pegboard?.Highlight(targetType == "peg" && !game.builder.pegboard.IsOccupied(targetPeg) && HeldToolFor(targetPeg) >= 0 ? targetPeg : null);
             if (targetType == "item")
             {
                 var inst = World.instances[targetItem];
@@ -401,11 +400,7 @@ namespace WorkshopWreckage
                     var sub = $"{Storage.Stored(targetDest).Count} / {game.AssignedCount(targetDest)} stored" + (strays > 0 ? $"  ·  {strays} stray part{(strays == 1 ? "" : "s")} in the way" : "");
                     if (held < 0) return new TargetInfo { title = title, sub = sub, hint = "" };
                     var r = Storage.Check(targetDest, held);
-                    if (r == StorageSystem.Result.Ok)
-                    {
-                        int n = MatchingCarried(targetDest).Count;
-                        return new TargetInfo { title = title, sub = sub, hint = "[LMB] Store here" + (n > 1 ? $"    [G] Store all {n}" : ""), tone = 1 };
-                    }
+                    if (r == StorageSystem.Result.Ok) return new TargetInfo { title = title, sub = sub, hint = "[LMB] Store here", tone = 1 };
                     return new TargetInfo { title = title, sub = sub, hint = Storage.ResultText(r, targetDest, held), tone = -1 };
                 }
                 case "peg":
@@ -415,14 +410,12 @@ namespace WorkshopWreckage
                     var title = "Tool board  ·  " + tool.name;
                     var sub = $"{pb.Hung} / {pb.Total} tools hung" + (pb.IsOccupied(targetPeg) ? "  ·  in its place" : "  ·  this slot is empty");
                     if (pb.IsOccupied(targetPeg)) return new TargetInfo { title = title, sub = sub, hint = "" };
-                    int n = Inv.items.Count(i => World.DefOf(i).IsPegboardTool);
-                    string all = n > 1 ? $"    [G] Hang all {n}" : "";
-                    if (pb.WaitsForHolder(targetPeg) && CarriedToolFor(targetPeg) >= 0)
-                        return new TargetInfo { title = title, sub = sub, hint = MountHolderFirst(targetPeg) + all, tone = -1 };
-                    if (CarriedToolFor(targetPeg) >= 0)
-                        return new TargetInfo { title = title, sub = sub, hint = "[LMB] " + pb.cfg.S("interaction", "prompt", "Hang {tool}").Replace("{tool}", tool.name) + all, tone = 1 };
+                    if (pb.WaitsForHolder(targetPeg) && HeldToolFor(targetPeg) >= 0)
+                        return new TargetInfo { title = title, sub = sub, hint = MountHolderFirst(targetPeg), tone = -1 };
+                    if (HeldToolFor(targetPeg) >= 0)
+                        return new TargetInfo { title = title, sub = sub, hint = "[LMB] " + pb.cfg.S("interaction", "prompt", "Hang {tool}").Replace("{tool}", tool.name), tone = 1 };
                     if (held >= 0)
-                        return new TargetInfo { title = title, sub = sub, hint = pb.cfg.S("interaction", "wrong_prompt", "{tool} doesn't belong here").Replace("{tool}", World.DefOf(held).displayName) + all, tone = -1 };
+                        return new TargetInfo { title = title, sub = sub, hint = pb.cfg.S("interaction", "wrong_prompt", "{tool} doesn't belong here").Replace("{tool}", World.DefOf(held).displayName), tone = -1 };
                     return new TargetInfo { title = title, sub = sub, hint = $"Find the {tool.name.ToLowerInvariant()} to hang it here", tone = 0 };
                 }
                 case "tray":
@@ -487,6 +480,8 @@ namespace WorkshopWreckage
                 case "arm": targetArm?.PickUp(); break;
                 case "dest":
                     int held = Inv.HeldId();
+                    // held down, the next part in the order is stored only if it fits too: no reject per repeat
+                    if (held >= 0 && repeat && Storage.Check(targetDest, held) != StorageSystem.Result.Ok) break;
                     if (held >= 0) Deposit(targetDest, held);
                     else if (targetUnit.type == "drawer_cabinet") OpenDrawer(targetUnit, targetDest);
                     break;
@@ -507,7 +502,8 @@ namespace WorkshopWreckage
                 {
                     var pb = game.builder.pegboard;
                     if (pb.IsOccupied(targetPeg)) break;
-                    int tool = CarriedToolFor(targetPeg);
+                    int tool = HeldToolFor(targetPeg);   // only the tool in hand; the next one comes up in the inventory order
+                    if (repeat && (tool < 0 || pb.WaitsForHolder(targetPeg))) break;   // held down: no reject per repeat
                     if (tool >= 0) HangTool(tool);
                     else if (Inv.HeldId() >= 0)
                     {
@@ -717,25 +713,19 @@ namespace WorkshopWreckage
             Feedback?.Invoke($"{p.name}: {n} part{(n == 1 ? "" : "s")} applied ({wb.InstalledCount(p)}/{wb.Required(p)})" + (wb.CanActivate(p) ? " — ready to activate" : ""), true);
         }
 
-        void DepositAll()
+        /// <summary>G: hand everything over at the workbench, empty into the sorting tray (separate work stations).
+        /// A storage place and the pegboard have no G (placement rules 2026-10-30): one click places the part or tool
+        /// in hand; Automatic Storage Delivery stores several parts.</summary>
+        public void DepositAll()
         {
             if (targetType == "dest")
-            {
-                var ids = MatchingCarried(targetDest);
-                if (ids.Count == 0) { int held = Inv.HeldId(); if (held >= 0) Deposit(targetDest, held); return; }
-                int n = ids.Count(id => Deposit(targetDest, id));
-                if (n > 1) Feedback?.Invoke($"Stored {n} parts", true);
-            }
+                Feedback?.Invoke("No Store all: [LMB] stores the part in your hand (Automatic Storage Delivery stores several)", false);
+            else if (targetType == "peg")
+                Feedback?.Invoke("No Hang all: [LMB] hangs the tool in your hand", false);
             else if (targetType == "station")
             {
                 int n = StationParts().Count(DepositStation);
                 if (n > 1) Feedback?.Invoke($"Delivered {n} parts to the workbench", true);
-            }
-            else if (targetType == "peg")
-            {
-                var pcfg = game.builder.pegboard.cfg;
-                int n = Inv.items.Where(id => World.DefOf(id).IsPegboardTool).OrderBy(id => pcfg.slotById.TryGetValue(World.DefOf(id).PegSlot, out var ps) && ps.IsChild ? 1 : 0).ToList().Count(HangTool);
-                if (n > 1) Feedback?.Invoke($"Hung {n} tools ({game.builder.pegboard.Hung}/{game.builder.pegboard.Total} on the tool board)", true);
             }
             else if (targetType == "tray")
             {
@@ -744,11 +734,25 @@ namespace WorkshopWreckage
             }
         }
 
-        List<int> MatchingCarried(string dest)
+        /// <summary>The placement check shared by a click and Automatic Storage Delivery: a part in hand, the crosshair
+        /// on a storage place within reach (the aim ray is reach long), and that place takes the part in hand (its
+        /// own place, room, nothing in the way: StorageSystem.Check). Nothing else in the inventory is looked at.</summary>
+        public StorageSystem.Result CanPlaceHeld(out int held)
         {
-            var l = Inv.items.Where(id => World.DefOf(id).storageBox == dest).ToList();
+            held = Inv.HeldId();
+            if (held < 0 || targetType != "dest" || string.IsNullOrEmpty(targetDest)) return StorageSystem.Result.UnknownBox;
+            return Storage.Check(targetDest, held);
+        }
+
+        /// <summary>For Automatic Storage Delivery: the part in hand first, then other carried parts of the same kind
+        /// wherever they are in the inventory, at most `max` and no more than `dest` has room for.</summary>
+        public List<int> SameKindAsHeld(string dest, int held, int max)
+        {
+            int def = World.instances[held].defId;
+            var l = new List<int> { held };
+            l.AddRange(Inv.items.Where(id => id != held && World.instances[id].defId == def));
             int room = game.db.BoxCapacity(dest) - Storage.Stored(dest).Count;
-            return l.Take(Mathf.Max(0, room)).ToList();
+            return l.Take(Mathf.Max(0, Mathf.Min(max, room))).ToList();
         }
 
         /// <summary>What the workbench would take from your hands: robot parts, and recipe
