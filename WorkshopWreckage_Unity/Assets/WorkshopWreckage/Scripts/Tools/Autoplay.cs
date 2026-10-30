@@ -633,6 +633,9 @@ namespace WorkshopWreckage
             int Part(string robot, string key) => wb.PartIds(wb.P(robot)).First(i => Robot.PartKey(g.world.DefOf(i)) == key);
             int uArm = Part("unibot", "left arm"), hHead = Part("hoverbot", "head"), rArm = Part("retrobot", "left arm"), rHead = Part("retrobot", "head");
             LevelTo(2);
+            // Unibot and Hoverbot must be locked for their parts to be donors. Every robot is level 1 since
+            // 2026-10-29, so the lock is the pegboard reward: keep the real tool requirement, not the QA bypass.
+            RobotWorkbench.QaIgnoreToolRequirements = false;
             wb.selected = "retrobot";
             // Unibot's arm before Retrobot's torso: into Unibot's tray, then on once the torso is in
             Take(uArm); g.interaction.DepositStation(uArm);
@@ -649,7 +652,8 @@ namespace WorkshopWreckage
             Take(rArm); g.interaction.DepositStation(rArm);
             Take(rHead); g.interaction.DepositStation(rHead);
             string ownWhy = wb.CanInstall(retro, rArm);
-            bool ownRefused = g.world.instances[rArm].state == ItemState.Stored && ownWhy.Contains("Unibot");
+            // refused because the slot holds Unibot's arm (wording since hands-on building 2026-10-29: "already has a left arm fitted")
+            bool ownRefused = g.world.instances[rArm].state == ItemState.Stored && ownWhy.Contains("already has a left arm") && wb.DonorIn(retro, ModuleSlot.ArmL) == uArm;
             foreach (var key in new[] { "right arm", "leg assembly" }) { int id = Part("retrobot", key); Take(id); g.interaction.DepositStation(id); }
             wb.InstallAll(retro);   // "Build from the parts pool"
             yield return Frames(2);
@@ -676,7 +680,9 @@ namespace WorkshopWreckage
                   $"operational {rb.Operational}; head {m.At("retrobot", ModuleSlot.Head)?.id}, left {m.At("retrobot", ModuleSlot.ArmL)?.id}, right {m.At("retrobot", ModuleSlot.ArmR)?.id}; audit: {(audit.Count == 0 ? "clean" : string.Join("; ", audit))}");
             LookAtRobot(0.7f, 0.45f, 0.15f);
             yield return g.Capture(Path.Combine(outDir, "31_retrobot_donor_online.png"), 3);
-            // Unibot: its left arm is on Retrobot; Retrobot's own (in its tray) goes on instead
+            // Unibot: its left arm is on Retrobot; Retrobot's own (in its tray) goes on instead.
+            // Unibot's blueprint now: as if the pliers section were completed (its pegboard reward)
+            g.pegRewards.GrantAll(new[] { "unibot" });
             LevelTo(5);
             wb.selected = "unibot";
             int uTorso = Part("unibot", "torso");
@@ -701,6 +707,7 @@ namespace WorkshopWreckage
             Check("donor heads and arms (on the bench and as modules) survive save/load, audit clean",
                   before == after && audit2.Count == 0 && g.retrobot.ModelFroms.l == "unibot", before == after ? $"same; audit {(audit2.Count == 0 ? "clean" : string.Join("; ", audit2))}" : $"{before}  vs  {after}");
             File.Delete(SaveSystem.PathOf("autotest_donor"));
+            RobotWorkbench.QaIgnoreToolRequirements = true;
         }
 
         /// <summary>Playtest 2026-10-25: the aimed-at part gets a thin glowing rim, not a shell much
@@ -751,6 +758,11 @@ namespace WorkshopWreckage
             int Part(string robot, string key) => wb.PartIds(wb.P(robot)).First(i => Robot.PartKey(g.world.DefOf(i)) == key);
             int uArm = Part("unibot", "left arm"), rArm = Part("retrobot", "left arm"), uHead = Part("unibot", "head shell");
             LevelTo(2);
+            // Unibot's own blueprint must be locked for its parts to be donors ("its own robot cannot use it").
+            // Every robot is level 1 since 2026-10-29, so the lock is the pegboard reward (pliers section):
+            // keep the real tool requirement here instead of the global QA bypass.
+            RobotWorkbench.QaIgnoreToolRequirements = false;
+            bool uniLocked = !wb.Unlocked(uni) && wb.Unlocked(retro);
             wb.selected = "retrobot";
             Take(uArm); g.interaction.DepositStation(uArm);
             foreach (var id in wb.PartIds(retro).Where(id => id != rArm).ToList()) { Take(id); g.interaction.DepositStation(id); }
@@ -770,8 +782,8 @@ namespace WorkshopWreckage
             bool ownOn = m.At("retrobot", ModuleSlot.ArmL)?.id == "arm_l.retrobot" && g.world.instances[rArm].state == ItemState.Installed && m.Complete("retrobot");
             bool intact = PartsIntact(out var pi);
             Check("a found arm waiting in the tray goes straight on a built robot once its slot is free",
-                  act && donorOn && off != null && listed && fit && ownOn && m.Audit().Count == 0 && intact,
-                  $"built with Unibot's arm {donorOn}; off {off?.id}; listed {listed}; fitted {fit}; own arm on {ownOn}; audit {(m.Audit().Count == 0 ? "clean" : string.Join("; ", m.Audit()))}; {pi}");
+                  uniLocked && act && donorOn && off != null && listed && fit && ownOn && m.Audit().Count == 0 && intact,
+                  $"Unibot locked {uniLocked}; activated {act}; built with Unibot's arm {donorOn}; off {off?.id}; listed {listed}; fitted {fit}; own arm on {ownOn}; audit {(m.Audit().Count == 0 ? "clean" : string.Join("; ", m.Audit()))}; {pi}");
             // a found head carried by the player replaces the fitted one, which goes to the bench
             int need0 = wb.Required(uni);
             Take(uHead);
@@ -779,10 +791,12 @@ namespace WorkshopWreckage
             g.retrobot.ApplyModules();
             bool headOn = m.At("retrobot", ModuleSlot.Head)?.id == "head.unibot" && m.Get("head.retrobot").BenchSlot >= 0 && !g.inventory.items.Contains(uHead);
             int need1 = wb.Required(uni);
+            // each part keeps its own look: Unibot's head on the Retrobot model, its own arm drawn as its own (null = no donor)
+            bool looks = g.retrobot.ModelFroms.h == "unibot" && g.retrobot.ModelFroms.l is null or "retrobot";
             bool intact2 = PartsIntact(out var pi2);
             Check("a found head in the player's hands replaces a robot's head (the old one goes to the bench); its own robot, unbuilt, then needs no head",
-                  fit2 && headOn && need1 == need0 - 1 && m.Audit().Count == 0 && intact2,
-                  $"fitted {fit2}; head {m.At("retrobot", ModuleSlot.Head)?.id}, Retrobot's own at {m.Get("head.retrobot").location}; Unibot needs {need0} -> {need1}; {pi2}");
+                  fit2 && headOn && need1 == need0 - 1 && m.Audit().Count == 0 && intact2 && looks,
+                  $"fitted {fit2}; model {g.retrobot.ModelFroms} (own colours {looks}); head {m.At("retrobot", ModuleSlot.Head)?.id}, Retrobot's own at {m.Get("head.retrobot").location}; Unibot needs {need0} -> {need1}; {pi2}");
             LookAtRobot(0.7f, 0.45f, 0.15f);
             yield return g.Capture(Path.Combine(outDir, "35_loose_parts_fitted.png"), 3);
             string State() => $"{Json.Write(m.ToDict()["locations"])}|{Json.Write(m.ToDict()["waiting"])}|{g.world.instances[rArm].owner}|{g.world.instances[uHead].owner}|{wb.Required(wb.P("unibot"))}";
@@ -797,6 +811,7 @@ namespace WorkshopWreckage
             Check("found parts fitted as modules survive save/load, audit clean", before == after && m.Audit().Count == 0,
                   before == after ? $"same; audit {(m.Audit().Count == 0 ? "clean" : string.Join("; ", m.Audit()))}" : $"{before}  vs  {after}");
             File.Delete(SaveSystem.PathOf("autotest_loose"));
+            RobotWorkbench.QaIgnoreToolRequirements = true;
         }
 
         /// <summary>Playtest 2026-10-25: strip a built robot and fit the part to another. Retrobot is
