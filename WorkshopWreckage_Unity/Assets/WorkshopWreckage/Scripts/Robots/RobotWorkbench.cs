@@ -147,77 +147,71 @@ namespace WorkshopWreckage
 
         public bool Operational(Project p) => RobotOf(p)?.Operational ?? false;
 
-        /// <summary>The blueprint: player level reached (and, for a crafted robot, the
-        /// previous unit of its type operational — they share one bench mat).</summary>
-        /// The pegboard sections it needs (unlocks.json robot_pegboard) complete too. An operational robot stays
-        /// unlocked whatever the rules say now (older saves follow the new rules otherwise).
+        /// <summary>The blueprint: granted by the tool pegboard (Retrobot from the start; unlocks.json
+        /// "pegboard_rewards", docs/PEGBOARD.md "Rewards") and the player level reached. Never needs another robot:
+        /// units of a type share one bench mat, but whichever unit is unlocked can be built on it (ActiveOnMat). An
+        /// operational robot stays unlocked whatever the rules say now.</summary>
         public bool Unlocked(Project p) => _debugUnlocked.Contains(p.id) || Operational(p)
-            || _g.progression != null && _g.progression.level >= p.level && (p.after == null || Operational(P(p.after))) && ToolsMet(p);
+            || _g.progression != null && _g.progression.level >= p.level && ToolsMet(p);
 
         public string LockReason(Project p)
         {
             var why = new List<string>();
             if (!ToolsMet(p)) why.Add($"Requires: {ToolRequirementText(p)} ({ToolProgressText(p)})");
-            if (p.after != null && !Operational(P(p.after))) why.Add($"Needs {P(p.after).name} operational first");
             if (_g.progression == null || _g.progression.level < p.level) why.Add($"Blueprint unlocks at level {p.level}");
             return string.Join("  ·  ", why);
         }
 
-        // ---------------------------------------------------------------- pegboard requirements (docs/PEGBOARD.md "Sections")
+        // ---------------------------------------------------------------- pegboard rewards (docs/PEGBOARD.md "Rewards")
 
-        readonly HashSet<string> _warnedSections = new();
+        Pegboard.PegboardRewards Rewards => _g.pegRewards;
+        Pegboard.PegboardRewards.Milestone MilestoneOf(Project p) => Rewards?.For(p.id);
 
-        /// <summary>The section this blueprint needs complete (null if none, or if the id is not on the board:
-        /// a config slip is logged once and does not lock the robot away for good).</summary>
-        string RequiredSection(Project p)
-        {
-            var (sec, _) = Unlocks.PegboardRequirement(p.id);
-            if (sec == null || _g.builder?.pegboard == null) return null;
-            if (_g.builder.pegboard.cfg.sectionById.ContainsKey(sec)) return sec;
-            if (_warnedSections.Add(p.id)) Debug.LogWarning($"[unlocks] robot_pegboard: {p.id} needs unknown pegboard section '{sec}' - ignored");
-            return null;
-        }
-
-        int RequiredSectionCount(Project p) => _g.builder?.pegboard == null ? 0 : Mathf.Min(Unlocks.PegboardRequirement(p.id).sections, _g.builder.pegboard.cfg.sections.Count);
-
-        public bool HasToolRequirement(Project p) => RequiredSection(p) != null || RequiredSectionCount(p) > 0;
+        public bool HasToolRequirement(Project p) => MilestoneOf(p) != null;
 
         /// <summary>QA only: the robot sections of the autoplay test levels and build order with the pegboard out of
-        /// the way (its own section, "pegboard", tests the requirements). Never set by the game.</summary>
+        /// the way (its own section, "pegboard", tests the rewards). Never set by the game.</summary>
         public static bool QaIgnoreToolRequirements;
 
-        public bool ToolsMet(Project p)
-        {
-            var pb = _g.builder?.pegboard;
-            if (pb == null || QaIgnoreToolRequirements) return true;
-            if (RequiredSection(p) is string sec && !pb.SectionComplete(sec)) return false;
-            return pb.SectionsComplete >= RequiredSectionCount(p);
-        }
+        /// <summary>The board has granted this blueprint (for good, saved), or it is open from the start.</summary>
+        public bool ToolsMet(Project p) => QaIgnoreToolRequirements || Rewards == null || Rewards.Has(p.id);
 
-        /// <summary>(have, need, unit) toward the pegboard requirement: tools of the section, or sections.</summary>
-        public (int have, int need, string unit) ToolProgress(Project p)
-        {
-            var pb = _g.builder?.pegboard;
-            if (pb == null) return (0, 0, "");
-            if (RequiredSection(p) is string sec) return (pb.SectionHung(sec), pb.SectionTotal(sec), "tools restored");
-            int n = RequiredSectionCount(p);
-            return (Mathf.Min(pb.SectionsComplete, n), n, "sections");
-        }
+        /// <summary>(have, need, unit) toward the milestone that grants the blueprint: tools of the section, or sections.</summary>
+        public (int have, int need, string unit) ToolProgress(Project p) => Rewards?.Progress(MilestoneOf(p), _g.builder?.pegboard) ?? (0, 0, "");
 
-        public string ToolRequirementText(Project p)
-            => RequiredSection(p) is string sec ? _g.builder.pegboard.cfg.sectionById[sec].name
-             : RequiredSectionCount(p) > 0 ? $"any {RequiredSectionCount(p)} pegboard sections complete" : "";
+        public string ToolRequirementText(Project p) => Rewards?.RequirementText(MilestoneOf(p), _g.builder?.pegboard) ?? "";
 
         public string ToolProgressText(Project p) { var (h, n, u) = ToolProgress(p); return $"{h} / {n} {u}"; }
 
-        /// <summary>The robots still waiting for their pegboard requirement (for "... CONSTRUCTION UNLOCKED").</summary>
-        public List<Project> LockedByTools() => projects.Where(p => !Operational(p) && !ToolsMet(p)).ToList();
+        /// <summary>The other still-locked units of p's type and what opens them ("Hoverbot #2, Hoverbot #3: Sockets &
+        /// Keys (12 / 54 tools restored)"), for the bench page of the unit on the mat; "" if none.</summary>
+        public string OtherUnitsText(Project p)
+            => string.Join("  ·  ", projects.Where(q => q.type == p.type && q != p && !Unlocked(q) && !Operational(q)).GroupBy(MilestoneOf)
+                .Where(gr => gr.Key != null).Select(gr => $"{string.Join(", ", gr.Select(q => q.name))}: {ToolRequirementText(gr.First())} ({ToolProgressText(gr.First())})"));
 
-        /// <summary>A crafted project is on the bench once its predecessor has left the mat.</summary>
-        public bool OnBench(Project p) => !Operational(p) && (p.after == null || Operational(P(p.after)));
+        /// <summary>Robot units an older save had already unlocked (announced) or built: kept when it is loaded.</summary>
+        public IEnumerable<string> LegacyUnlocked() => projects.Where(p => _announced.Contains(p.id) || Operational(p)).Select(p => p.id).ToList();
 
-        /// <summary>The project currently using a mat (the first one not yet operational).</summary>
-        public Project ActiveOnMat(int mat) => projects.Where(p => p.mat == mat).FirstOrDefault(p => !Operational(p)) ?? projects.Last(p => p.mat == mat);
+        /// <summary>The project being built on its mat.</summary>
+        public bool OnBench(Project p) => !Operational(p) && ActiveOnMat(p.mat) == p;
+
+        /// <summary>The project using a mat: of the units not yet operational, one already being assembled, else the
+        /// first unlocked one, else the first one (locked); once all are operational, the last.</summary>
+        public Project ActiveOnMat(int mat)
+        {
+            Project first = null, open = null;
+            int n = 0;
+            foreach (var p in projects)
+            {
+                if (p.mat != mat || Operational(p)) continue;
+                first ??= p;
+                if (open == null && Unlocked(p)) open = p;
+                n++;
+            }
+            if (first == null) return projects.Last(p => p.mat == mat);
+            if (n > 1) foreach (var p in projects) if (p.mat == mat && !Operational(p) && InstalledCount(p) > 0) return p;
+            return open ?? first;
+        }
 
         public List<int> PartIds(Project p) => p.crafted ? new List<int>() : _g.db.RobotPartIds(p.id).SelectMany(d => _g.world.IdsOf(d)).ToList();
 

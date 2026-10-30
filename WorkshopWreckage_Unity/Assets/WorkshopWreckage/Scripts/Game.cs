@@ -33,6 +33,8 @@ namespace WorkshopWreckage
         public PileSim piles;
         public Hud hud;
         public RobotWorkbench workbench;
+        /// <summary>What the tool pegboard has unlocked (blueprints, Area Sweep), for good (docs/PEGBOARD.md "Rewards").</summary>
+        public readonly Pegboard.PegboardRewards pegRewards = new();
         /// <summary>The 24 detachable heads, arms and propellers and where each one is (Modify Robot).</summary>
         public RobotModules modules;
         public readonly List<Robot> robots = new();
@@ -370,6 +372,7 @@ namespace WorkshopWreckage
                 Debug.Log($"[boot] art: dressing {dsw.ElapsedMilliseconds} ms, cavity bake {CavityMask.BakeMs:0} ms over {CavityMask.Meshes} meshes so far");
             }
             workbench.ResetState();
+            bool rewardsSaved = pegRewards.Load(save);
             modules = new RobotModules();
             SpawnRobots();
             workbench.Load(save);
@@ -385,6 +388,11 @@ namespace WorkshopWreckage
             foreach (var e in modules.Audit()) Debug.LogError("[modules] " + e);
             foreach (var r in robots) r.ApplyModules();
             if (save != null) workbench.InstallKitsOfBuiltUnits();
+            // pegboard rewards: a save from before them keeps every blueprint it had unlocked or built; then whatever the
+            // board has earned is granted, silently (no string of old notices on loading)
+            if (!rewardsSaved) pegRewards.GrantAll(workbench.LegacyUnlocked());
+            pegRewards.Evaluate(builder?.pegboard);
+            workbench.CheckBlueprints(false);
             // an incomplete robot can't work: wherever it was saved, it is parked at the workbench
             foreach (var r in robots) if (r.Operational && !r.Docked && !modules.Complete(r.id)) r.DockAtSpot();
             foreach (var r in robots) r.RefreshAssembly();   // which crafted Hoverbot is on the bench depends on the others
@@ -1688,34 +1696,54 @@ namespace WorkshopWreckage
         float _recoverT;
 
         /// <summary>A tool deposited on its pegboard place (player only: robots never carry pegboard tools). A section
-        /// it completes pops its sign and announces the robot blueprints it opens; the last tool of the board gets the
-        /// TOOL WALL COMPLETE celebration (no reward). Loading a save never comes through here (SyncPegboard).</summary>
+        /// it completes pops its sign; the last tool of the board gets the TOOL WALL COMPLETE celebration. Then every
+        /// pegboard reward this placement earns is granted and announced once (PegboardRewards). Loading a save never
+        /// comes through here (SyncPegboard; StartWorld grants silently).</summary>
         void HangOnBoard(ItemDefinition def)
         {
             var pb = builder?.pegboard;
             if (pb == null) return;
             var sec = pb.cfg.SectionOf(def.PegSlot);
             bool wasDone = sec != null && pb.SectionComplete(sec.id), wasFull = pb.Missing == 0;
-            var lockedBefore = workbench?.LockedByTools() ?? new List<RobotWorkbench.Project>();
             pb.Install(def.PegSlot, def);
-            if (sec == null || wasDone || !pb.SectionComplete(sec.id)) return;
-            var tx = pb.cfg.Section("section_signs");
-            if (!wasFull && pb.Missing == 0)
+            if (sec != null && !wasDone && pb.SectionComplete(sec.id))
             {
-                pb.Celebrate(null);
-                Sfx.Play("complete", null, -2);
-                hud.Toast($"{Json.Str(tx, "full_title", "TOOL WALL COMPLETE!")}  ·  {Json.Str(tx, "full_text", "")}", true);
+                var tx = pb.cfg.Section("section_signs");
+                if (!wasFull && pb.Missing == 0)
+                {
+                    pb.Celebrate(null);
+                    Sfx.Play("complete", null, -2);
+                    hud.Toast($"{Json.Str(tx, "full_title", "TOOL WALL COMPLETE!")}  ·  {Json.Str(tx, "full_text", "")}", true);
+                }
+                else
+                {
+                    pb.Celebrate(sec.id);
+                    Sfx.Play("milestone", null, -4);
+                    hud.Toast(Json.Str(tx, "complete_toast", "{section} COMPLETE!").Replace("{section}", sec.name.ToUpperInvariant()), true);
+                }
             }
-            else
+            AnnounceRewards(pegRewards.Evaluate(pb));
+        }
+
+        /// <summary>One toast per milestone reached: its own notice lines (the first tool), else the blueprints or the
+        /// bonus it opens.</summary>
+        void AnnounceRewards(List<(Pegboard.PegboardRewards.Milestone m, List<string> rewards)> got)
+        {
+            if (got.Count == 0) return;
+            foreach (var (m, rewards) in got)
             {
-                pb.Celebrate(sec.id);
-                Sfx.Play("milestone", null, -4);
-                hud.Toast(Json.Str(tx, "complete_toast", "{section} COMPLETE!").Replace("{section}", sec.name.ToUpperInvariant()), true);
+                if (m.notice.Count > 0) { hud.Toast(string.Join("  ·  ", m.notice), true); continue; }
+                var bps = rewards.Where(r => workbench.P(r) != null).Select(r => workbench.P(r).name).ToList();
+                if (bps.Count > 0) hud.Toast($"{(bps.Count == 1 ? "Blueprint" : "Blueprints")} unlocked: {string.Join(", ", bps)}  ·  see the Robot Workbench", true);
+                if (rewards.Contains("part_radar")) hud.Toast("Blueprint unlocked: Part Radar  ·  see the Robot Workbench", true);
+                if (rewards.Contains("area_sweep"))
+                    hud.Toast($"Bonus unlocked: Area Sweep  ·  key {tools.Slot("area_sweep")}, every {Mathf.RoundToInt(tools.CooldownOf("area_sweep") / 60f)} min", true);
             }
-            foreach (var p in lockedBefore.Where(workbench.ToolsMet))
-                hud.Toast(workbench.Unlocked(p) ? $"{p.name.ToUpperInvariant()} CONSTRUCTION UNLOCKED  ·  see the Robot Workbench"
-                                                : $"{p.name.ToUpperInvariant()}: TOOLS READY  ·  {workbench.LockReason(p)}", true);
-            workbench?.CheckBlueprints(false);   // marks them announced (the toast above is the announcement)
+            Sfx.Play("milestone", null, -6);
+            if (got.Any(x => x.rewards.Contains("part_radar"))) radar?.TryAssemble();   // built at once if its parts are already in the pool
+            workbench.CheckBlueprints(false);   // marks them announced (the toasts above are the announcement)
+            foreach (var r in robots) r.RefreshAssembly();   // which unit is on a mat can change
+            workbench.Refresh();
         }
 
         void CheckFullyRestored()

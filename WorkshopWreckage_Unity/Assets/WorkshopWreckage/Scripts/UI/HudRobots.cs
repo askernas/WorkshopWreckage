@@ -163,7 +163,7 @@ namespace WorkshopWreckage
                 var missing = radar.MissingNames();
                 string parts = missing.Count == 0 ? $"<color={Hex(GoodC)}>all {PartRadarModel.Parts.Length} parts in the pool</color>"
                     : $"{PartRadarModel.Parts.Length - missing.Count}/{PartRadarModel.Parts.Length} parts in the pool  <color={Hex(Muted)}>· missing: {string.Join(", ", missing)}</color>";
-                string plans = radar.HasPlans ? $"<color={Hex(GoodC)}>plans bought</color>" : $"<color={Hex(BadC)}>plans not bought</color> <color={Hex(Muted)}>(2 skill points, [K])</color>";
+                string plans = radar.HasPlans ? $"<color={Hex(GoodC)}>blueprint unlocked</color>" : $"<color={Hex(BadC)}>blueprint locked</color> <color={Hex(Muted)}>({PartRadar.PlansHint})</color>";
                 text = $"<b>Part Radar</b>  {parts}  ·  {plans}";
             }
             var t = Para(_wbRadar, text, 16, Cream, 30);
@@ -206,9 +206,9 @@ namespace WorkshopWreckage
                 // "SPIDERBOT — LOCKED / Requires: Spanners & Wrenches / Progress 14 / 20 tools restored" (docs/PEGBOARD.md "Sections")
                 bp = $"<color={Hex(BadC)}><b>{p.name.ToUpperInvariant()} — LOCKED</b></color>    Requires: <color={Hex(Brass)}>{wb.ToolRequirementText(p)}</color>"
                    + $"    Progress <color={Hex(Cream)}>{wb.ToolProgressText(p)}</color>";
-                if (p.after != null && !wb.Operational(wb.P(p.after))) bp += $"  ·  needs {wb.P(p.after).name} operational";
             }
             else bp = $"Blueprint: <color={Hex(BadC)}>locked</color> — {wb.LockReason(p)}  ·  you are level {lvl}";
+            if (!wb.Unlocked(p) && wb.OtherUnitsText(p) is string others && others != "") bp += $"    <color={Hex(Muted)}>Also: {others}</color>";
             bp += "\n" + StageLine(wb, p);
             string Bar(float f) { int n = Mathf.RoundToInt(f * 24); return $"<color={Hex(GoodC)}>{new string('■', n)}</color><color=#5a4a38>{new string('■', 24 - n)}</color>"; }
             string statusLine = $"<size=26><b><color={Hex(Brass)}>{p.name}</color></b></size>    <color={Hex(st == RobotWorkbench.Status.Operational || st == RobotWorkbench.Status.ReadyForActivation ? GoodC : Cream)}>{RobotWorkbench.StatusText(st)}</color>";
@@ -230,7 +230,7 @@ namespace WorkshopWreckage
             if (!_wbParts)
             {
                 // ---- page 1: the blueprints
-                foreach (var q in wb.projects.Where(q => q.after == null || wb.Operational(wb.P(q.after)) || wb.Operational(q)))
+                foreach (var q in wb.projects.Where(q => wb.ActiveOnMat(q.mat) == q || wb.Operational(q)))
                 {
                     var s = wb.StatusOf(q);
                     string mark = s == RobotWorkbench.Status.Operational ? "  ✓" : s == RobotWorkbench.Status.AwaitingBlueprint ? $"  (lv {q.level})" : $"  {wb.FoundCount(q)}/{wb.Required(q)}";
@@ -253,7 +253,7 @@ namespace WorkshopWreckage
                 {
                     var missing = radar.MissingNames();
                     _wbHeader.text = $"<size=26><b><color={Hex(Brass)}>Part Radar</color></b></size>    {(radar.assembled ? $"<color={Hex(GoodC)}>built</color>" : "not built")}\n"
-                        + (radar.HasPlans ? $"Plans: <color={Hex(GoodC)}>bought</color>" : $"Plans: <color={Hex(BadC)}>not bought</color> <color={Hex(Muted)}>(2 skill points, [K])</color>") + "\n"
+                        + (radar.HasPlans ? $"Blueprint: <color={Hex(GoodC)}>unlocked</color>" : $"Blueprint: <color={Hex(BadC)}>locked</color> <color={Hex(Muted)}>({PartRadar.PlansHint})</color>") + "\n"
                         + $"Found  {Bar((float)radarFound / PartRadarModel.Parts.Length)}  {radarFound} / {PartRadarModel.Parts.Length} parts in the pool";
                     _wbPartsA.text = "<b>A hand-held part finder</b>\n[Y] take it out, pulse it and the nearest parts of the kind you chose light up.\nRuns on batteries found in the workshop.";
                     _wbPartsB.text = missing.Count == 0 ? $"<color={Hex(GoodC)}>All its parts are in the pool.</color>" : $"<b>Still missing</b>\n<color={Hex(Muted)}>{string.Join("\n", missing)}</color>";

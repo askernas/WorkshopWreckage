@@ -170,9 +170,13 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- the workbench
 
-        /// <summary>The Part Radar plans (skill "part_radar_plans", 2 skill points, playtest 2026-10-26): without
-        /// them its parts only collect in the robot parts pool.</summary>
-        public bool HasPlans => g.progression != null && g.progression.Has("part_radar_plans");
+        /// <summary>The Part Radar blueprint: the tool pegboard's first-tool reward ("part_radar", docs/PEGBOARD.md
+        /// "Rewards"), or the older skill "part_radar_plans" (2 skill points, still in the skill tree). Without it the
+        /// radar's parts only collect in the robot parts pool.</summary>
+        public bool HasPlans => g.pegRewards.Has("part_radar") || g.progression != null && g.progression.Has("part_radar_plans");
+
+        /// <summary>How to get the blueprint.</summary>
+        public const string PlansHint = "hang a tool in its place on the pegboard";
 
         /// <summary>Names of the parts not yet in the pool.</summary>
         public List<string> MissingNames()
@@ -187,7 +191,7 @@ namespace WorkshopWreckage
             if (assembled) return "The Part Radar is already built";
             var missing = MissingNames();
             if (missing.Count > 0) return $"The Part Radar still needs: {string.Join(", ", missing)}";
-            return HasPlans ? "" : "Buy the Part Radar plans first (2 skill points, [K])";
+            return HasPlans ? "" : $"The Part Radar blueprint is locked: {PlansHint}";
         }
 
         /// <summary>Builds the radar if the plans are bought and one of each part is in the pool (after buying the plans).</summary>
@@ -214,7 +218,7 @@ namespace WorkshopWreckage
             if (def.IsRadarBattery) return (true, "Spent radar battery disposed of at the workbench");
             if (assembled) return (true, $"Spare radar part: {def.displayName} — kept in the robot parts pool");
             var have = TypesDelivered();
-            string plans = HasPlans ? "" : "  ·  buy the Part Radar plans (2 skill points, [K]) to build it";
+            string plans = HasPlans ? "" : $"  ·  blueprint locked: {PlansHint}";
             if (have.Count < PartRadarModel.Parts.Length)
             {
                 var missing = PartRadarModel.Parts.Where(p => !have.Contains(p)).Select(Name);

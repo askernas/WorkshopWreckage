@@ -61,7 +61,7 @@ namespace WorkshopWreckage
             "magnetic_glove" => MagnetLevel,
             "scanner" => P.Has("scan_radius_m") ? 1 : 0,
             "supermagnet" => P.Has("supermagnet") ? 1 : 0,
-            "area_sweep" => P.Has("area_collect_radius_m") ? 1 : 0,
+            "area_sweep" => P.Has("area_collect_radius_m") || g.pegRewards.Has("area_sweep") ? 1 : 0,   // the skill, or the full pegboard's free bonus
             "part_sense" => (int)P.Effect("part_sense"),   // ranks I-V
             _ => 0,
         };
@@ -76,7 +76,11 @@ namespace WorkshopWreckage
         }
 
         public int Slot(string id) => (int)Tuned(id, "slot", 1, System.Array.FindIndex(Usable, u => u.id == id) + 1);
-        public float CooldownOf(string id) => Tuned(id, "cooldown_s", Level(id), 10);
+        public float CooldownOf(string id) => id == "area_sweep" && SweepFromBoard ? g.pegRewards.SweepCooldown : Tuned(id, "cooldown_s", Level(id), 10);
+
+        /// <summary>Area Sweep from the full pegboard (unlocks.json pegboard_rewards.area_sweep), not the skill: its own
+        /// radius, cooldown and limit, the same for every preset.</summary>
+        bool SweepFromBoard => !P.Has("area_collect_radius_m") && g.pegRewards.Has("area_sweep");
         public float CooldownLeft(string id) => Mathf.Max(0, _ready.GetValueOrDefault(id) - Time.time);
 
         /// <summary>False (with a message) while the skill recharges.</summary>
@@ -418,10 +422,11 @@ namespace WorkshopWreckage
         /// hands, nearest first, up to the sweep limit and free inventory space.</summary>
         public int AreaSweep()
         {
-            float r = (float)P.Effect("area_collect_radius_m") * g.Scale("tool_range");
-            if (r <= 0) { g.hud.OnFeedback("You need the Area Sweep skill (K → Skills)", false); return 0; }
+            bool board = SweepFromBoard;
+            float r = board ? g.pegRewards.SweepRadius : (float)P.Effect("area_collect_radius_m") * g.Scale("tool_range");
+            if (r <= 0) { g.hud.OnFeedback("Area Sweep is locked: complete every pegboard section", false); return 0; }
             if (!Ready("area_sweep", "Area Sweep")) return 0;
-            int max = Mathf.RoundToInt((float)P.Effect("area_collect_max_items") * g.Scale("tool_items"));   // what doesn't fit goes to the tray
+            int max = board ? g.pegRewards.SweepMaxItems : Mathf.RoundToInt((float)P.Effect("area_collect_max_items") * g.Scale("tool_items"));   // what doesn't fit goes to the tray
             var me = g.player.transform.position + Vector3.up * 0.5f;
             var ids = g.index.QuerySphere(me, r).Where(Takeable).Where(i => LineOfSight(Hand, g.world.instances[i].Position) && !g.Covered(i))
                 .OrderBy(i => (g.world.instances[i].Position - me).sqrMagnitude).Take(max).ToList();

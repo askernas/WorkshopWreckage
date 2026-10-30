@@ -2634,6 +2634,15 @@ namespace WorkshopWreckage
             }
             long xp0 = g.progression.xp; int lv0 = g.progression.level, pts0 = g.progression.skillPoints;
             float pct0 = g.progress.OverallPercent;
+            Check("a new game: no pegboard reward yet (Part Radar blueprint locked, no Area Sweep)",
+                  g.pegRewards.Granted.Count == 0 && !g.radar.HasPlans && g.tools.Level("area_sweep") == 0, string.Join(",", g.pegRewards.Granted));
+            it.Pickup(c.id, false);
+            yield return AimAtSlot(g.world.DefOf(b.id).PegSlot);
+            it.Primary();
+            yield return Frames(2);
+            Check("a tool offered at another tool's place is refused and unlocks nothing",
+                  pb.Hung == 0 && g.inventory.Has(c.id) && g.pegRewards.Granted.Count == 0 && !g.radar.HasPlans, $"hung {pb.Hung}, granted {string.Join(",", g.pegRewards.Granted)}");
+            g.inventory.Remove(c.id); g.world.SetState(c.id, ItemState.InWorld, "world");   // out of the hands again: the checks below aim at its slot
             it.Pickup(a.id, false);
             yield return AimAtSlot(g.world.DefOf(a.id).PegSlot);
             var info = it.Describe();
@@ -2641,8 +2650,15 @@ namespace WorkshopWreckage
                   it.targetType == "peg" && it.targetPeg == g.world.DefOf(a.id).PegSlot && info.tone == 1 && info.hint.Contains("Hang"),
                   $"target {it.targetType} {it.targetPeg}, hint '{info.hint}'");
             yield return g.Capture(Path.Combine(outDir, "peg_highlight.png"), 1);
+            int firstT0 = g.hud.toastLog.Count;
             it.Primary();
             yield return Frames(2);
+            var firstSaid = g.hud.toastLog.Skip(firstT0).ToList();
+            Check("the first tool in its place unlocks the Part Radar blueprint at once, with the one-time notice",
+                  pb.Hung == 1 && g.pegRewards.Has("part_radar") && g.radar.HasPlans && !g.progression.Has("part_radar_plans")
+                  && firstSaid.Count(t => t.Contains("Blueprint unlocked: Part Radar") && t.Contains("Complete tool sections to unlock more blueprints.")) == 1,
+                  string.Join(" | ", firstSaid));
+            yield return g.Capture(Path.Combine(outDir, "peg_first_tool_notice.png"), 1);
             Check("[LMB] hangs it: stored in its slot, drawn on the board, restored % up, no XP, level or skill point",
                   pb.IsOccupied(g.world.DefOf(a.id).PegSlot) && pb.Hung == 1 && a.state == ItemState.Stored && a.owner == "box:" + g.world.DefOf(a.id).storageBox && !g.inventory.Has(a.id)
                   && g.progress.OverallPercent > pct0 && g.progression.xp == xp0 && g.progression.level == lv0 && g.progression.skillPoints == pts0,
@@ -2663,14 +2679,15 @@ namespace WorkshopWreckage
             g.piles.Finish();
             g.SaveGame("autotest_peg");
             g.StartWorld(g.world.seed, null);
-            Check("a new world starts with an empty board", g.builder.pegboard.Hung == 0, $"{g.builder.pegboard.Hung} hung");
+            Check("a new world starts with an empty board and no pegboard rewards", g.builder.pegboard.Hung == 0 && g.pegRewards.Granted.Count == 0 && !g.radar.HasPlans,
+                  $"{g.builder.pegboard.Hung} hung, granted {string.Join(",", g.pegRewards.Granted)}");
             g.LoadGame("autotest_peg");
             g.player.enabled = false;
             yield return Frames(3);
             pb = g.builder.pegboard;
             a = g.world.instances[a.id]; b = g.world.instances[b.id];
-            Check("save and load restore the board: the hung tool in its slot, the other still carried",
-                  pb.Hung == 1 && pb.IsOccupied(g.world.DefOf(a.id).PegSlot) && a.state == ItemState.Stored && g.inventory.Has(b.id) && g.progression.xp == xp0,
+            Check("save and load restore the board: the hung tool in its slot, the other still carried, the Part Radar blueprint kept",
+                  pb.Hung == 1 && pb.IsOccupied(g.world.DefOf(a.id).PegSlot) && a.state == ItemState.Stored && g.inventory.Has(b.id) && g.progression.xp == xp0 && g.pegRewards.Has("part_radar"),
                   $"hung {pb.Hung}, a {a.state}, b carried {g.inventory.Has(b.id)}, xp {g.progression.xp}");
 
             // a set: its pieces can be found and carried first, but go up only once their holder is mounted
@@ -2769,44 +2786,89 @@ namespace WorkshopWreckage
             Check("the smallest set pieces (deep socket, PH, slotted, Torx and hex bits, the 1.5 mm key) lying on the floor are targeted and picked up",
                   aimed == 6 && picked == 6, $"aimed {aimed}/6, picked {picked}/6; {string.Join(", ", sizes)}");
 
-            // sections open robot blueprints (unlocks.json robot_pegboard)
+            // pegboard rewards (unlocks.json pegboard_rewards, docs/PEGBOARD.md "Rewards"): blueprints and Area Sweep
             var wb = g.workbench;
-            var spider = wb.P("spiderbot"); var arm1 = wb.P("sorting_arm"); var h3 = wb.P("hoverbot_3");
-            LevelTo(Mathf.Max(spider.level, arm1.level));
-            var expect = new Dictionary<string, string> { ["sorting_arm"] = "pliers", ["spiderbot"] = "spanners", ["hoverbot"] = "precision", ["sorting_arm_2"] = "screwdrivers", ["sorting_arm_3"] = "hammers", ["hoverbot_2"] = "sockets" };
-            Check("blueprint table: Sorting Arm #1 ← Pliers, Spiderbot ← Spanners, Hoverbot #1 ← Precision, Arm #2 ← Screwdrivers, Arm #3 ← Hammers, Hoverbot #2 ← Sockets, Hoverbot #3 ← any 5; Retrobot, Unibot, Caterpillarbot need none",
-                  expect.All(kv => Unlocks.PegboardRequirement(kv.Key).section == kv.Value) && Unlocks.PegboardRequirement("hoverbot_3").sections == 5
-                  && new[] { "retrobot", "unibot", "caterpillarbot" }.All(id => !wb.HasToolRequirement(wb.P(id))), "");
-            Check("Spiderbot stays locked until Spanners & Wrenches is complete; the bench says why and how far",
-                  !wb.Unlocked(spider) && wb.LockReason(spider).Contains("Requires: Spanners & Wrenches") && wb.LockReason(spider).Contains($"{pb.SectionHung("spanners")} / 20 tools restored")
-                  && wb.ToolProgressText(h3) == $"{pb.SectionsComplete} / 5 sections", $"'{wb.LockReason(spider)}'; Hoverbot #3: {wb.ToolProgressText(h3)}");
+            var rw = g.pegRewards;
+            var spider = wb.P("spiderbot"); var hb1 = wb.P("hoverbot"); var hb2 = wb.P("hoverbot_2");
+            string MsOf(string r) { var m = rw.For(r); return m == null ? "start" : m.tools > 0 ? $"tools {m.tools}" : m.section ?? (m.all ? "all" : $"any {m.sections}"); }
+            var table = new Dictionary<string, string>
+            {
+                ["retrobot"] = "start", ["part_radar"] = "tools 1", ["unibot"] = "pliers", ["caterpillarbot"] = "precision", ["hoverbot"] = "hammers",
+                ["sorting_arm"] = "screwdrivers", ["spiderbot"] = "spanners", ["hoverbot_2"] = "sockets", ["hoverbot_3"] = "sockets",
+                ["sorting_arm_2"] = "any 3", ["sorting_arm_3"] = "any 5", ["area_sweep"] = "all",
+            };
+            Check("reward table: Retrobot from the start, first tool → Part Radar, Pliers → Unibot, Precision → Caterpillarbot, Hammers → Hoverbot #1, Screwdrivers → Sorting Arm #1, Spanners → Spiderbot, Sockets → Hoverbot #2 and #3, any 3 → Arm #2, any 5 → Arm #3, all → Area Sweep",
+                  table.All(kv => MsOf(kv.Key) == kv.Value) && rw.Milestones.SelectMany(m => m.unlocks).Count() == table.Count - 1,
+                  string.Join(", ", table.Keys.Select(k => $"{k} {MsOf(k)}")) + $"; section sizes from the slots: {string.Join(", ", cfg.sections.Select(s => $"{s.id} {pb.SectionTotal(s.id)}"))}, {pb.Total} in all");
+            var robotsOpen = wb.projects.Where(p => !wb.Operational(p) && wb.Unlocked(p)).Select(p => p.id).ToList();
+            Check("after the first tool only Retrobot (from the start) and the Part Radar are open; the bench says what Spiderbot needs and how far",
+                  robotsOpen.SequenceEqual(new[] { "retrobot" }) && rw.Granted.SequenceEqual(new[] { "part_radar" }) && g.tools.Level("area_sweep") == 0
+                  && wb.LockReason(spider).Contains("Requires: Spanners & Wrenches") && wb.LockReason(spider).Contains($"{pb.SectionHung("spanners")} / {pb.SectionTotal("spanners")} tools restored")
+                  && wb.LockReason(hb1).Contains("Hammers, Chisels & Saws") && wb.OtherUnitsText(hb1).Contains("Hoverbot #2, Hoverbot #3: Sockets & Keys"),
+                  $"open: {string.Join(",", robotsOpen)}; granted: {string.Join(",", rw.Granted)}; spider: '{wb.LockReason(spider)}'");
             g.OpenWorkbench("spiderbot");
             yield return Frames(4);
             yield return g.Capture(Path.Combine(outDir, "peg_bench_spider_locked.png"), 2);
             g.SetState("play");
             g.player.enabled = false;
 
-            int toasts0 = g.hud.toastLog.Count;
-            foreach (var slot in cfg.sectionById["pliers"].slots.Where(s => !pb.IsOccupied(s)))
+            // sections in an order unlike the table: every one gives its own reward, the counts their arms, each once
+            List<string> HangSection(string sec)
             {
-                int id = Tool(slot);
-                Take(id);
-                it.HangTool(id);
+                int t0 = g.hud.toastLog.Count;
+                foreach (var slot in cfg.sectionById[sec].slots.Where(s => !pb.IsOccupied(s)).OrderBy(s => cfg.slotById[s].IsChild ? 1 : 0).ToList())
+                {
+                    int id = Tool(slot);
+                    if (!g.inventory.Has(id)) Take(id);
+                    it.HangTool(id);
+                }
+                return g.hud.toastLog.Skip(t0).ToList();
             }
-            yield return Frames(2);
-            var said = g.hud.toastLog.Skip(toasts0).ToList();
-            Check("completing Pliers & Clamps: its sign reads COMPLETE, the log says so and SORTING ARM CONSTRUCTION UNLOCKED; the arm's blueprint opens",
-                  pb.SectionComplete("pliers") && pb.SignText("pliers").StartsWith("COMPLETE") && said.Any(t => t.Contains("PLIERS & CLAMPS COMPLETE!"))
-                  && said.Any(t => t.Contains(arm1.name.ToUpperInvariant() + " CONSTRUCTION UNLOCKED")) && wb.Unlocked(arm1) && !wb.Unlocked(spider)
-                  && wb.ToolProgressText(h3) == "1 / 5 sections", $"sign '{pb.SignText("pliers")}'; said: {string.Join(" | ", said)}; Hoverbot #3 {wb.ToolProgressText(h3)}");
-            var signAt = pb.transform.TransformPoint(new Vector3((cfg.sectionById["pliers"].x0 + cfg.sectionById["pliers"].x1) / 2, pb.cfg.PanelCentre.y + 0.3f, pb.cfg.PanelFront));
-            LookFrom(signAt - pb.transform.forward * 1.3f, signAt);
-            yield return Frames(3);
-            yield return g.Capture(Path.Combine(outDir, "peg_pliers_complete.png"), 1);
+            var expected = new HashSet<string> { "part_radar" };
+            var steps = new (string sec, string[] gets)[]
+            {
+                ("precision", new[] { "caterpillarbot" }),
+                ("sockets", new[] { "hoverbot_2", "hoverbot_3" }),
+                ("pliers", new[] { "unibot", "sorting_arm_2" }),   // the third section: two milestones at once
+                ("hammers", new[] { "hoverbot" }),
+                ("spanners", new[] { "spiderbot", "sorting_arm_3" }),   // the fifth
+                ("screwdrivers", new[] { "sorting_arm", "area_sweep" }),   // the whole board
+            };
+            var allSaid = new List<string>();
+            foreach (var (sec, gets) in steps)
+            {
+                var said = HangSection(sec);
+                yield return Frames(2);
+                allSaid.AddRange(said);
+                expected.UnionWith(gets);
+                var granted = rw.Granted.ToHashSet();
+                var unlockToasts = said.Where(t => t.Contains("unlocked:")).ToList();
+                bool robotsOk = gets.Where(r => wb.P(r) != null).All(r => wb.Unlocked(wb.P(r)) && unlockToasts.Count(t => t.Contains(wb.P(r).name)) == 1);
+                bool othersLocked = wb.projects.Where(p => !expected.Contains(p.id) && p.id != "retrobot").All(p => !wb.Unlocked(p));
+                Check($"{cfg.sectionById[sec].name} complete ({pb.SectionsComplete} of {cfg.sections.Count}): unlocks {string.Join(" + ", gets)}, announced once; nothing else",
+                      pb.SectionComplete(sec) && granted.SetEquals(expected) && robotsOk && othersLocked && Rewards(rw.Evaluate(pb)) == 0,
+                      $"granted {string.Join(",", granted.OrderBy(x => x))}; said: {string.Join(" | ", said)}");
+                if (sec == "sockets")
+                    Check("Hoverbot #2 and #3 open while Hoverbot #1 is still locked: #2 is the unit on the Hoverbot mat",
+                          wb.Unlocked(hb2) && wb.Unlocked(wb.P("hoverbot_3")) && !wb.Unlocked(hb1) && wb.ActiveOnMat(hb1.mat) == hb2 && wb.OnBench(hb2)
+                          && !wb.CanInstall(hb2, wb.PoolIds(hb2).First()).Contains("Requires"),
+                          $"active on the mat: {wb.ActiveOnMat(hb1.mat).id}; hb1 '{wb.LockReason(hb1)}'");
+                if (sec == "pliers")
+                {
+                    var signAt = pb.transform.TransformPoint(new Vector3((cfg.sectionById["pliers"].x0 + cfg.sectionById["pliers"].x1) / 2, pb.cfg.PanelCentre.y + 0.3f, pb.cfg.PanelFront));
+                    LookFrom(signAt - pb.transform.forward * 1.3f, signAt);
+                    yield return Frames(3);
+                    yield return g.Capture(Path.Combine(outDir, "peg_pliers_complete.png"), 1);
+                }
+            }
+            int Rewards(List<(Pegboard.PegboardRewards.Milestone m, List<string> rewards)> got) => got.Sum(x => x.rewards.Count);
+            Check("the first tool's notice and every reward toast appear exactly once in the whole run",
+                  allSaid.Count(t => t.Contains("Blueprint unlocked: Part Radar")) == 0 && firstSaid.Count(t => t.Contains("Blueprint unlocked: Part Radar") && t.Contains("Complete tool sections to unlock more blueprints.")) == 1
+                  && allSaid.Count(t => t.Contains("Area Sweep")) == 1, $"first tool: {string.Join(" | ", firstSaid)}");
 
             // every tool hung: the board is complete (100 %), still no XP; holders go up before their pieces
             int refused = 0;
-            toasts0 = g.hud.toastLog.Count;
+            int toasts0 = g.hud.toastLog.Count;
             foreach (var i in g.world.instances.Where(i => g.world.DefOf(i.id).IsPegboardTool && i.state != ItemState.Stored)
                                                .OrderBy(i => cfg.slotById[g.world.DefOf(i.id).PegSlot].IsChild ? 1 : 0).ToList())
             {
@@ -2814,13 +2876,13 @@ namespace WorkshopWreckage
                 if (!it.HangTool(i.id)) refused++;
             }
             yield return Frames(3);
-            said = g.hud.toastLog.Skip(toasts0).ToList();
             Check("every tool hangs in its own slot: the board shows all of them, none missing, 100 %, no XP",
                   refused == 0 && pb.Missing == 0 && pb.Percent >= 99.99f && g.progression.xp == xp0,
                   $"{pb.Hung}/{pb.Total} hung, {refused} refused, xp {g.progression.xp}");
-            Check("the full board: TOOL WALL COMPLETE! with its line, every section complete, every robot's tool requirement met (no reward)",
-                  said.Any(t => t.Contains("TOOL WALL COMPLETE!") && t.Contains("The inventor would almost be impressed.")) && pb.SectionsComplete == 6 && wb.projects.All(wb.ToolsMet)
-                  && g.progression.xp == xp0, string.Join(" | ", said));
+            Check("the full board: TOOL WALL COMPLETE! with its line, every section complete, every blueprint open, Area Sweep a free bonus (0.5 m, 300 s), still no XP",
+                  allSaid.Any(t => t.Contains("TOOL WALL COMPLETE!") && t.Contains("The inventor would almost be impressed.")) && pb.SectionsComplete == 6 && wb.projects.All(wb.Unlocked)
+                  && g.tools.Level("area_sweep") == 1 && Mathf.Approximately(g.tools.CooldownOf("area_sweep"), rw.SweepCooldown) && rw.SweepCooldown == 300 && Mathf.Approximately(rw.SweepRadius, 0.5f)
+                  && !g.progression.Has("area_collect_radius_m") && g.progression.xp == xp0, $"sweep level {g.tools.Level("area_sweep")}, cooldown {g.tools.CooldownOf("area_sweep")} s, radius {rw.SweepRadius} m");
             foreach (var (holder, shot) in new[] { ("SK01", "peg_socket_holder_full.png"), ("HX01", "peg_hex_holder_full.png"), ("SK03", "peg_deep_holder_full.png"), ("SK08", "peg_bit_holder_full.png") })
             {
                 var at = pb.SlotCentre(holder);
@@ -2828,9 +2890,7 @@ namespace WorkshopWreckage
                 yield return Frames(3);
                 yield return g.Capture(Path.Combine(outDir, shot), 1);
             }
-            Check("Sorting Arm #2, Sorting Arm #3 and Hoverbot #2 say their tools are ready and what else they wait for",
-                  new[] { "sorting_arm_2", "sorting_arm_3", "hoverbot_2" }.All(id => said.Any(t => t.StartsWith(wb.P(id).name.ToUpperInvariant() + ": TOOLS READY") || t.StartsWith(wb.P(id).name.ToUpperInvariant() + " CONSTRUCTION UNLOCKED"))),
-                  string.Join(" | ", said.Where(t => t.Contains("TOOLS READY") || t.Contains("UNLOCKED"))));
+            var grantedBefore = rw.Granted.OrderBy(x => x).ToList();
             g.piles.Finish();
             g.SaveGame("autotest_peg");
             int toasts1 = g.hud.toastLog.Count;
@@ -2841,6 +2901,10 @@ namespace WorkshopWreckage
             Check("a full board with its holders survives save and load, with no celebration on loading",
                   pb.Missing == 0 && pb.SectionsComplete == 6 && !g.hud.toastLog.Skip(toasts1).Any(t => t.Contains("COMPLETE")) && g.PegboardGuard(false).Count == 0,
                   $"{pb.Hung}/{pb.Total}, {pb.SectionsComplete} sections");
+            Check("save and load keep every reward, with no notice again: all blueprints open, Area Sweep on its 300 s cooldown",
+                  g.pegRewards.Granted.OrderBy(x => x).SequenceEqual(grantedBefore) && !g.hud.toastLog.Skip(toasts1).Any(t => t.Contains("unlocked")) && g.workbench.projects.All(g.workbench.Unlocked)
+                  && g.tools.Level("area_sweep") == 1 && Mathf.Approximately(g.tools.CooldownOf("area_sweep"), 300) && g.pegRewards.Evaluate(pb).Count == 0,
+                  $"granted {string.Join(",", g.pegRewards.Granted)}; toasts on load: {string.Join(" | ", g.hud.toastLog.Skip(toasts1))}");
             var mid = pb.transform.TransformPoint(new Vector3(0, pb.cfg.PanelCentre.y, pb.cfg.PanelFront));
             LookFrom(mid - pb.transform.forward * 3.2f, mid);
             yield return Frames(3);
@@ -3142,8 +3206,10 @@ namespace WorkshopWreckage
             Check("robots that were operational stay operational, whatever the new blueprint rules say", opBefore.All(opAfter.Contains),
                   $"before: {string.Join(", ", opBefore)}; after: {string.Join(", ", opAfter)}");
             var wb = g.workbench;
-            Check("blueprints follow the new rules: a robot needing an incomplete section is locked unless it is already built",
-                  wb.projects.All(p => wb.Operational(p) || wb.ToolsMet(p) || !wb.Unlocked(p)),
+            Check("an older save keeps every blueprint it had (announced or built) and gets what its board has earned; the rest stays locked",
+                  wb.projects.All(p => wb.Unlocked(p) == (wb.Operational(p) || announcedBefore.Contains(p.id) || p.id == "retrobot"
+                                                         || g.pegRewards.Milestones.Any(m => m.unlocks.Contains(p.id) && g.pegRewards.Met(m, pb))))
+                  && g.pegRewards.Has("part_radar") == (pb.Hung > 0 || g.pegRewards.Granted.Contains("part_radar")),
                   string.Join("; ", wb.projects.Select(p => $"{p.id} {(wb.Unlocked(p) ? "open" : "locked")}{(wb.Operational(p) ? " (built)" : "")}")));
             var partsWhereAfter = g.world.instances.Where(i => g.world.DefOf(i.id).IsRobotPart)
                 .GroupBy(i => Where((int)i.state, i.owner)).ToDictionary(gr => gr.Key, gr => gr.Count());
@@ -3182,7 +3248,7 @@ namespace WorkshopWreckage
             bool allOffered = parts.All(offered.Contains);
             foreach (var id in offered.ToList()) { var r = g.workbench.Deliver(id); if (parts.Contains(id)) last = r.text; }
             yield return Frames(2);
-            bool waits = !radar.assembled && !radar.HasPlans && parts.All(id => wb.PoolContents().Contains(id)) && last.Contains("plans");
+            bool waits = !radar.assembled && !radar.HasPlans && parts.All(id => wb.PoolContents().Contains(id)) && last.Contains("blueprint locked");
             Check("radar parts go into the robot parts pool; without the plans the radar is not built",
                   parts.Count == PartRadarModel.Parts.Length && allOffered && waits && plans != null && plans.cost == 2,
                   $"{parts.Count} part types, offered at the bench {allOffered}, assembled {radar.assembled}, pool {wb.PoolContents().Count}; plans cost {plans?.cost}; \"{last}\"");

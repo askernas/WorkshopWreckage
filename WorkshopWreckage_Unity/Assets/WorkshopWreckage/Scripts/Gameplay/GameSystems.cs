@@ -627,6 +627,7 @@ namespace WorkshopWreckage
                 ["robots"] = g.robots.ToDictionary(r => r.id, r => (object)r.ToDict()),
                 ["objectives"] = g.objectives.ToList(),
                 ["workbench"] = g.workbench.ToDict(),
+                ["pegboard_rewards"] = g.pegRewards.ToList(),
                 ["modules"] = g.modules.ToDict(),
                 ["radar"] = g.radar.ToDict(),
                 ["items"] = items, ["item_defs"] = itemDefs, ["storage"] = storage,
