@@ -24,3 +24,17 @@ WorkshopWreckage_Unity/.vs/
 # large generated QA/reference images (local only)
 part audit/
 sheets/
+
+# work images and logs kept on disk only (2026-11-02 clean-up; nothing in the game or tools reads them)
+robots/
+graphic rework/
+docs/component_catalogue/images/
+docs/component_catalogue/contact_sheets/
+docs/comparison/
+docs/screenshots/
+docs/retrobot_polish/
+docs/component_rescale/
+docs/component_rescale_1p5/
+Logs/
+__pycache__/
+*.pyc
