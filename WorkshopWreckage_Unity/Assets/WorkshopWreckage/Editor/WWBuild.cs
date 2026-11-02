@@ -22,6 +22,7 @@ namespace WorkshopWreckage.EditorTools
 
         /// <summary>Generated only during a release build: unlocks.json compiled in.</summary>
         const string BakedUnlocks = "Assets/WorkshopWreckage/Scripts/Core/UnlocksBaked.g.cs";
+        public const string IconAsset = "Assets/WorkshopWreckage/Icon/WorkshopWreckageIcon.png";
         public static bool Release { get; private set; }
 
         [MenuItem("Workshop Wreckage/Build Windows Player")]
@@ -77,6 +78,7 @@ namespace WorkshopWreckage.EditorTools
             PlayerSettings.SplashScreen.show = false;
             PlayerSettings.companyName = "Workshop Wreckage";
             PlayerSettings.productName = "Workshop Wreckage";
+            ConfigureIcon();
             if (mac) ConfigureMac();
             var sw = Stopwatch.StartNew();
             var opts = new BuildPlayerOptions
@@ -97,6 +99,17 @@ namespace WorkshopWreckage.EditorTools
             Directory.CreateDirectory("Builds");   // a build that fails before writing anything leaves no Builds/
             File.WriteAllText("Builds/last_build.txt", line + "\n");
             return s.result == BuildResult.Succeeded;
+        }
+
+        /// <summary>One source image drives every player icon: the .app's .icns, the .exe's icon and
+        /// the icon Windows shows in the taskbar and when you alt-tab. Standalone has a single icon
+        /// kind but several size slots, and Unity wants the array filled for all of them.</summary>
+        static void ConfigureIcon()
+        {
+            var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(IconAsset);
+            if (tex == null) { UnityEngine.Debug.LogError("[build] no icon at " + IconAsset + "; the player keeps the default Unity one."); return; }
+            var slots = PlayerSettings.GetIconSizes(NamedBuildTarget.Standalone, IconKind.Any).Length;
+            PlayerSettings.SetIcons(NamedBuildTarget.Standalone, Enumerable.Repeat(tex, slots).ToArray(), IconKind.Any);
         }
 
         /// <summary>x64 + arm64 in one binary. The bundle identifier is set here because the project
