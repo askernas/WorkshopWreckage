@@ -92,7 +92,7 @@ namespace WorkshopWreckage.Sandbox
             }
             picks = picks.OrderByDescending(p => p.key).ToList();
 
-            // packed on the game's heightfield (Godot space: x, -z), as a heap
+            // packed on the game's heightfield (layout space: x, -z), as a heap
             var gc = new Vector2(centre.x, -centre.z);
             float span = cfg.radius * 1.6f;
             var surf = new PileSurface(new Rect(gc - Vector2.one * span, Vector2.one * span * 2), centre.y);

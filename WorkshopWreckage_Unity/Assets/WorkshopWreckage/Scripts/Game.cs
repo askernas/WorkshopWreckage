@@ -10,7 +10,7 @@ using UnityEngine.InputSystem;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Entry point and game controller (port of Godot main.gd). Created
+    /// <summary>Entry point and game controller. Created
     /// automatically after the first scene loads, so the scene needs no setup.
     ///
     /// Command line: --preset=standard|large|massive  --seed=N|random  --shot=a.png;b.png
@@ -683,7 +683,7 @@ namespace WorkshopWreckage
         List<(Matrix4x4 inv, Vector3 half, Bounds aabb)> _containers;
 
         /// <summary>Closed containers (boxes, bins, crates): parts are never generated inside
-        /// them, where they would be hidden. Godot-space centre and radius.</summary>
+        /// them, where they would be hidden. Layout-space centre and radius.</summary>
         /// <summary>Unity-space point inside a closed container (boxes, bins, crates)?</summary>
         public bool InsideContainer(Vector3 p, float r) => InsideContainerG(new Vector3(p.x, p.y, -p.z), r);
 
@@ -973,7 +973,7 @@ namespace WorkshopWreckage
                 }
                 var unit = units[Json.Str(bd, "unit")];
                 var dp = unit.DestPoint(bd);
-                var front = Vector3.ProjectOnPlane(unit.transform.TransformDirection(new Vector3(0, 0, -1)), Vector3.up).normalized;   // units face Godot +Z
+                var front = Vector3.ProjectOnPlane(unit.transform.TransformDirection(new Vector3(0, 0, -1)), Vector3.up).normalized;   // units face layout +Z
                 Look(dp + front * 0.9f + Vector3.up * 0.35f, dp, 50);
                 yield return Capture(Path.Combine(dir, "fullbox.png"), 3);
                 Debug.Log($"[lineup] fullbox {fb}: {storage.Stored(fb).Count} of {cap} stored");
@@ -1285,7 +1285,7 @@ namespace WorkshopWreckage
 
         /// <summary>QA tool (--gallery=gear [--lod=0|1]): every mesh whose geometry key starts
         /// with the prefix, in a grid 2.5 m north of the spawn, each scaled to 25 cm.
-        /// Camera: --cam=spawnX,1.75,spawnZ,0,0 (Godot pose).</summary>
+        /// Camera: --cam=spawnX,1.75,spawnZ,0,0 (layout pose).</summary>
         void BuildGallery(string prefix, int lod)
         {
             var keys = db.order.Select(d => db.Get(d)).GroupBy(d => d.geometryKey).Where(gk => gk.Key.StartsWith(prefix)).OrderBy(gk => gk.Key).ToList();
@@ -1319,7 +1319,7 @@ namespace WorkshopWreckage
                 var p = WorkshopLayout.V(f["pos"]); var s = WorkshopLayout.V(f["size"]);
                 rects.Add(new Rect(p.x - s.x / 2, p.z - s.z / 2, s.x, s.z));
             }
-            return rects.Select(r => new Rect(r.xMin, -r.yMax, r.width, r.height)).ToList();   // Godot z -> Unity z
+            return rects.Select(r => new Rect(r.xMin, -r.yMax, r.width, r.height)).ToList();   // Layout z -> Unity z
         }
 
         /// <summary>One robot per workbench project (crafted Hoverbots included, hidden
@@ -1344,7 +1344,7 @@ namespace WorkshopWreckage
             }
         }
 
-        /// <summary>QA (--layoutdump=file.json): floor plan in Godot XZ — room, storage unit
+        /// <summary>QA (--layoutdump=file.json): floor plan in layout XZ — room, storage unit
         /// footprints, floor blockers, keep-clear areas, spawn and unsorted part positions.</summary>
         void DumpLayout(string path)
         {

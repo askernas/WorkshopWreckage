@@ -62,7 +62,7 @@ namespace WorkshopWreckage
             var bench = new GameObject("Bench").transform;
             bench.SetParent(root, false);
             bench.SetPositionAndRotation(wb.transform.position, wb.transform.rotation);
-            float wallZ = -RobotWorkbench.Bench.z / 2 - 0.044f;   // Godot-local: the wall behind the back board
+            float wallZ = -RobotWorkbench.Bench.z / 2 - 0.044f;   // Layout-local: the wall behind the back board
             for (int k = 0; k < BenchSheets.Length; k++)
             {
                 var s = BenchSheets[k];
@@ -95,7 +95,7 @@ namespace WorkshopWreckage
             foreach (var p in PartSheets) { var pp = p; pool.Add(() => PartDrawing(g, pp.key, pp.title, pp.code, pp.code.GetHashCode() % 2 == 0)); }
             var order = Enumerable.Range(0, pool.Count).OrderBy(_ => rng.Next()).ToList();
             int next = 0;
-            // walls: (start, direction along the wall, inward normal, length), Godot XZ
+            // walls: (start, direction along the wall, inward normal, length), layout XZ
             var walls = new (Vector2 a, Vector2 dir, Vector2 n, float len, string name)[]
             {
                 (new Vector2(west, north), Vector2.right, Vector2.up, east - west, "north"),
@@ -121,14 +121,14 @@ namespace WorkshopWreckage
                     var pos = new Vector3(c.x, y, c.y) + new Vector3(wall.n.x, 0, wall.n.y) * (0.006f + placed % 3 * 0.0005f);
                     var rot = Shared.YRot(Mathf.Atan2(wall.n.x, wall.n.y)) * Quaternion.Euler(0, 0, ((float)rng.NextDouble() - 0.5f) * 5f);
                     Sheet(wallRoot, tex, Shared.Pos(pos.x, pos.y, pos.z), rot, w, h, 0.01f + 0.015f * (float)rng.NextDouble(), $"WallPoster_{wall.name}_{placed}");
-                    Debug.Log($"[posters] {wall.name} wall at ({pos.x:0.00}, {pos.y:0.00}, {pos.z:0.00}) Godot, {w:0.00} m: {tex.name}");
+                    Debug.Log($"[posters] {wall.name} wall at ({pos.x:0.00}, {pos.y:0.00}, {pos.z:0.00}) layout, {w:0.00} m: {tex.name}");
                     placed++;
                 }
             }
             Debug.Log($"[posters] {placed} wall sheets, {_drawings.Count} drawings");
         }
 
-        /// <summary>Lowest clear sheet bottom (m) at wall point c (Godot XZ) for a sheet of width
+        /// <summary>Lowest clear sheet bottom (m) at wall point c (layout XZ) for a sheet of width
         /// w, or -1 where none may hang (window, door, sign, existing board, workbench, corner).</summary>
         static float BottomAt(WorkshopLayout L, string wall, Vector2 c, Vector2 dir, float w, float h)
         {
@@ -201,7 +201,7 @@ namespace WorkshopWreckage
             mr.shadowCastingMode = ShadowCastingMode.Off;
         }
 
-        /// <summary>A paper sheet facing +Z Godot-local (into the room): a grid with the lower
+        /// <summary>A paper sheet facing +Z layout-local (into the room): a grid with the lower
         /// corners curled away from the wall.</summary>
         static Mesh SheetMesh(float w, float h, float curl)
         {

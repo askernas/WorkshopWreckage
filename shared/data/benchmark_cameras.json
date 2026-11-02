@@ -1,6 +1,6 @@
 {
 	"version": 1,
-	"note": "Standard benchmark camera poses shared by the Godot and Unity implementations. Position in metres (eye), yaw/pitch in degrees; yaw 0 looks toward -Z (north), positive yaw turns left (counter-clockwise seen from above).",
+	"note": "Standard benchmark camera poses for the game. Position in metres (eye), yaw/pitch in degrees; yaw 0 looks toward -Z (north), positive yaw turns left (counter-clockwise seen from above).",
 	"resolution": [1920, 1080],
 	"warmup_s": 1.5,
 	"measure_s": 5.0,

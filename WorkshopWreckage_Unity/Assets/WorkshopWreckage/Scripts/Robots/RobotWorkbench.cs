@@ -54,7 +54,7 @@ namespace WorkshopWreckage
         const float RobotZ = -0.04f;
         /// <summary>The robot parts bin (playtest 2026-10-31): a deep bin on a stand beside the bench's east end,
         /// 0.40 m wide, 0.50 m deep (4:5) and 0.40 m tall inside, so the delivered parts heap up in it. Its floor
-        /// is at BinFloor; BinX / BinZ are its middle in the bench's own (Godot) space.</summary>
+        /// is at BinFloor; BinX / BinZ are its middle in the bench's own (layout) space.</summary>
         public static readonly Vector3 Bin = new(0.40f, 0.40f, 0.50f);
         public const float BinFloor = 0.5f, BinGap = 0.06f, BinZ = 0f;
         public static float BinX => -(Bench.x / 2 + BinGap + Bin.x / 2);
@@ -1085,7 +1085,7 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- bench
 
-        /// <summary>Bench-local (Godot space) x of a robot type's mat.</summary>
+        /// <summary>Bench-local (layout space) x of a robot type's mat.</summary>
         public static float MatX(int i) => -Bench.x / 2 + Bench.x / Types.Length * (i + 0.5f);
 
         /// <summary>Where a robot under construction stands on its mat (world), facing the player side.</summary>

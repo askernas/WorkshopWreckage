@@ -96,7 +96,7 @@ namespace WorkshopWreckage
 
         public override void Animate(RobotAnim a) { }
 
-        Vector3 F(float x, float y, float lift = 0) => new Vector3(x, y, -(D / 2 + lift));   // a point on the front face (Godot-local: front is -z)
+        Vector3 F(float x, float y, float lift = 0) => new Vector3(x, y, -(D / 2 + lift));   // a point on the front face (layout-local: front is -z)
         Vector3 Bk(float x, float y, float lift = 0) => new Vector3(x, y, D / 2 + lift);   // on the back face
 
         void RustyScrew(Batch b, string part, Vector3 p, Vector3 n, float r = 0.0045f, float streak = 0.02f)

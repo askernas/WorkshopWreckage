@@ -3,17 +3,17 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Geometry batching: primitives added in Godot-local coordinates are
+    /// <summary>Geometry batching: primitives added in layout-local coordinates are
     /// mirrored into Unity space and merged into one mesh per material.</summary>
     public class Batch
     {
         readonly Dictionary<Material, (List<Vector3> v, List<Vector3> n, List<Vector2> uv, List<int> t)> _parts = new();
         public readonly List<(Vector3 center, Vector3 size, Quaternion rot)> colliders = new();
 
-        /// <summary>Godot local point -> Unity local point.</summary>
+        /// <summary>Layout local point -> Unity local point.</summary>
         public static Vector3 G(Vector3 p) => new Vector3(p.x, p.y, -p.z);
         public static Vector3 G(float x, float y, float z) => new Vector3(x, y, -z);
-        /// <summary>Godot rotation (axis, radians) -> Unity rotation.</summary>
+        /// <summary>Layout rotation (axis, radians) -> Unity rotation.</summary>
         public static Quaternion R(Vector3 axis, float rad) => Quaternion.AngleAxis(-rad * Mathf.Rad2Deg, new Vector3(axis.x, axis.y, -axis.z));
 
         (List<Vector3>, List<Vector3>, List<Vector2>, List<int>) Part(Material m)
@@ -26,7 +26,7 @@ namespace WorkshopWreckage
             return p;
         }
 
-        /// <summary>Box centred at a Godot-local point, optional Godot-space rotation.</summary>
+        /// <summary>Box centred at a layout-local point, optional layout-space rotation.</summary>
         public void Box(Vector3 centerG, Vector3 size, Material m, bool collide = false, Quaternion? rotU = null)
         {
             if (m == null) return;   // a missing robot part: nothing is drawn
@@ -63,9 +63,9 @@ namespace WorkshopWreckage
             if (collide) colliders.Add((G(centerG), size, Quaternion.identity));
         }
 
-        /// <summary>A lofted prism from a to b (Godot-local) whose chamfered-rectangle cross-section
+        /// <summary>A lofted prism from a to b (layout-local) whose chamfered-rectangle cross-section
         /// (size.x across X, size.y across the other side) changes linearly from sizeA to sizeB:
-        /// tapered limbs and plinths. Flat-shaded sides, capped ends. `sideG` (Godot space) sets
+        /// tapered limbs and plinths. Flat-shaded sides, capped ends. `sideG` (layout space) sets
         /// the direction of size.x (projected across the axis); default +X.</summary>
         public void Loft(Vector3 aG, Vector3 bG, Vector2 sizeA, Vector2 sizeB, float chamferA, float chamferB, Material m, Vector3? sideG = null)
         {
@@ -118,7 +118,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Box with flat chamfered edges and corners (chamfer `ch`), centred at a
-        /// Godot-local point, optional Godot-space rotation: machined and pressed-steel panels whose
+        /// Layout-local point, optional layout-space rotation: machined and pressed-steel panels whose
         /// crisp facets catch the light. 26 flat faces (6 sides, 12 edge chamfers, 8 corners).
         /// `soft`: the chamfers blend the normals of the faces they join (each vertex takes its own
         /// face's normal), so the edges shade like a tight rounding while the faces stay flat.</summary>
@@ -169,7 +169,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Box with rounded edges and corners (radius r, `segs` steps per
-        /// rounding), centred at a Godot-local point. The pressed-tin look of the toys.</summary>
+        /// rounding), centred at a layout-local point. The pressed-tin look of the toys.</summary>
         public void RoundedBox(Vector3 centerG, Vector3 size, float r, Material m, int segs = 3, Quaternion? rotU = null)
         {
             if (m == null) return;   // a missing robot part: nothing is drawn
@@ -216,7 +216,7 @@ namespace WorkshopWreckage
                 }
         }
 
-        /// <summary>Surface of revolution around local Y (Godot-local centre, optional
+        /// <summary>Surface of revolution around local Y (layout-local centre, optional
         /// rotation). `profile` = (radius, y) points from bottom to top; normals are
         /// smoothed between neighbouring profile segments unless `hard` is set.</summary>
         public void Lathe(Vector3 centerG, Vector2[] profile, Material m, Quaternion? rotU = null, int segs = 20, bool hard = false)
@@ -252,7 +252,7 @@ namespace WorkshopWreckage
             }
         }
 
-        /// <summary>A small domed rivet head on a surface (Godot-local point and outward direction).</summary>
+        /// <summary>A small domed rivet head on a surface (layout-local point and outward direction).</summary>
         public void Rivet(Vector3 centerG, Vector3 outwardG, float r, Material m)
         {
             if (m == null) return;   // a missing robot part: nothing is drawn
@@ -261,7 +261,7 @@ namespace WorkshopWreckage
             Lathe(centerG, new[] { new Vector2(r, -r * 0.2f), new Vector2(r * 0.95f, r * 0.15f), new Vector2(r * 0.7f, r * 0.5f), new Vector2(0, r * 0.62f) }, m, rot, 8);
         }
 
-        /// <summary>Cylinder along local Y, centred at a Godot-local point.</summary>
+        /// <summary>Cylinder along local Y, centred at a layout-local point.</summary>
         public void Cylinder(Vector3 centerG, float r, float h, Material m, Quaternion? rotU = null, int segs = 16)
         {
             if (m == null) return;   // a missing robot part: nothing is drawn
@@ -294,7 +294,7 @@ namespace WorkshopWreckage
             }
         }
 
-        /// <summary>Quad facing local -Z after mirroring (i.e. Godot +Z), with UVs.</summary>
+        /// <summary>Quad facing local -Z after mirroring (i.e. Layout +Z), with UVs.</summary>
         public void Quad(Vector3 centerG, Vector2 size, Material m, Rect uvRect, Quaternion? rotU = null)
         {
             if (m == null) return;   // a missing robot part: nothing is drawn

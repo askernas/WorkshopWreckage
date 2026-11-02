@@ -64,7 +64,7 @@ namespace WorkshopWreckage
         /// <summary>The dark line of a panel seam (a thin, slightly proud strip reads as a groove).</summary>
         protected static Material SeamMat => _seam ??= EnvMaterials.Plain(new Color(0.06f, 0.05f, 0.04f), 0.2f, 0.25f);
 
-        /// <summary>A panel seam on a surface from a to b (Godot-local), lying flat on the surface
+        /// <summary>A panel seam on a surface from a to b (layout-local), lying flat on the surface
         /// with the given normal; `lift` keeps it above curved (faceted) surfaces.</summary>
         protected void SeamLine(Batch b, string part, Vector3 a, Vector3 bb, Vector3 normal, float w = 0.0042f, float lift = 0.0006f)
         {
@@ -78,7 +78,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>A hex bolt on a washer (the concept sheets' fastener), same call shape as
-        /// Batch.Rivet: Godot-local point on the surface, outward direction, size, material.</summary>
+        /// Batch.Rivet: layout-local point on the surface, outward direction, size, material.</summary>
         protected void Bolt(Batch b, Vector3 c, Vector3 outward, float r, Material m)
         {
             if (m == null) return;
@@ -112,7 +112,7 @@ namespace WorkshopWreckage
             return h - Mathf.Floor(h);
         }
 
-        /// <summary>A rust streak running down a vertical surface from p (Godot-local): four
+        /// <summary>A rust streak running down a vertical surface from p (layout-local): four
         /// overlapping stain strips from the same source, wide and short to narrow and long, so the
         /// multiplied tint is darkest where it bleeds out of the bolt or seam and fades to its tail.
         /// `stain` replaces the rust tint (a robot's own grease or grime).</summary>
@@ -136,7 +136,7 @@ namespace WorkshopWreckage
         static Vector3 CatmullRom(Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float t) =>
             0.5f * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * p1 - p0 - 3 * p2 + p3) * t * t * t);
 
-        /// <summary>A hose or pipe along a smooth curve through Godot-local points, with ferrules
+        /// <summary>A hose or pipe along a smooth curve through layout-local points, with ferrules
         /// (`ends`) where it plugs in. Keep it within one pivot so it never tears when animating.</summary>
         protected void Pipe(Batch b, string part, Vector3[] pts, float r, Material m, Material ends = null, int perSpan = 5)
         {
@@ -163,7 +163,7 @@ namespace WorkshopWreckage
             }
         }
 
-        /// <summary>A bolted plate on one face of an axis-aligned box (Godot-local centre and size,
+        /// <summary>A bolted plate on one face of an axis-aligned box (layout-local centre and size,
         /// normal one of ±X, ±Y, ±Z): a seam rectangle inset from the edges (keep it past the
         /// bevel) and hex bolts just inside it, at the corners and spaced along the sides.</summary>
         protected void PanelFrame(Batch b, string part, Vector3 c, Vector3 size, Vector3 normal, float inset, float boltR = 0.0065f, float spacing = 0.075f, float seamW = 0.0042f, float maxStreak = 9f)
@@ -243,7 +243,7 @@ namespace WorkshopWreckage
 
         // ------------------------------------------------------------ details
 
-        /// <summary>A recessed slatted grille on a face (Godot-local centre on the
+        /// <summary>A recessed slatted grille on a face (layout-local centre on the
         /// surface; zSign -1 = front face, +1 = back face).</summary>
         protected void Grille(Batch b, string part, Vector3 c, float w, float h, int slats, bool vertical, float zSign)
         {
@@ -385,7 +385,7 @@ namespace WorkshopWreckage
             float cs = clawScale, kc = k * cs;
             var wrist = E(0, -0.31f, 0);
             // the claw is twisted round the forearm so its opening shows from the front and the side
-            var tw = Quaternion.AngleAxis(s * 40f, Vector3.up);       // Godot-space points
+            var tw = Quaternion.AngleAxis(s * 40f, Vector3.up);       // Layout-space points
             var twU = Quaternion.AngleAxis(-s * 40f, Vector3.up);     // the same twist for Unity-space rotations
             Vector3 C(float x, float y, float z) => wrist + tw * ((E(x, y, z) - wrist) * cs);   // claw points, scaled about the wrist
             Vector3 CV(float x, float y, float z) => new Vector3(x, y, z) * kc;           // claw sizes

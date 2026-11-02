@@ -31,7 +31,7 @@ Shader "WorkshopWreckage/Outline"
         {
             Name "Glow"
             Tags { "LightMode" = "SRPDefaultUnlit" }
-            Cull Back   // item meshes are mirrored from Godot space: this keeps their real back faces
+            Cull Back   // item meshes are mirrored from layout space: this keeps their real back faces
             ZWrite Off
             Blend SrcAlpha OneMinusSrcAlpha
             HLSLPROGRAM
@@ -45,7 +45,7 @@ Shader "WorkshopWreckage/Outline"
         {
             Name "Edge"
             Tags { "LightMode" = "UniversalForward" }
-            Cull Back   // item meshes are mirrored from Godot space: this keeps their real back faces
+            Cull Back   // item meshes are mirrored from layout space: this keeps their real back faces
             ZWrite Off
             HLSLPROGRAM
             #pragma vertex vert

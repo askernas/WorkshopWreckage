@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Material + finish -> PBR numbers (identical table to the Godot version).</summary>
+    /// <summary>Material + finish -> PBR numbers.</summary>
     public static class ItemAppearance
     {
         struct P { public Color albedo; public float metallic, roughness, wear; public P(Color a, float m, float r, float w) { albedo = a; metallic = m; roughness = r; wear = w; } }

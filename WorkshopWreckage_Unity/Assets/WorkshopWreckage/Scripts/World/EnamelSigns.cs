@@ -29,12 +29,12 @@ namespace WorkshopWreckage
         public struct Spot
         {
             public string wall;   // north / east / south / west
-            public float t;       // along the wall: x on north and south, z on east and west (Godot)
+            public float t;       // along the wall: x on north and south, z on east and west (layout space)
             public float bottom, w;
             public string image;
         }
 
-        /// <summary>Where the signs hang in this layout (Godot coordinates).</summary>
+        /// <summary>Where the signs hang in this layout (layout coordinates).</summary>
         public static List<Spot> Spots(WorkshopLayout L)
         {
             var spots = new List<Spot>();

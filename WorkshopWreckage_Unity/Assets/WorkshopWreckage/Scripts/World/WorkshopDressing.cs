@@ -151,7 +151,7 @@ namespace WorkshopWreckage
             }
         }
 
-        /// <summary>A cable sagging between a and c (Godot space): a parabola of cylinder segments.</summary>
+        /// <summary>A cable sagging between a and c (layout space): a parabola of cylinder segments.</summary>
         static void Droop(Batch b, Vector3 a, Vector3 c, float sag, float r, Material m, int segs = 10)
         {
             Vector3 P(float t) => Vector3.Lerp(a, c, t) + Vector3.down * sag * 4 * t * (1 - t);
@@ -165,7 +165,7 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- walls
 
-        /// <summary>A point on a wall: position along it (Godot XZ) and the inward normal.</summary>
+        /// <summary>A point on a wall: position along it (layout XZ) and the inward normal.</summary>
         static (Vector2 c, Vector2 n) OnWall(WorkshopLayout L, string wall, float t) => wall switch
         {
             "north" => (new Vector2(t, L.roomMin.z), Vector2.up),

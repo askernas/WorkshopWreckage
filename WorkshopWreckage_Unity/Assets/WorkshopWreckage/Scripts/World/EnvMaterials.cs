@@ -4,7 +4,7 @@ using UnityEngine;
 namespace WorkshopWreckage
 {
     /// <summary>Procedural environment textures and materials. The patterns follow
-    /// the Godot reference shaders (brick + plaster, planks, wood grain, chipped
+    /// the reference shaders (brick + plaster, planks, wood grain, chipped
     /// paint, blueprint) but are baked into tiling textures sampled triplanar.</summary>
     public static class EnvMaterials
     {

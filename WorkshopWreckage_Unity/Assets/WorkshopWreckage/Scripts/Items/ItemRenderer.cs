@@ -150,7 +150,7 @@ namespace WorkshopWreckage
                     var def = w.DefOf(id);
                     var (albedo, custom) = ItemAppearance.Params(def);
                     float jitter = 0.9f + 0.2f * Rand01(id);
-                    var lin = albedo * jitter;   // raw values, as Godot's instance colours
+                    var lin = albedo * jitter;   // raw values, as instance colours
                     if (ItemSkins.Applies(def)) lin = ItemSkins.Base(def, albedo) * (0.95f + 0.1f * Rand01(id));   // skins: linear colour
                     // salvage workshop: most parts are used and worn; ~15 % are new (clean, still matte)
                     bool fresh = Rand01(id * 31 + 5) < 0.15f;

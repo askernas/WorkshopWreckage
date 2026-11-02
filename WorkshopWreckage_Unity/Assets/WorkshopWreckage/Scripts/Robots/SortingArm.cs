@@ -15,7 +15,7 @@ namespace WorkshopWreckage
         public static Obb Of(Transform t, Vector3 c, Vector3 h) =>
             new() { c = t.TransformPoint(c), ax = t.right, ay = t.up, az = t.forward, h = h * t.lossyScale.x };
 
-        /// <summary>An axis-aligned box in a unit's local frame, given in Godot axes (min / max corners).</summary>
+        /// <summary>An axis-aligned box in a unit's local frame, given in layout axes (min / max corners).</summary>
         public static Obb In(Transform t, Vector3 minG, Vector3 maxG)
         {
             var c = (minG + maxG) / 2;
@@ -64,7 +64,7 @@ namespace WorkshopWreckage
         public List<string> dests;
         public StorageUnit su;
         public bool cabinet;
-        public float xMin, xMax, parkX, hMin, hPark, pz, yb, mastLen, baseYaw, top;   // unit-local (Godot axes), m
+        public float xMin, xMax, parkX, hMin, hPark, pz, yb, mastLen, baseYaw, top;   // unit-local (layout axes), m
         public float cx, cH;                                                       // the carriage now
         public Transform trolley, mast;
         public Renderer lamp;
@@ -891,7 +891,7 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- mount fixtures
 
-        // unit-local (Godot axes): the mast stands MountFwd in front of the unit's front (clear of a
+        // unit-local (layout axes): the mast stands MountFwd in front of the unit's front (clear of a
         // neighbouring shelf, which stands 0.2 further out than a cabinet); parked, the coupler is
         // ParkGap above the unit's top so the folded arm (lowest point ~0.5 under the coupler) clears it
         const float MountFwd = 0.4f, LowCoupler = 2.1f, Collar = 0.07f;

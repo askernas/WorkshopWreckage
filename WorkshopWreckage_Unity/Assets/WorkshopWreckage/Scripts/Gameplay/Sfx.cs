@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Synthesised sound effects (same recipes as the Godot Audio autoload).</summary>
+    /// <summary>Synthesised sound effects.</summary>
     public class Sfx : MonoBehaviour
     {
         const int Rate = 44100;

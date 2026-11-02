@@ -41,7 +41,7 @@ namespace WorkshopWreckage
             for (int i = 0; i < 6; i++)
             {
                 var (_, x, z, _) = Legs[i];
-                _hip[i] = Pivot("Hip" + i, _shell, new Vector3(x * 0.19f, HipY, -z));   // Unity z = -Godot z
+                _hip[i] = Pivot("Hip" + i, _shell, new Vector3(x * 0.19f, HipY, -z));   // Unity z = -layout z
                 _knee[i] = Pivot("Knee" + i, _hip[i], new Vector3(x * Thigh.x, Thigh.y, 0));   // high knees, as on the sheet
                 _foot[i] = Pivot("Foot" + i, _knee[i], new Vector3(x * Shin.x, Shin.y, 0));
             }

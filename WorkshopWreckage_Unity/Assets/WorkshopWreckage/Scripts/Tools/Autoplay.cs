@@ -1015,7 +1015,7 @@ namespace WorkshopWreckage
                   string.Join(", ", starter.Select(i => $"{w.DefOf(i).displayName} ({w.DefOf(i).CategoryName}, 1 of {w.TotalOf(w.instances[i].defId)}) {(w.instances[i].Position - sp).magnitude:0.0} m")));
             var torso = g.workbench.PartIds(g.workbench.P("retrobot")).Select(id => w.instances[id]).FirstOrDefault(i => w.DefOf(i.id).shape == "Torso");
             var d = torso != null ? torso.Position - sp : Vector3.zero;
-            float off = Mathf.Abs(Vector2.SignedAngle(new Vector2(0, -1), new Vector2(d.x, -d.z)));   // Unity +z = Godot -z = ahead
+            float off = Mathf.Abs(Vector2.SignedAngle(new Vector2(0, -1), new Vector2(d.x, -d.z)));   // Unity +z = layout -z = ahead
             var tb = torso == null ? default : g.index.WorldBounds(torso.id);
             var top = torso == null ? -1 : g.index.QuerySphere(tb.center, tb.extents.magnitude + 0.1f).Where(o => o != torso.id && w.instances[o].state == ItemState.InWorld)
                 .Where(o => g.index.WorldBounds(o) is var ob && ob.min.y > tb.max.y - 0.01f && ob.min.x < tb.max.x && ob.max.x > tb.min.x && ob.min.z < tb.max.z && ob.max.z > tb.min.z).DefaultIfEmpty(-1).First();
@@ -5662,9 +5662,9 @@ namespace WorkshopWreckage
             Debug.Log($"[autoplay] {(ok ? "PASS" : "FAIL")} {name}  {detail}");
         }
 
-        List<int> ItemsNear(Vector3 godotCenter, float r)
+        List<int> ItemsNear(Vector3 layoutCenter, float r)
         {
-            var c = Shared.Pos(godotCenter.x, godotCenter.y, godotCenter.z);
+            var c = Shared.Pos(layoutCenter.x, layoutCenter.y, layoutCenter.z);
             return g.world.instances.Where(i => i.state == ItemState.InWorld && new Vector2(i.Position.x - c.x, i.Position.z - c.z).magnitude < r)
                 .OrderByDescending(i => i.Position.y).Select(i => i.id).ToList();
         }
@@ -5681,7 +5681,7 @@ namespace WorkshopWreckage
         void LookFrom(Vector3 eye, Vector3 at)
         {
             var d = (at - eye).normalized;
-            // Unity direction -> Godot yaw/pitch (mirror Z)
+            // Unity direction -> layout yaw/pitch (mirror Z)
             var gd = new Vector3(d.x, d.y, -d.z);
             float yaw = Mathf.Atan2(-gd.x, -gd.z);
             float pitch = Mathf.Asin(Mathf.Clamp(gd.y, -1, 1));

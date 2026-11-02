@@ -28,13 +28,13 @@ namespace WorkshopWreckage
     public static class Mirror
     {
         static readonly Matrix4x4 S = Matrix4x4.Scale(new Vector3(1, 1, -1));
-        /// <summary>Godot-space matrix -> Unity-space matrix.</summary>
+        /// <summary>Layout-space matrix -> Unity-space matrix.</summary>
         public static Matrix4x4 M(Matrix4x4 g) => S * g * S;
         public static Matrix4x4 GRot(Vector3 axis, float rad) => Matrix4x4.Rotate(Quaternion.AngleAxis(rad * Mathf.Rad2Deg, axis));
     }
 
     /// <summary>Neat, deterministic placement of stored items (port of StorageArrangement.gd).
-    /// Works in Godot destination-local space (+Z = front), returns a Unity local matrix.</summary>
+    /// Works in layout destination-local space (+Z = front), returns a Unity local matrix.</summary>
     public static class StorageArrangement
     {
         public static Matrix4x4 SlotLocal(ItemDefinition def, int index, Vector3 inner /* width, height, depth */)
@@ -481,7 +481,7 @@ namespace WorkshopWreckage
                 time += Time.deltaTime;
                 float e = Mathf.Clamp01(time / dur);
                 e = to > from ? 1 - (1 - e) * (1 - e) : e * e;
-                // Godot +Z (out of the cabinet) is Unity -Z
+                // Layout +Z (out of the cabinet) is Unity -Z
                 t.localPosition = basePos + new Vector3(0, 0, -Mathf.Lerp(from, to, e));
                 yield return null;
             }
@@ -524,7 +524,7 @@ namespace WorkshopWreckage
 
         public Matrix4x4 TrayContentLocal(ItemDefinition def, int index, Dictionary<string, object> d)
         {
-            // tray-local (Godot): destination frame centred on the tray floor
+            // tray-local (layout space): destination frame centred on the tray floor
             var inner = Inner(d);
             return Mirror.M(Matrix4x4.Translate(new Vector3(0, 0, -TrayDepth / 2))) * StorageArrangement.SlotLocal(def, index, inner);
         }

@@ -518,7 +518,7 @@ namespace WorkshopWreckage
         }
     }
 
-    /// <summary>Versioned JSON delta saves (same structure as the Godot SaveSystem).</summary>
+    /// <summary>Versioned JSON delta saves.</summary>
     public static class SaveSystem
     {
         /// <summary>2: every saved part also records its definition id (item_defs), so a save

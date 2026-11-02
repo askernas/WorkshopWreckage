@@ -1,4 +1,4 @@
-// Shared material for every item (port of Godot's item_world.gdshader).
+// Shared material for every item.
 // Instanced draws (keyword _WW_INSTANCED): per-instance albedo + (metallic,
 // roughness, wear, seed) come from _ItemData[(offset + instanceID) * 2 + {0,1}].
 // Non-instanced draws (inspection, held items) use the material properties.

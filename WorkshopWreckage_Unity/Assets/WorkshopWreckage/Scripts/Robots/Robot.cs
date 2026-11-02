@@ -1961,7 +1961,7 @@ namespace WorkshopWreckage
             return p;
         }
 
-        static Vector3 UnitFront(StorageUnit unit) => Flat(unit.transform.TransformDirection(new Vector3(0, 0, -1))).normalized;   // units face Godot +Z
+        static Vector3 UnitFront(StorageUnit unit) => Flat(unit.transform.TransformDirection(new Vector3(0, 0, -1))).normalized;   // units face layout +Z
 
         public bool IsPiledBelowDestination(int itemId)
         {

@@ -10,7 +10,7 @@ using Unity.Profiling;
 
 namespace WorkshopWreckage
 {
-    /// <summary>HUD and menus (port of Godot hud.gd + menus.gd), built in uGUI.</summary>
+    /// <summary>HUD and menus, built in uGUI.</summary>
     public partial class Hud : MonoBehaviour
     {
         static readonly Color Bg = new(0.11f, 0.08f, 0.06f, 0.94f), Brass = new(0.82f, 0.63f, 0.32f), BrassDim = new(0.55f, 0.42f, 0.22f),
@@ -74,7 +74,7 @@ namespace WorkshopWreckage
             return r;
         }
 
-        /// <summary>Pins a rect to an anchor with a pixel offset and size (y down, like Godot).</summary>
+        /// <summary>Pins a rect to an anchor with a pixel offset and size (y down).</summary>
         static RectTransform At(string name, Transform parent, Vector2 anchor, Vector2 offset, Vector2 size)
         {
             var r = Rect(name, parent, new Vector2(anchor.x, 1 - anchor.y), new Vector2(anchor.x, 1 - anchor.y), Vector2.zero, Vector2.zero);

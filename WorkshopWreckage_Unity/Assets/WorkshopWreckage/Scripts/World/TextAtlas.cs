@@ -6,7 +6,7 @@ using UnityEngine.UI;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Renders text into textures (Unity counterpart of Godot's SubViewport
+    /// <summary>Renders text into textures (an offscreen render
     /// label atlas): a world-space uGUI canvas on a private layer is drawn by an
     /// offscreen camera into a RenderTexture whenever the text changes.</summary>
     public class TextAtlas

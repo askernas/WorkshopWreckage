@@ -8,7 +8,7 @@ namespace WorkshopWreckage
     /// Family finish (FamilySkin), hardware (Nut, Hub, Gear, FramedGrille), wear (GreaseRun, GrimeBand),
     /// the family head module (FamilyHead) and the family arm with its articulated red gripper (FamilyArm,
     /// PoseClaws). A model opts in by calling these; robots that don't keep their older kit (DetailedHead,
-    /// DetailedArm). Coordinates are Godot-local (front = -Z), as everywhere in the robot models.</summary>
+    /// DetailedArm). Coordinates are layout-local (front = -Z), as everywhere in the robot models.</summary>
     public abstract partial class RobotModel
     {
         // ------------------------------------------------------------ finish
@@ -395,7 +395,7 @@ namespace WorkshopWreckage
             // the gripper, twisted round the forearm and scaled about the wrist
             string CP = spec.clawPart ?? P;
             float cs = spec.clawScale;
-            var tw = Quaternion.AngleAxis(s * spec.twist, Vector3.up);       // Godot-space points
+            var tw = Quaternion.AngleAxis(s * spec.twist, Vector3.up);       // Layout-space points
             var twU = Quaternion.AngleAxis(-s * spec.twist, Vector3.up);     // the same twist for Unity-space rotations
             Vector3 C(float x, float y, float z) => wrist + tw * (new Vector3(x, y, z) * cs);
             Vector3 side = tw * Vector3.right;

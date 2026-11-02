@@ -14,13 +14,13 @@ namespace WorkshopWreckage
     /// lugs on its top to eyes in the wall. The O's get glass domes with real lights a little apart in strength
     /// and colour, so they read as old bulbs; the one in "SHOP" flickers now and then (SignLamps). A warm,
     /// shadowed spot from above models the letters. Every tunable value is in shared/data/workshop_sign.json (the
-    /// defaults here are used when a value is missing). Godot-local, +Z out of the wall, centred on the sign
+    /// defaults here are used when a value is missing). Layout-local, +Z out of the wall, centred on the sign
     /// fixture; the wall is 5 cm behind the fixture's centre.</summary>
     public static class WorkshopSign
     {
         const float Wall = -0.05f;   // the wall surface, sign-local
         static Dictionary<string, object> _d = new();
-        static Vector3 _posG;        // where the sign hangs (room space, Godot)
+        static Vector3 _posG;        // where the sign hangs (room space, layout)
         static float _halfWidth = -1;
 
         static Dictionary<string, object> Sec(string s) => Json.Obj(_d.GetValueOrDefault(s)) ?? new Dictionary<string, object>();
@@ -34,7 +34,7 @@ namespace WorkshopWreckage
 
         /// <summary>A ceiling fixture hanging just in front of the sign moves back into the room by
         /// "ceiling_fixture" move_m, so it neither hides the sign's top from the floor nor floods its face.
-        /// Room space, Godot; call after the sign is built.</summary>
+        /// Room space, layout; call after the sign is built.</summary>
         public static Vector3 KeepFixtureClear(Vector3 pG)
         {
             if (_halfWidth < 0) return pG;
@@ -268,7 +268,7 @@ namespace WorkshopWreckage
                 new Dictionary<string, object> { ["x_px"] = 658.0, ["y_px"] = 278.0 },
                 new Dictionary<string, object> { ["x_px"] = 1515.0, ["y_px"] = 290.0, ["strength"] = 0.84, ["flickers"] = true },
             };
-            var outward = Quaternion.FromToRotation(Vector3.up, Vector3.back);   // lathe axis out of the sign (Godot +Z)
+            var outward = Quaternion.FromToRotation(Vector3.up, Vector3.back);   // lathe axis out of the sign (layout +Z)
             for (int i = 0; i < lamps.Count; i++)
             {
                 var lamp = Json.Obj(lamps[i]);
@@ -326,7 +326,7 @@ namespace WorkshopWreckage
 
         const int LetterCode = 10;   // SignShape layers 10-25: the letters one by one, in reading order (make_sign_art.py)
 
-        /// <summary>Loose quads in sign-local Godot space built into one mesh: the sign's sloped outlines need
+        /// <summary>Loose quads in sign-local layout space built into one mesh: the sign's sloped outlines need
         /// corners Batch.Quad cannot place. Flat-shaded, wound to face along the given normal.</summary>
         sealed class Faces
         {
@@ -364,7 +364,7 @@ namespace WorkshopWreckage
             }
         }
 
-        /// <summary>A chain of round links from a up to top (Godot-local), alternate links turned a quarter; top
+        /// <summary>A chain of round links from a up to top (layout-local), alternate links turned a quarter; top
         /// hangs from a pin in an eye plate on the wall.</summary>
         static void Chain(Batch b, Vector3 a, Vector3 top, Material steel, Material plate)
         {

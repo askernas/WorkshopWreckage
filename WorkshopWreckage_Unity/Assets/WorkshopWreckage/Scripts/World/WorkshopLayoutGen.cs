@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>A surface unsorted parts can rest on (Godot space: XZ rect, height y).</summary>
+    /// <summary>A surface unsorted parts can rest on (layout space: XZ rect, height y).</summary>
     public class PileSurfaceDef
     {
         public string name;
@@ -30,7 +30,7 @@ namespace WorkshopWreckage
     }
 
     /// <summary>Procedural workshop layout for a world preset (replaces the layout
-    /// imported from the Godot reference). Everything is in Godot space (+X east,
+    /// from the reference data). Everything is in layout space (+X east,
     /// -Z north, +Y up) so the existing builders convert it unchanged. Room size,
     /// aisle rows and pile density come from the preset's world_config.json.</summary>
     public class WorkshopLayout
@@ -43,13 +43,13 @@ namespace WorkshopWreckage
         public readonly List<Dictionary<string, object>> furniture = new();
         public readonly List<Dictionary<string, object>> windows = new();
         public readonly List<Vector3> lamps = new();
-        /// <summary>Overhead fluorescent fixtures (Godot space, hanging height): the workshop's main light.</summary>
+        /// <summary>Overhead fluorescent fixtures (layout space, hanging height): the workshop's main light.</summary>
         public readonly List<Vector3> fixtures = new();
         public readonly List<(string name, Rect rect)> zones = new();
         public readonly Dictionary<string, Dictionary<string, object>> units = new();
         public readonly List<Rect> floorBlockers = new();
         public readonly List<PileSurfaceDef> surfaces = new();
-        /// <summary>Every shelf deck (Godot XZ rect, height): what a dropped or falling part rests on.</summary>
+        /// <summary>Every shelf deck (layout XZ rect, height): what a dropped or falling part rests on.</summary>
         public readonly List<(Rect rect, float y)> decks = new();
         public readonly List<PileSite> piles = new();
         public readonly List<string> placementErrors = new();
@@ -58,15 +58,15 @@ namespace WorkshopWreckage
         public readonly List<Vector2> retroSpots = new();
         public Vector2 starterSpot;
         public Vector3 repairBayPos;
-        public Rect trayRect;                                     // sorting tray (Godot XZ); kept clear of generated debris
+        public Rect trayRect;                                     // sorting tray (layout XZ); kept clear of generated debris
         /// <summary>Height of the sorting tray's bottom (parts in the tray rest on it).</summary>
         public const float TrayFloor = 0.04f;
         public readonly List<Rect> keepClear = new();             // no starting piles here, but walkable
-        /// <summary>Walkways (Godot XZ segments, half width): the spread leaves them mostly clear (see OnWalkway;
+        /// <summary>Walkways (layout XZ segments, half width): the spread leaves them mostly clear (see OnWalkway;
         /// the floor in front of storage, `access`, counts as walkway too).</summary>
         public readonly List<(Vector2 a, Vector2 b, float halfWidth)> walkways = new();
         const float WalkwayHalfWidth = 0.5f;
-        /// <summary>Clear floor in front of every storage unit (Godot XZ): no furniture or other
+        /// <summary>Clear floor in front of every storage unit (layout XZ): no furniture or other
         /// unit may stand there (loose parts may lie there); reachable from the spawn on foot.</summary>
         public readonly Dictionary<string, Rect> access = new();
         const float AccessDepth = 0.9f;
@@ -163,7 +163,7 @@ namespace WorkshopWreckage
                     fixtures.Add(new Vector3(Mathf.Lerp(west + 2.2f, east - 2.2f, ix / (float)(nx - 1)), 3.9f, Mathf.Lerp(north + 2.4f, south - 2.2f, iz / (float)(nz - 1))));
 
             // --- storage runs: walls first, then freestanding aisles ----------------
-            // Godot-space directions (Unity's Vector3.forward/back have the opposite Z meaning)
+            // Layout-space directions (Unity's Vector3.forward/back have the opposite Z meaning)
             var toEast = new Vector3(1, 0, 0); var toWest = new Vector3(-1, 0, 0);
             var toSouth = new Vector3(0, 0, 1); var toNorth = new Vector3(0, 0, -1);
             Run(new Vector3(west + 0.05f, 0, north), toEast, toSouth, -3.4f - (west + 0.05f), "drawer_cabinet", "shelving");
@@ -233,7 +233,9 @@ namespace WorkshopWreckage
             int benchN = surfaces.Count;
             surfaces.Add(new PileSurfaceDef { name = "north_bench", rect = new Rect(-2.9f, north + 0.2f, 5.8f, 0.82f), y = 0.94f, maxHeight = 0.45f });
             surfaces.Add(new PileSurfaceDef { name = "island", rect = new Rect(-0.6f, -1.35f, 3.0f, 1.2f), y = 0.94f, maxHeight = 0.45f });
-            surfaces.Add(new PileSurfaceDef { name = "lathe", rect = new Rect(-1.6f, south - 1.12f, 2.2f, 0.42f), y = 0.92f, maxHeight = 0.3f });
+            // the lathe: only the open stretch of bed between its tailstock and carriage, never inside a housing (playtest 2026-11-02)
+            var lb = LatheModel.FreeBed;
+            surfaces.Add(new PileSurfaceDef { name = "lathe", rect = new Rect(-0.5f + lb.x, south - 0.9f + lb.y, lb.width, lb.height), y = LatheModel.WaysTop, maxHeight = LatheModel.FreeBedPile });
             surfaces.Add(new PileSurfaceDef { name = "island_shelf", rect = new Rect(-0.6f, -1.3f, 3.0f, 1.1f), y = 0.24f, maxHeight = 0.5f });
 
             // --- walkways -------------------------------------------------------------
@@ -285,7 +287,7 @@ namespace WorkshopWreckage
             var taken = new List<Vector2>(heaps);
             foreach (int k in new[] { 2, 1, 3, 0, 4 })
             {
-                float a = -Mathf.PI / 2 + (k - 2) * 0.62f;   // a fan in front of the spawn (Godot -z = north = ahead)
+                float a = -Mathf.PI / 2 + (k - 2) * 0.62f;   // a fan in front of the spawn (layout -z = north = ahead)
                 var s = OpenSpot(sp + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * (2.6f + 0.5f * (k % 2)), 0, 3f, taken);
                 if (s == null) continue;
                 retroSpots.Add(s.Value);
@@ -303,7 +305,7 @@ namespace WorkshopWreckage
             zones.Add(("Central Floor", new Rect(west + W * 0.27f, north + 3f, W * 0.43f, D - 3f)));
         }
 
-        /// <summary>Walking room between facing storage (Godot metres).</summary>
+        /// <summary>Walking room between facing storage (metres).</summary>
         const float AisleClear = 2.4f;
 
         static Rect Footprint(Vector3 c, float w, float d, bool alongX)
@@ -430,7 +432,7 @@ namespace WorkshopWreckage
             float w = (float)Json.Num(u, "width"), d = (float)Json.Num(u, "depth");
             Rect ToWorld(float lx0, float lz0, float lx1, float lz1)
             {
-                // unit-local (x along unit, z toward its front) -> Godot world, rotations are multiples of 90°
+                // unit-local (x along unit, z toward its front) -> layout world, rotations are multiples of 90°
                 Vector2 P(float lx, float lz)
                 {
                     float cs = Mathf.Cos(rot), sn = Mathf.Sin(rot);
@@ -499,7 +501,7 @@ namespace WorkshopWreckage
             return o;
         }
 
-        /// <summary>Whether p (Godot XZ) lies on a walkway, widened by margin.</summary>
+        /// <summary>Whether p (layout XZ) lies on a walkway, widened by margin.</summary>
         public bool OnWalkway(Vector2 p, float margin = 0)
         {
             foreach (var a in access.Values)
@@ -513,7 +515,7 @@ namespace WorkshopWreckage
             return false;
         }
 
-        /// <summary>Zone index for a Unity-space position (zones are Godot XZ rects).</summary>
+        /// <summary>Zone index for a Unity-space position (zones are layout XZ rects).</summary>
         public int ZoneAt(Vector3 unityPos)
         {
             var q = new Vector2(unityPos.x, -unityPos.z);

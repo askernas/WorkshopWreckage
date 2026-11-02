@@ -6,7 +6,7 @@ using UnityEngine;
 namespace WorkshopWreckage
 {
     /// <summary>Runtime catalog + storage layout from shared/data, with the same
-    /// validation rules as the Godot implementation. Counts are never adjusted;
+    /// validation rules as the shared data spec. Counts are never adjusted;
     /// an invalid database refuses to produce a world.</summary>
     public class ItemDatabase
     {
@@ -211,7 +211,7 @@ namespace WorkshopWreckage
             return e[0] <= inner[0] * FitTolerance && e[1] <= inner[1] * FitTolerance && e[2] <= inner[2] * FitTolerance;
         }
 
-        /// <summary>Same rules as Godot's ItemDatabase.validate().</summary>
+        /// <summary>The item database validation rules.</summary>
         public void Validate()
         {
             int maxDefault = Json.Int(config, "max_spawn_default", 10);

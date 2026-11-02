@@ -79,7 +79,7 @@ namespace WorkshopWreckage.Pegboard
             _dist = Mathf.Clamp(_dist + ((kb.sKey.isPressed ? 1 : 0) - (kb.wKey.isPressed ? 1 : 0)) * sp * 1.5f, 0.35f, 6f);
             var at = pb.transform.TransformPoint(new Vector3(_x, _y, pb.cfg.PanelFront));
             var eye = at - pb.transform.forward * _dist;
-            // Unity direction -> the player's yaw/pitch (Godot convention, mirrored Z), as Autoplay.LookFrom
+            // Unity direction -> the player's yaw/pitch (layout convention, mirrored Z), as Autoplay.LookFrom
             var d = (at - eye).normalized;
             var gd = new Vector3(d.x, d.y, -d.z);
             _g.player.Teleport(eye - Vector3.up * PlayerController.Eye);

@@ -25,7 +25,7 @@ namespace WorkshopWreckage
         public override float ModelHeight => 0.9f;
         const float TrackX = 0.25f, TrackW = 0.17f, EndZ = 0.47f, EndR = 0.145f, EndY = 0.145f, Cleat = 0.06f, SprocketR = 0.118f;
         const float ShoulderX = 0.33f, ShoulderY = 0.43f, ShoulderZ = 0.55f, HullPivotY = 0.2f;
-        static readonly float[] BoxZ = { -0.07f, 0.2f, 0.47f };   // Godot z (front = -z)
+        static readonly float[] BoxZ = { -0.07f, 0.2f, 0.47f };   // Layout z (front = -z)
         static readonly string[] BoxPart = { "front cargo box", "middle cargo box", "rear cargo box" };
 
         protected override Material Skin(Material m) => FamilySkin(m);

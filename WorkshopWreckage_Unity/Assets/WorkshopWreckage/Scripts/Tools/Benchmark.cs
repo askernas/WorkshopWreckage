@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Standard benchmark on the shared camera poses (port of Godot benchmark.gd):
+    /// <summary>Standard benchmark on the shared camera poses :
     /// frame times, 1 % lows, draw calls, GPU/CPU time, picking cost, memory.</summary>
     public class Benchmark
     {

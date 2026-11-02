@@ -63,7 +63,7 @@ namespace WorkshopWreckage
 
         // ---------------------------------------------------------------- the room as boxes
 
-        void Box(Rect gr, float y0, float y1)   // a Godot-space rect (x, -z) from y0 to y1
+        void Box(Rect gr, float y0, float y1)   // a layout-space rect (x, -z) from y0 to y1
         {
             if (y1 - y0 < 0.002f || gr.width < 0.002f || gr.height < 0.002f) return;
             var go = new GameObject("static");

@@ -4,10 +4,10 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Collision-aware procedural packing on a heightfield (port of Godot
-    /// PileSurface). Items are dropped one at a time: resting height comes from the
+    /// <summary>Collision-aware procedural packing on a heightfield
+    /// (PileSurface). Items are dropped one at a time: resting height comes from the
     /// heightfield under the footprint, the item tilts with the local slope, steep
-    /// spots make it slide downhill and its top is stamped back. Godot space.</summary>
+    /// spots make it slide downhill and its top is stamped back. Layout space.</summary>
     public class PileSurface
     {
         const float MaxSlope = 0.7f, Repose = 0.95f;
@@ -17,7 +17,7 @@ namespace WorkshopWreckage
         readonly int w, h;
         readonly float[] heights;
         public readonly List<Rect> blockers = new();
-        /// <summary>Spots a part may never rest at (Godot centre, radius): inside closed
+        /// <summary>Spots a part may never rest at (layout centre, radius): inside closed
         /// containers. Checked before anything is stamped, so nothing floats on a rejected spot.</summary>
         public System.Func<Vector3, float, bool> forbidden;
 
@@ -89,7 +89,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Returns the Unity world matrix, or null if the spot is unusable.
-        /// half = world half extents of the item's local AABB (Godot axes).</summary>
+        /// half = world half extents of the item's local AABB (layout axes).</summary>
         public Matrix4x4? Place(ItemDefinition def, Vector3 half, Vector2 at, float yaw, float roll, float scale, float maxY)
         {
             at = SettlePoint(at, Mathf.Max(half.x, half.z) * 0.8f);
@@ -177,7 +177,7 @@ namespace WorkshopWreckage
     }
 
     /// <summary>Builds the initial ItemWorld from a validated database, the
-    /// procedural layout and a seed (port of Godot WorldGenerator). Instance ids
+    /// procedural layout and a seed. Instance ids
     /// follow catalog order (definition, then copy), independent of the seed, so
     /// saves always map back; the seed only decides where things end up.</summary>
     public class WorldGenerator

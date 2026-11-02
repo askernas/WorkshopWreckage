@@ -8,7 +8,7 @@ using Art = WorkshopWreckage.WorkshopArtDirectionProfile;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Builds the static workshop (port of Godot WorkshopBuilder +
+    /// <summary>Builds the static workshop (the room builder and
     /// WorkshopLighting): room, furniture, lamps, sun, sky, post-processing.</summary>
     public class WorkshopBuilder : MonoBehaviour
     {
@@ -206,7 +206,7 @@ namespace WorkshopWreckage
             b.Build(g, type);
         }
 
-        /// <summary>Unity-local point back to the Godot-local convention Batch expects.</summary>
+        /// <summary>Unity-local point back to the layout-local convention Batch expects.</summary>
         static Vector3 Unmirror(Vector3 u) => new Vector3(u.x, u.y, -u.z);
 
         void Bench(Batch b, Vector3 size, bool shelf)
@@ -232,46 +232,7 @@ namespace WorkshopWreckage
         public Light machineLamp;
         public AudioSource machineHum;
 
-        void Machine(Transform g, Batch b, Vector3 size)
-        {
-            var iron = EnvMaterials.Metal(new Color(0.2f, 0.28f, 0.24f), 0.4f);
-            var steel = EnvMaterials.Plain(new Color(0.6f, 0.6f, 0.62f), 1, 0.7f);
-            b.Box(new Vector3(-size.x * 0.4f, 0.4f, 0), new Vector3(0.3f, 0.8f, size.z * 0.8f), iron, true);
-            b.Box(new Vector3(size.x * 0.4f, 0.4f, 0), new Vector3(0.3f, 0.8f, size.z * 0.8f), iron, true);
-            b.Box(new Vector3(0, 0.86f, 0), new Vector3(size.x, 0.12f, size.z * 0.5f), iron, true);
-            b.Box(new Vector3(-size.x * 0.35f, 1.08f, 0), new Vector3(0.45f, 0.34f, 0.4f), iron);
-            b.Box(new Vector3(size.x * 0.32f, 1.02f, 0), new Vector3(0.3f, 0.22f, 0.3f), iron);
-            // spindle + chuck and the handwheel turn once the machine is repaired (restoration)
-            machineSpindle = new GameObject("Spindle").transform;
-            machineSpindle.SetParent(g, false);
-            machineSpindle.localPosition = G(0, 1.08f, 0);
-            var sb = new Batch();
-            sb.Cylinder(Vector3.zero, 0.03f, size.x * 0.5f, steel, R(Vector3.forward, Mathf.PI / 2), 12);
-            sb.Cylinder(new Vector3(-size.x * 0.12f, 0, 0), 0.08f, 0.06f, steel, R(Vector3.forward, Mathf.PI / 2), 6);
-            for (int k = 0; k < 3; k++)
-            {
-                float a = k * Mathf.PI * 2 / 3;
-                sb.Box(new Vector3(-size.x * 0.12f - 0.035f, Mathf.Sin(a) * 0.06f, Mathf.Cos(a) * 0.06f), new Vector3(0.03f, 0.025f, 0.025f), EnvMaterials.Plain(new Color(0.3f, 0.3f, 0.32f), 1, 0.5f));   // chuck jaws
-            }
-            sb.Build(machineSpindle, "spindle");
-            machineHandwheel = new GameObject("Handwheel").transform;
-            machineHandwheel.SetParent(g, false);
-            machineHandwheel.localPosition = G(-size.x * 0.58f, 1.2f, 0);
-            var hb = new Batch();
-            hb.Cylinder(Vector3.zero, 0.2f, 0.06f, EnvMaterials.Plain(new Color(0.55f, 0.12f, 0.08f), 0.2f, 0.5f), R(Vector3.forward, Mathf.PI / 2), 24);
-            hb.Box(new Vector3(-0.04f, 0.14f, 0), new Vector3(0.03f, 0.03f, 0.03f), EnvMaterials.Plain(new Color(0.2f, 0.2f, 0.2f), 0.8f, 0.5f));   // grip
-            hb.Build(machineHandwheel, "handwheel");
-            var lg = new GameObject("WorkLamp");
-            lg.transform.SetParent(g, false);
-            lg.transform.localPosition = G(size.x * 0.1f, 1.6f, 0.1f);
-            machineLamp = lg.AddComponent<Light>();
-            machineLamp.type = LightType.Point;
-            machineLamp.color = new Color(1f, 0.85f, 0.6f);
-            machineLamp.range = 2.5f;
-            machineLamp.intensity = 0;
-            machineHum = g.gameObject.AddComponent<AudioSource>();
-            machineHum.spatialBlend = 1; machineHum.minDistance = 1; machineHum.maxDistance = 12; machineHum.loop = true; machineHum.volume = 0;
-        }
+        void Machine(Transform g, Batch b, Vector3 size) => LatheModel.Build(g, b, this);   // the engine lathe (LatheModel)
 
         void Sign(Transform g, Batch b, Vector3 size)
         {
@@ -535,7 +496,7 @@ namespace WorkshopWreckage
             sun.color = Art.C("lighting", "sun_color", new Color(1f, 0.74f, 0.46f));   // late-afternoon gold through the windows
             sun.intensity = Art.F("lighting", "sun_intensity", 3.8f);
             sun.shadows = LightShadows.Soft;
-            // Godot: Basis.from_euler(-32°, -75°) (YXZ); the light shines along -Z.
+            // Layout space: from_euler(-32°, -75°) (YXZ); the light shines along -Z.
             var gdir = Quaternion.AngleAxis(-75f, Vector3.up) * Quaternion.AngleAxis(-32f, Vector3.right) * Vector3.back;
             go.transform.rotation = Quaternion.LookRotation(new Vector3(gdir.x, gdir.y, -gdir.z));
             RenderSettings.sun = sun;
@@ -552,7 +513,7 @@ namespace WorkshopWreckage
             RenderSettings.fogMode = FogMode.ExponentialSquared;
             RenderSettings.fogColor = Art.C("lighting", "fog_color", new Color(0.46f, 0.39f, 0.31f));
             RenderSettings.fogDensity = Art.F("lighting", "fog_density", 0.018f);
-            // Godot adds screen-space indirect light (SSIL); URP has none, so ambient is a bit stronger.
+            // URP has no screen-space indirect light, so ambient is a bit stronger.
             // (trilight ambient set above; the fixtures carry the room)
             RenderSettings.reflectionIntensity = 0.3f;
             if (RenderSettings.skybox != null)

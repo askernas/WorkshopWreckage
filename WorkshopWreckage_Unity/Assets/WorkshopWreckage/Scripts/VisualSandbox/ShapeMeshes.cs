@@ -18,7 +18,7 @@ namespace WorkshopWreckage.Sandbox
     ///   bolt heads, chamfered bores;
     /// - gears: curved flanks, filleted roots and rounded tips (10-24 outline points per tooth instead of 4),
     ///   round chamfered bores, cast rims with a recessed web (20-31 teeth) or five spokes (32+) and a hub.
-    /// Built in Godot space (the coordinates the shared meshes were authored in), mirrored on Z like
+    /// Built in layout space (the coordinates the shared meshes were authored in), mirrored on Z like
     /// MeshLibrary.Load, cached per key and LOD by MeshLibrary.
     ///
     /// Versions (the LOD number carries it, so both stay cached side by side and BP1 never changes):
@@ -944,7 +944,7 @@ namespace WorkshopWreckage.Sandbox
 
         // ================================================================== the builder
 
-        /// <summary>Geometry in Godot space, per material slot; Finish mirrors Z into Unity space.</summary>
+        /// <summary>Geometry in layout space, per material slot; Finish mirrors Z into Unity space.</summary>
         sealed class G
         {
             public readonly bool hero, compact;

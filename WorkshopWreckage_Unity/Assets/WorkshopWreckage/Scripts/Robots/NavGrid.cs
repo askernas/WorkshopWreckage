@@ -4,7 +4,7 @@ using UnityEngine;
 namespace WorkshopWreckage
 {
     /// <summary>Floor walkability grid for small robots, built from the procedural
-    /// layout (storage units, furniture, benches, repair bay), inflated by the robot
+    /// Layout (storage units, furniture, benches, repair bay), inflated by the robot
     /// radius. A* with 8 neighbours plus line-of-sight smoothing. Unity XZ space.
     /// Loose parts are not obstacles — robots wade through scatter like the player.</summary>
     public class NavGrid
@@ -19,7 +19,7 @@ namespace WorkshopWreckage
         public NavGrid(WorkshopLayout layout, float radius, float robotHeight = 1f)
         {
             _radius = radius;
-            _origin = new Vector2(layout.roomMin.x, -layout.roomMax.z);   // Godot z max = Unity z min
+            _origin = new Vector2(layout.roomMin.x, -layout.roomMax.z);   // Layout z max = Unity z min
             w = Mathf.CeilToInt((layout.roomMax.x - layout.roomMin.x) / Cell);
             h = Mathf.CeilToInt((layout.roomMax.z - layout.roomMin.z) / Cell);
             _blocked = new bool[w * h];
@@ -35,7 +35,7 @@ namespace WorkshopWreckage
                 for (int x = 0; x < w; x++)
                 {
                     var c = CellCenter(x, z);
-                    var g = new Vector2(c.x, -c.z);   // back to Godot XZ for the layout rects
+                    var g = new Vector2(c.x, -c.z);   // back to layout XZ for the layout rects
                     bool b = g.x < layout.roomMin.x + radius || g.x > layout.roomMax.x - radius || g.y < layout.roomMin.z + radius || g.y > layout.roomMax.z - radius;
                     for (int i = 0; i < rects.Count && !b; i++)
                     {

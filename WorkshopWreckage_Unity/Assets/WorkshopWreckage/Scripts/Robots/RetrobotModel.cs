@@ -328,7 +328,7 @@ namespace WorkshopWreckage
             PoseLeg(legR, kneeR, ankleR, 1, hipR, kR, _twistR);
             float idle = (1 - walking) * (1 - bend) * (1 - a.armLift) * (1 - a.aimWeight);
             float breathe = 0.0022f * Mathf.Sin(a.time * 2.3f) * idle;   // a faint idle hum
-            body.localPosition = new Vector3(0, walkY - crouch + breathe, -shift);   // Godot +Z (back) is Unity -Z
+            body.localPosition = new Vector3(0, walkY - crouch + breathe, -shift);   // Layout +Z (back) is Unity -Z
             body.localRotation = Quaternion.Euler(0, 0, s * 1.5f * walking);
             upper.localRotation = Quaternion.Euler(lean + 4 * a.gait - 3 * a.armHold * (1 - bend), 0, 0);   // leans back a touch under a load
             float armSwing = s * stride * 0.9f;

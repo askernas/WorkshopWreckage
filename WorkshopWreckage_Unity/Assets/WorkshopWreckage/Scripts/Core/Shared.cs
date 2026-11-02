@@ -4,10 +4,10 @@ using UnityEngine;
 
 namespace WorkshopWreckage
 {
-    /// <summary>Locates the engine-neutral shared data and converts Godot
+    /// <summary>Locates the engine-neutral shared data and converts layout-space
     /// (right-handed, -Z forward) coordinates into Unity (left-handed, +Z forward)
     /// by mirroring Z. Meshes and transforms are mirrored the same way, so the
-    /// geometry is identical to the Godot reference.</summary>
+    /// geometry is identical to the reference data.</summary>
     public static class Shared
     {
         static string _root;
@@ -33,7 +33,7 @@ namespace WorkshopWreckage
         public static Vector3 Pos(float x, float y, float z) => new Vector3(x, y, -z);
         public static Vector3 Pos(List<object> a) => new Vector3(Json.F(a[0]), Json.F(a[1]), -Json.F(a[2]));
 
-        /// <summary>Godot basis columns + origin (all Godot space) -> Unity matrix (S * T * S).</summary>
+        /// <summary>Layout basis columns + origin (all layout space) -> Unity matrix (S * T * S).</summary>
         public static Matrix4x4 Matrix(Vector3 bx, Vector3 by, Vector3 bz, Vector3 origin)
         {
             var m = new Matrix4x4();
@@ -44,11 +44,11 @@ namespace WorkshopWreckage
             return m;
         }
 
-        /// <summary>Godot yaw/pitch (degrees) -> Unity camera rotation.</summary>
-        public static Quaternion View(float godotYawDeg, float godotPitchDeg)
-            => Quaternion.Euler(-godotPitchDeg, -godotYawDeg, 0);
+        /// <summary>Layout yaw/pitch (degrees) -> Unity camera rotation.</summary>
+        public static Quaternion View(float yawDeg, float pitchDeg)
+            => Quaternion.Euler(-pitchDeg, -yawDeg, 0);
 
-        /// <summary>Godot rotation about Y (radians) -> Unity rotation.</summary>
-        public static Quaternion YRot(float godotRad) => Quaternion.Euler(0, -godotRad * Mathf.Rad2Deg, 0);
+        /// <summary>Layout rotation about Y (radians) -> Unity rotation.</summary>
+        public static Quaternion YRot(float rad) => Quaternion.Euler(0, -rad * Mathf.Rad2Deg, 0);
     }
 }

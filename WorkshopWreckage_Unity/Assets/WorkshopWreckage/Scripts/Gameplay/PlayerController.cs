@@ -30,7 +30,7 @@ namespace WorkshopWreckage
         float _stepSmooth;
         bool _grounded;
 
-        /// <summary>Godot-convention yaw/pitch in radians (yaw 0 = look along Godot -Z).</summary>
+        /// <summary>Layout-convention yaw/pitch in radians (yaw 0 = look along layout -Z).</summary>
         public float Yaw => _yaw;
         public float Pitch => _pitch;
 
@@ -51,7 +51,7 @@ namespace WorkshopWreckage
             cam = camGo.AddComponent<Camera>();
             cam.nearClipPlane = 0.02f;
             cam.farClipPlane = 80;
-            cam.fieldOfView = 72f;   // Godot's Camera3D fov is vertical too
+            cam.fieldOfView = 72f;   // vertical fov
             cam.cullingMask &= ~(1 << TextAtlas.Layer);
             camGo.AddComponent<AudioListener>();
             var data = camGo.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
@@ -60,7 +60,7 @@ namespace WorkshopWreckage
             camGo.tag = "MainCamera";
         }
 
-        /// <summary>Sets view from Godot-convention yaw/pitch (radians).</summary>
+        /// <summary>Sets view from layout-convention yaw/pitch (radians).</summary>
         public void SetView(float yaw, float pitch)
         {
             _yaw = yaw;
@@ -117,7 +117,7 @@ namespace WorkshopWreckage
             if (lookEnabled && mouse != null && LookReady)
             {
                 var d = mouse.delta.ReadValue();
-                float s = sensitivity * 0.01f * cam.fieldOfView / fov;   // radians per pixel, as in Godot (slower when zoomed)
+                float s = sensitivity * 0.01f * cam.fieldOfView / fov;   // radians per pixel (slower when zoomed)
                 _yaw -= d.x * s;
                 _pitch = Mathf.Clamp(_pitch + d.y * s * (invertY ? -1 : 1), -1.536f, 1.536f);
             }

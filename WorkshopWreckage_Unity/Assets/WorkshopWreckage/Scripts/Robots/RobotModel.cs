@@ -41,7 +41,7 @@ namespace WorkshopWreckage
     }
 
     /// <summary>Base for the five procedural robots (all toy scale, built at ~1 m and
-    /// scaled to their configured height). Geometry is authored in Godot-local space
+    /// scaled to their configured height). Geometry is authored in layout-local space
     /// (front = -Z) through Batch. Every primitive belongs to an assembly part. On the
     /// Robot Workbench a robot is genuinely unfinished: parts not yet installed are
     /// simply absent, the bare internal frame shows where a shell is missing, empty
@@ -62,11 +62,11 @@ namespace WorkshopWreckage
         readonly List<(Transform pivot, string part, Vector3 normal, float r)> _mounts = new();
 
         /// <summary>Registers an attachment point: while `part` is missing, an empty
-        /// socket facing `normalG` (Godot-local) is drawn at the pivot's origin.</summary>
+        /// socket facing `normalG` (layout-local) is drawn at the pivot's origin.</summary>
         protected void Mount(Transform pivot, string part, Vector3 normalG, float r = 0.04f) => _mounts.Add((pivot, part, normalG, r));
 
         /// <summary>Where the assembly clamp grips the body while on the workbench
-        /// (Godot-local, model units, on the robot's back), or null for no clamp.</summary>
+        /// (layout-local, model units, on the robot's back), or null for no clamp.</summary>
         protected virtual Vector3? ClampPoint => null;
 
         /// <summary>The exposed internal frame drawn while the robot's main shell part is
@@ -184,7 +184,7 @@ namespace WorkshopWreckage
         readonly List<(Transform t, float side)> _elbows = new();
 
         /// <summary>The elbow pivot under an arm pivot (made once, kept across rebuilds; its
-        /// geometry is rebuilt like any pivot's), placed at the Godot-local elbow point.</summary>
+        /// geometry is rebuilt like any pivot's), placed at the layout-local elbow point.</summary>
         protected Transform Elbow(Transform arm, Vector3 posG, float side)
         {
             var e = arm.Find("Elbow");
@@ -360,7 +360,7 @@ namespace WorkshopWreckage
         public void SetEyes(bool on) { foreach (var r in eyes) if (r != null) r.sharedMaterial = on ? _eyeOn : _eyeOff; }
         public void SetBeacon(bool on) { foreach (var r in beacons) if (r != null) r.sharedMaterial = on ? _beaconOn : _beaconOff; }
 
-        /// <summary>Two-segment toy arm with red claw, hanging from its pivot (Godot-local).</summary>
+        /// <summary>Two-segment toy arm with red claw, hanging from its pivot (layout-local).</summary>
         protected void ArmKit(Batch b, float side, string part, Material paint, float scale = 1f, string clawPart = null)
         {
             clawPart ??= part;
