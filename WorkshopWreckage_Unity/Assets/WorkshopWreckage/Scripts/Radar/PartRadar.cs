@@ -461,6 +461,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (g == null || g.world == null) return;
             if (isOut && g.state == "play" && (g.interaction.inspecting || g.CarriedArm != null)) Put(false);
             var kb = Keyboard.current;

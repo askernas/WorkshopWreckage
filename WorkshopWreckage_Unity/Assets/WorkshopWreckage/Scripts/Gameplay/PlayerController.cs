@@ -93,6 +93,7 @@ namespace WorkshopWreckage
 
         void LateUpdate()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             bool locked = Cursor.lockState == CursorLockMode.Locked;
             if (locked && LockedFrames == 0) { _lockYaw = _yaw; _lockPitch = _pitch; Debug.Log("[input] cursor captured"); }
             // QA: the view right after a capture is where it was (no jump from the recentring warp)
@@ -103,6 +104,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             // hold the right mouse button to zoom (playtest 2026-10-26); the view slows down with it

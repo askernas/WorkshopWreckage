@@ -51,7 +51,13 @@ namespace WorkshopWreckage
         }
 
         public static readonly Vector3 Bench = new(3.45f, 0.86f, 0.9f);   // six mats (the Sorting Arm is the sixth)
-        const float RobotZ = -0.04f, TrayZ = 0.31f, BoxWall = 0.07f;
+        const float RobotZ = -0.04f;
+        /// <summary>The robot parts bin (playtest 2026-10-31): a deep bin on a stand beside the bench's east end,
+        /// 0.40 m wide, 0.50 m deep (4:5) and 0.40 m tall inside, so the delivered parts heap up in it. Its floor
+        /// is at BinFloor; BinX / BinZ are its middle in the bench's own (Godot) space.</summary>
+        public static readonly Vector3 Bin = new(0.40f, 0.40f, 0.50f);
+        public const float BinFloor = 0.5f, BinGap = 0.06f, BinZ = 0f;
+        public static float BinX => -(Bench.x / 2 + BinGap + Bin.x / 2);
         public readonly List<Project> projects = new();
         public string selected = "retrobot";
         readonly HashSet<string> _announced = new();
@@ -675,7 +681,9 @@ namespace WorkshopWreckage
 
         /// <summary>The bench screen's parts page (playtest 2026-10-28): every place a part goes on p, the part on
         /// it now (-1: none), the part needed there (for its found state) and the ring of found parts the player
-        /// steps through with the arrows (the one on it included), each fitted at once so the preview shows it.</summary>
+        /// steps through with the arrows (the one on it included), each fitted at once so the preview shows it.
+        /// The places are always listed in the robot's blueprint order, whatever is fitted (playtest 2026-11-02:
+        /// fitting a right arm swapped it with the leg assembly).</summary>
         public List<(string key, int on, int need, List<int> ring)> Slots(Project p)
         {
             var o = new List<(string, int, int, List<int>)>();
@@ -697,11 +705,14 @@ namespace WorkshopWreckage
                 }
                 o.Add((key, on, need, ring.OrderBy(OriginOf).ThenBy(c => c).ToList()));
             }
-            return o;
+            var order = _g.db.RobotPartIds(p.id).Select(d => Robot.PartKey(_g.db.Get(d))).Distinct().ToList();
+            int Rank(string k) { int i = order.IndexOf(k); return i >= 0 ? i : order.Count; }
+            return o.OrderBy(s => Rank(s.Item1)).ThenBy(s => s.Item1, System.StringComparer.Ordinal).ToList();
         }
 
-        /// <summary>The middle of the parts pool tray (the bench screen frames it for the Part Radar).</summary>
-        public Vector3 PoolPoint => transform.TransformPoint(Batch.G(0, Bench.y + 0.03f, TrayZ));
+        /// <summary>The middle of the robot parts bin, a little above its floor (the bench screen frames it for the
+        /// Part Radar).</summary>
+        public Vector3 PoolPoint => transform.TransformPoint(Batch.G(BinX, BinFloor + 0.1f, BinZ));
 
         /// <summary>Locks every fitted part of p in place (Apply). Returns how many.</summary>
         public int Commit(Project p)
@@ -780,8 +791,12 @@ namespace WorkshopWreckage
             return plane.Raycast(new Ray(o, dir), out float t) && t > 0 && t < 6 ? o + dir * t : fallback;
         }
 
-        /// <summary>Is that bench point on the parts pool tray (front edge), not a mat?</summary>
-        public bool AtPool(Vector3 world) => Batch.G(transform.InverseTransformPoint(world)).z > 0.22f;
+        /// <summary>Is that point at the robot parts bin (beside the bench), not on a mat?</summary>
+        public bool AtPool(Vector3 world)
+        {
+            var l = Batch.G(transform.InverseTransformPoint(world));
+            return Mathf.Abs(l.x - BinX) <= Bin.x / 2 + 0.06f && Mathf.Abs(l.z - BinZ) <= Bin.z / 2 + 0.06f;
+        }
 
         public bool Install(Project p, int id, bool animate = true)
         {
@@ -1114,19 +1129,27 @@ namespace WorkshopWreckage
             }
             var title = TextAtlas.RenderSingle("ROBOT WORKBENCH", 1024, 128, new Color(0.3f, 0.2f, 0.13f), new Color(0.82f, 0.63f, 0.32f), 72, true);
             b.Quad(new Vector3(0, 1.88f, -Bench.z / 2 + 0.045f), new Vector2(1.6f, 0.2f), EnvMaterials.Atlas(title), new Rect(0, 0, 1, 1));
-            var trayTex = TextAtlas.RenderSingle("ROBOT PARTS BOX", 512, 64, new Color(0.62f, 0.5f, 0.3f), new Color(0.18f, 0.12f, 0.07f), 40, true);
-            var trayLabel = EnvMaterials.Atlas(trayTex);
-            // the robot parts box (playtest 2026-10-28): a deep open box along the front, every delivered part
-            // tossed in on one heap
-            float tw = Bench.x - 0.1f;
-            b.Box(new Vector3(0, Bench.y + 0.006f, TrayZ), new Vector3(tw, 0.012f, 0.16f), dark);
-            foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(0, Bench.y + BoxWall / 2, TrayZ + sz * 0.08f), new Vector3(tw, BoxWall, 0.012f), steel);
-            foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(sx * tw / 2, Bench.y + BoxWall / 2, TrayZ), new Vector3(0.012f, BoxWall, 0.16f), steel);
-            b.Box(new Vector3(0, Bench.y + BoxWall, TrayZ + 0.08f), new Vector3(tw + 0.012f, 0.008f, 0.02f), brass);   // the front lip
-            foreach (var lx in new[] { -tw / 4, tw / 4 }) b.Quad(new Vector3(lx, Bench.y + BoxWall * 0.5f, TrayZ + 0.087f), new Vector2(0.4f, 0.05f), trayLabel, new Rect(0, 0, 1, 1));
+            var binTex = TextAtlas.RenderSingle("ROBOT PARTS", 512, 64, new Color(0.62f, 0.5f, 0.3f), new Color(0.18f, 0.12f, 0.07f), 40, true);
+            var binLabel = EnvMaterials.Atlas(binTex);
+            // the robot parts bin (playtest 2026-10-31; it was a long shallow box along the front): a deep bin on a
+            // stand beside the bench's east end, every delivered part tossed in on one heap
+            float bx = BinX, rim = BinFloor + Bin.y, wall = 0.014f;
+            b.Box(new Vector3(bx, BinFloor - 0.01f, BinZ), new Vector3(Bin.x, 0.02f, Bin.z), dark);
+            foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(bx, BinFloor + Bin.y / 2, BinZ + sz * (Bin.z / 2 + wall / 2)), new Vector3(Bin.x + 2 * wall, Bin.y, wall), steel);
+            foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(bx + sx * (Bin.x / 2 + wall / 2), BinFloor + Bin.y / 2, BinZ), new Vector3(wall, Bin.y, Bin.z), steel);
+            foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(bx, rim, BinZ + sz * (Bin.z / 2 + wall / 2)), new Vector3(Bin.x + 2 * wall + 0.01f, 0.012f, wall + 0.01f), brass);   // the rim
+            foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(bx + sx * (Bin.x / 2 + wall / 2), rim, BinZ), new Vector3(wall + 0.01f, 0.012f, Bin.z), brass);
+            b.Quad(new Vector3(bx, BinFloor + Bin.y * 0.72f, BinZ + Bin.z / 2 + wall + 0.002f), new Vector2(Bin.x - 0.04f, 0.05f), binLabel, new Rect(0, 0, 1, 1));
+            // the stand: four legs and a frame under the floor
+            foreach (var sx in new[] { -1f, 1f })
+                foreach (var sz in new[] { -1f, 1f })
+                    b.Box(new Vector3(bx + sx * (Bin.x / 2 - 0.01f), (BinFloor - 0.02f) / 2, BinZ + sz * (Bin.z / 2 - 0.01f)), new Vector3(0.035f, BinFloor - 0.02f, 0.035f), steel);
+            foreach (var sz in new[] { -1f, 1f }) b.Box(new Vector3(bx, 0.12f, BinZ + sz * (Bin.z / 2 - 0.01f)), new Vector3(Bin.x, 0.025f, 0.025f), steel);
+            foreach (var sx in new[] { -1f, 1f }) b.Box(new Vector3(bx + sx * (Bin.x / 2 - 0.01f), 0.12f, BinZ), new Vector3(0.025f, 0.025f, Bin.z), steel);
+            b.colliders.Add((Batch.G(bx, rim / 2, BinZ), new Vector3(Bin.x + 2 * wall, rim, Bin.z + 2 * wall), Quaternion.identity));
             _pool = new GameObject("PartsPool").transform;
             _pool.SetParent(transform, false);
-            _pool.localPosition = Batch.G(0, Bench.y + 0.012f, TrayZ);
+            _pool.localPosition = Batch.G(bx, BinFloor, BinZ);
             _labels = new TextAtlas(Types.Length, new Vector2Int(200, 80), new Color(0.3f, 0.2f, 0.13f));
             var lm = EnvMaterials.Atlas(_labels.texture);
             float w = Bench.x / Types.Length;
@@ -1155,7 +1178,18 @@ namespace WorkshopWreckage
             tgo.transform.localPosition = Batch.G(0, Bench.y + 0.15f, 0);
             tgo.AddComponent<BoxCollider>().size = new Vector3(Bench.x, 0.3f, Bench.z);
             tgo.AddComponent<StorageTarget>().station = true;
+            // the parts bin's own aim box (a click there only puts parts in; elsewhere on the bench opens it)
+            var bgo = new GameObject("Target_PartsBin") { layer = Layers.Target };
+            bgo.transform.SetParent(transform, false);
+            bgo.transform.localPosition = Batch.G(BinX, (BinFloor + Bin.y + 0.25f) / 2, BinZ);
+            bgo.AddComponent<BoxCollider>().size = new Vector3(Bin.x + 0.08f, BinFloor + Bin.y + 0.25f, Bin.z + 0.08f);
+            var bst = bgo.AddComponent<StorageTarget>();
+            bst.station = true;
+            bst.destId = BinTarget;
         }
+
+        /// <summary>The parts bin's aim box (StorageTarget.destId).</summary>
+        public const string BinTarget = "PARTSBIN";
 
         /// <summary>Redraws the status labels, blueprint boards and the parts pool.</summary>
         public void Refresh()
@@ -1171,16 +1205,16 @@ namespace WorkshopWreckage
                 _labels.Set(i, code, p.name.ToUpper(), word, s != Status.AwaitingBlueprint);
                 if (_boards[i] != null) _boards[i].sharedMaterial = EnvMaterials.Blueprint(Unlocked(p) ? 1 : 2);
             }
-            // the parts box: every part tossed onto one untidy heap, highest in the middle (spent radar batteries are
+            // the parts bin: every part tossed onto one untidy heap, highest in the middle (spent radar batteries are
             // disposed of, not shown). Each part lands where its id says, so the heap stays put between refreshes.
             foreach (Transform c in _pool) Destroy(c.gameObject);
             _poolModels.Clear();
             var ids = PoolContents().Where(id => !_g.world.DefOf(id).IsRadarBattery).OrderBy(id => id).ToList();
-            // the heap: a height per 4 cm along the box and per half of its depth
-            const float cell = 0.04f, inner = 0.068f;
-            float half = (Bench.x - 0.1f) / 2 - 0.02f;
-            int cells = Mathf.Max(1, Mathf.FloorToInt(2 * half / cell));
-            var heap = new float[cells, 2];
+            // the heap: a height per 4 cm square of the bin's floor
+            const float cell = 0.04f;
+            float half = Bin.x / 2 - 0.01f, inner = Bin.z / 2 - 0.01f;
+            int cells = Mathf.Max(1, Mathf.FloorToInt(2 * half / cell)), rows = Mathf.Max(1, Mathf.FloorToInt(2 * inner / cell));
+            var heap = new float[cells, rows];
             static float H(int id, int salt) { uint h = (uint)(id * 73856093) ^ (uint)(salt * 19349663); h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15; return (h & 0xffffff) / (float)0x1000000; }
             for (int k = 0; k < ids.Count; k++)
             {
@@ -1189,36 +1223,36 @@ namespace WorkshopWreckage
                 var mi = HeldView.MakeModel(def);
                 mi.transform.SetParent(_pool, false);
                 _poolModels.Add((id, mi.transform));
-                mi.transform.localScale = Vector3.one * def.worldScale * 0.55f;
-                // tossed in, lying any which way, but turned so it fits between the box's walls
+                mi.transform.localScale = Vector3.one * def.worldScale;   // full size: the bin is deep enough (the old tray showed them at 55 %)
+                // tossed in, lying any which way, but turned so it fits between the bin's walls
                 // (long parts lie nearly flat: a tipped rod would stand up out of the box)
                 var lay = def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, -90) : Quaternion.identity;
                 mi.transform.localRotation = lay;
                 float tip = 25f * Mathf.Clamp(0.06f / Mathf.Max(0.001f, LocalExtent(mi.transform).size.magnitude), 0.15f, 1f);
                 var tilt = Quaternion.Euler((H(id, 1) * 2 - 1) * tip, 0, (H(id, 3) * 2 - 1) * tip) * lay;
-                // the first of a few turns that fits between the walls, or else the narrowest one
-                float yaw0 = H(id, 2) * 360f, best = 0, bestZ = float.MaxValue;
+                // the first of a few turns that fits between the walls, or else the one that sticks out least
+                float yaw0 = H(id, 2) * 360f, best = 0, bestOver = float.MaxValue;
                 foreach (float dy in new[] { 0f, 90f, 45f, 135f, 20f, 160f, 70f, 110f })
                 {
                     mi.transform.localRotation = Quaternion.Euler(0, yaw0 + dy, 0) * tilt;
-                    float wz = LocalExtent(mi.transform).size.z;
-                    if (wz < bestZ) { bestZ = wz; best = dy; }
-                    if (wz <= 2 * inner) break;
+                    var sz = LocalExtent(mi.transform).size;
+                    float over = Mathf.Max(0, sz.x - 2 * half) + Mathf.Max(0, sz.z - 2 * inner);
+                    if (over < bestOver) { bestOver = over; best = dy; }
+                    if (over <= 0) break;
                 }
                 mi.transform.localRotation = Quaternion.Euler(0, yaw0 + best, 0) * tilt;
                 var ext = LocalExtent(mi.transform);
-                // where it lands: around the middle (three throws averaged), inside the walls, on top of what is there
-                float u = (H(id, 4) + H(id, 5)) / 2f;
-                float hx = ext.extents.x, hz = Mathf.Min(ext.extents.z, inner);
-                float x = Mathf.Clamp((u - 0.5f) * 2.2f * half, -half + hx, half - hx);
-                float z = Mathf.Clamp((H(id, 6) - 0.5f) * 2 * inner, -inner + hz, inner - hz);
+                // where it lands: around the middle (two throws averaged), inside the walls, on top of what is there
+                float hx = Mathf.Min(ext.extents.x, half), hz = Mathf.Min(ext.extents.z, inner);
+                float x = Mathf.Clamp(((H(id, 4) + H(id, 5)) / 2f - 0.5f) * 2.4f * half, -half + hx, half - hx);
+                float z = Mathf.Clamp(((H(id, 6) + H(id, 7)) / 2f - 0.5f) * 2.4f * inner, -inner + hz, inner - hz);
                 int c0 = Mathf.Clamp(Mathf.FloorToInt((x - hx + half) / cell), 0, cells - 1), c1 = Mathf.Clamp(Mathf.FloorToInt((x + hx + half) / cell), 0, cells - 1);
-                int r0 = z - hz < 0 ? 0 : 1, r1 = z + hz < 0 ? 0 : 1;
+                int r0 = Mathf.Clamp(Mathf.FloorToInt((z - hz + inner) / cell), 0, rows - 1), r1 = Mathf.Clamp(Mathf.FloorToInt((z + hz + inner) / cell), 0, rows - 1);
                 float floor = 0;
                 for (int c = c0; c <= c1; c++) for (int r = r0; r <= r1; r++) floor = Mathf.Max(floor, heap[c, r]);
                 // settles a little into the gaps of what is under it
                 float bottom = floor * 0.7f;
-                mi.transform.localPosition = new Vector3(x - ext.center.x, bottom - ext.min.y, z - ext.center.z);   // the box's own space (as LocalExtent)
+                mi.transform.localPosition = new Vector3(x - ext.center.x, bottom - ext.min.y, z - ext.center.z);   // the bin's own space (as LocalExtent)
                 float top = bottom + ext.size.y;
                 for (int c = c0; c <= c1; c++) for (int r = r0; r <= r1; r++) heap[c, r] = Mathf.Max(heap[c, r], top);
             }

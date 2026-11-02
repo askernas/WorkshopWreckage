@@ -14,7 +14,7 @@ namespace WorkshopWreckage
     /// aged paper. The drawings are shared textures; the sheets on the walls (rebuilt with
     /// each layout) only choose size, tilt and curl. Wall sheets hang at eye height on bare
     /// wall and above pallet zones, never above shelving or cabinets (their name boards hang in
-    /// front of the wall), windows, the door, signs or the tray floodlight.</summary>
+    /// front of the wall), windows, the door, signs, the enamel signs or the tray floodlight.</summary>
     public static class BlueprintPosters
     {
         /// <summary>The six machines above the workbench: type, drawing code, blue paper?,
@@ -49,6 +49,7 @@ namespace WorkshopWreckage
             var root = new GameObject("BlueprintPosters").transform;
             root.SetParent(g.transform, false);
             BuildBench(g, root);
+            EnamelSigns.Build(g.layout, root);   // first: the wall sheets keep clear of them
             BuildWalls(g, root);
             return root;
         }
@@ -175,6 +176,8 @@ namespace WorkshopWreckage
             }
             // the sheet may hang below a wall sign or clock, never across it
             foreach (var lower in mounted) if (bottom + h > lower - 0.1f) return -1;
+            // nor across one of the big enamel signs (they hang straight; the sheets move elsewhere)
+            if (EnamelSigns.Blocks(L, wall, wall == "north" || wall == "south" ? c.x : c.y, w, bottom, bottom + h)) return -1;
             return bottom;
         }
 

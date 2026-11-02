@@ -79,7 +79,7 @@ namespace WorkshopWreckage
             _wbActions = Row(wb, 46, 10);
             _wbSpares = Row(wb, 36, 8);   // modules taken off built robots, for this assembly
             _wbRadar = Row(wb, 36, 10);   // the Part Radar: its parts in the pool, the plans, Build
-            Para(wb, "Robot parts are delivered by hand: click the bench and what you carry goes into the parts box.  Pick a blueprint, then Build to step through the found parts for each place (◀ ▶) and Apply them.", 14, Muted, 22);
+            Para(wb, "Robot parts are delivered by hand: click the parts bin beside the bench (or the bench itself) and what you carry goes into the bin.  Pick a blueprint, then Build to step through the found parts for each place (◀ ▶) and Apply them.", 14, Muted, 22);
 
             var rs = Screen("robots", 1500);
             Title(rs, "ROBOT MANAGEMENT", 34);
@@ -622,7 +622,15 @@ namespace WorkshopWreckage
         public string UpgradePreview(Progression pr, Robot rb, RobotUpgradeDef u, int next)
         {
             if (u.mode == "rank") return RankPreview(u.stat, next, rb);
-            var o = new List<string>();
+            return string.Join(";  ", UpgradeChanges(pr, rb, u, next).Select(c => $"{c.label} {c.now} → {c.after}{c.note}"));
+        }
+
+        /// <summary>Per stat the upgrade touches: its label, the value now, the value at rank `next` (units included)
+        /// and a note when the robot's limit caps it or a capacity only counts whole parts. Used by UpgradePreview and
+        /// the skill panel's current / next lines.</summary>
+        public List<(string label, string now, string after, string note)> UpgradeChanges(Progression pr, Robot rb, RobotUpgradeDef u, int next)
+        {
+            var o = new List<(string label, string now, string after, string note)>();
             foreach (var k in new[] { u.stat }.Concat(u.also.Keys).Concat(u.alsoPercent.Keys).Distinct())
             {
                 if (!StatText.TryGetValue(k, out var t)) continue;
@@ -631,9 +639,9 @@ namespace WorkshopWreckage
                 bool whole = k is "capacity" or "item_types";
                 string F(double v) => whole ? System.Math.Floor(v + 1e-4).ToString("0") : v.ToString(t.dec == 0 ? "0" : t.dec == 1 ? "0.0" : t.dec == 2 ? "0.00" : "0.000");
                 string note = raw > lim + 1e-6 ? $" (capped at its limit {F(lim)})" : whole && System.Math.Abs(after - System.Math.Floor(after + 1e-4)) > 1e-3 ? $" ({after:0.0}: counts once it reaches {System.Math.Ceiling(after):0})" : "";
-                o.Add($"{t.label} {F(now)}{t.unit} → {F(after)}{t.unit}{note}");
+                o.Add((t.label, F(now) + t.unit, F(after) + t.unit, note));
             }
-            return string.Join(";  ", o);
+            return o;
         }
 
         /// <summary>The behaviour of rank `r` of a robot-intelligence upgrade, from robots.json robot_ai and the strategy code.</summary>

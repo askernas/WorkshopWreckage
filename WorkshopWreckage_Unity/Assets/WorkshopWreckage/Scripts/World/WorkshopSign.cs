@@ -413,6 +413,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (still) return;
             float t = Time.time;
             if (_end > 0 && t < _end)

@@ -174,12 +174,13 @@ namespace WorkshopWreckage
         };
 
         /// <summary>May something w wide hang high on `wall` at t? Never across the big sign, the clock,
-        /// the door, the tray's floodlight, the Robot Workbench stencil or a window, nor in a corner.</summary>
+        /// the door, the tray's floodlight, the Robot Workbench stencil, a window or an enamel sign, nor in a corner.</summary>
         static bool HighClear(WorkshopLayout L, string wall, float t, float w)
         {
             float half = w / 2 + 0.25f;
             float lo = wall == "east" ? L.roomMin.z : L.roomMin.x, hi = wall == "east" ? L.roomMax.z : L.roomMax.x;
             if (t - half < lo + 0.8f || t + half > hi - 0.8f) return false;
+            if (EnamelSigns.Blocks(L, wall, t, w, BandBottom, BandTop)) return false;
             if (wall == "south")
             {
                 if (Mathf.Abs(t - L.repairBayPos.x) < RobotWorkbench.Bench.x / 2 + 0.3f + half) return false;
@@ -205,7 +206,7 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Large general-arrangement sheets (1.6 m) in the high wall band: two flanking the
-        /// sign on the north wall, two on the east wall, one on the south wall.</summary>
+        /// sign on the north wall, four on the east wall, one on the south wall.</summary>
         static void WallSheets(Game g, Transform root)
         {
             var L = g.layout;
@@ -218,7 +219,10 @@ namespace WorkshopWreckage
                 ("north", 6.2f, "spiderbot", "SB-03", false),
                 ("east", L.roomMin.z + D * 0.3f, "hoverbot", "HB-05", false),
                 ("east", L.roomMax.z - D * 0.3f, "unibot", "UB-02", true),
-                ("south", L.roomMax.x - W * 0.28f, "sorting_arm", "SA-06", true),
+                ("south", L.roomMax.x - W * 0.12f, "sorting_arm", "SA-06", true),   // its old spot holds an enamel sign
+                // moved here from the west wall and the machine, where the enamel signs hang (2026-11-02)
+                ("east", L.roomMin.z + 1.9f, "retrobot", "RB-01", true),
+                ("east", L.roomMax.z - 1.9f, "caterpillarbot", "CB-04", false),
             };
             const float w = 1.6f, h = 1.2f;
             int k = 0;

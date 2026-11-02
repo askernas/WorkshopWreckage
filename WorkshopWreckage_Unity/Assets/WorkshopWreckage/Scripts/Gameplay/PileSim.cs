@@ -87,6 +87,12 @@ namespace WorkshopWreckage
             var decks = l.surfaces.Where(s => !s.floor).Select(s => (s.rect, s.y)).Concat(l.decks).ToList();
             foreach (var (r, y) in decks) Box(r, y - 0.03f, y);
             foreach (var s in l.surfaces) foreach (var (r, top) in s.obstacles) Box(r, s.y, top);
+            // the sorting tray's rim (4 cm boards on its edges, 12 cm high): what drops in piles up inside
+            var t = l.trayRect;
+            Box(new Rect(t.xMin - 0.02f, t.yMin - 0.02f, 0.04f, t.height + 0.04f), 0, 0.12f);
+            Box(new Rect(t.xMax - 0.02f, t.yMin - 0.02f, 0.04f, t.height + 0.04f), 0, 0.12f);
+            Box(new Rect(t.xMin, t.yMin - 0.02f, t.width, 0.04f), 0, 0.12f);
+            Box(new Rect(t.xMin, t.yMax - 0.02f, t.width, 0.04f), 0, 0.12f);
             // furniture and units: solid up to their lowest deck (nothing rolls under a bench or
             // into a cabinet), full height where there is no deck at all
             foreach (var b in l.floorBlockers)
@@ -133,7 +139,7 @@ namespace WorkshopWreckage
         bool CanMove(int id)
         {
             var i = g.world.instances[id];
-            return !g.interaction.busy.Contains(id) && !g.robotReserved.Contains(id) && !g.InTray(i.Position) && i.Position.y < Game.MaxDropDeck + 0.4f;
+            return !g.interaction.busy.Contains(id) && !g.robotReserved.Contains(id) && i.Position.y < Game.MaxDropDeck + 0.4f;
         }
 
         /// <summary>Brings the parts around `c` into the simulation: the nearest ones (that may
@@ -287,6 +293,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (_bodies.Count == 0) return;
             // taken away meanwhile (picked up, stored, swept): out of the simulation, and what lay on it wakes
             List<int> gone = null;
@@ -355,7 +362,7 @@ namespace WorkshopWreckage
             foreach (var i in g.world.instances)
             {
                 if (i.state != ItemState.InWorld) continue;
-                bool loose = !g.InTray(i.Position) && i.Position.y < Game.MaxDropDeck + 0.4f;
+                bool loose = i.Position.y < Game.MaxDropDeck + 0.4f;
                 var b = Make(i.id, loose);
                 if (loose)
                 {

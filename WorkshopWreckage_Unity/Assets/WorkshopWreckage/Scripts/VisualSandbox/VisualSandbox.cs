@@ -75,6 +75,7 @@ namespace WorkshopWreckage.Sandbox
             _pile = new PileGenerator(_g.db, _pileItems, PileCentre);
             _style = new VisualStyleController();
             ItemRenderer.WorldLod = (key, size) => VisualStyleController.LodFor(key, size, _geomQ, _geomV, _allSpoked);
+            ItemRenderer.DistanceLod = false;   // the lab compares geometry at any distance
             ItemRenderer.SkinCondition = SkinCondition;
             MeshLibrary.Extra = ShapeMeshes.Build;
             var cfg = File.Exists(SettingsPath) ? Shared.ReadObject(SettingsPath) : new Dictionary<string, object>();
@@ -108,6 +109,7 @@ namespace WorkshopWreckage.Sandbox
         void OnDestroy()
         {
             ItemRenderer.WorldLod = null;
+            ItemRenderer.DistanceLod = true;
             ItemRenderer.SkinCondition = null;
             MeshLibrary.Extra = null;
             _draws.Dispose(); _batches.Dispose(); _setPass.Dispose(); _tris.Dispose(); _gcAlloc.Dispose();

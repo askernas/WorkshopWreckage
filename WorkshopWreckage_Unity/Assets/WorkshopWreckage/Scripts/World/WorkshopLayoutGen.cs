@@ -131,6 +131,8 @@ namespace WorkshopWreckage
             repairBayPos = new Vector3(west + 1.83f, 0, south - 0.5f);   // 3.45 m bench, 0.1 m from the west wall
             repairBayRot = Mathf.PI;
             Block(new Vector2(repairBayPos.x, repairBayPos.z), new Vector2(3.55f, 1.0f));
+            // the robot parts bin on its stand beside the bench's east end (RobotWorkbench.Bin, playtest 2026-10-31)
+            Block(new Vector2(repairBayPos.x + 1.725f + 0.06f + 0.2f, repairBayPos.z), new Vector2(0.5f, 0.6f));
             // sorting tray in front of the repair bay: drop any parts here and the robots sort them
             // against the south wall beside the door: out of the way of the workbench and the walkways
             // against the wall (the sign hangs on the wall above it), 1.6 m along it and 0.9 m deep: a

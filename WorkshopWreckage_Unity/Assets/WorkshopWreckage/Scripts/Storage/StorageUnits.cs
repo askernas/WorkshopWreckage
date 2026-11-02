@@ -489,6 +489,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (_open.Count == 0) return;
             foreach (var slot in new List<int>(_open.Keys))
             {

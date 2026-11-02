@@ -78,15 +78,49 @@ namespace WorkshopWreckage
         readonly HashSet<string> _labelsDirty = new();
         public static Game Instance;
 
+        /// <summary>Milliseconds since the engine started (the window opens before the first script runs).</summary>
+        public static int SinceLaunch() => (int)(Time.realtimeSinceStartupAsDouble * 1000);
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
         {
             if (Instance != null) return;
+            Debug.Log($"[boot] scripts start {SinceLaunch()} ms after launch");
             var go = new GameObject("WorkshopWreckage");
             Instance = go.AddComponent<Game>();
         }
 
-        void Start()
+        /// <summary>True while Start builds the game: Start yields between its steps so the loading splash can
+        /// draw its dots, and every Update in the game waits until the build is done.</summary>
+        public static bool Booting;
+
+        /// <summary>Command-line modes that are tools or tests: no loading splash and no title (they close it).</summary>
+        static readonly string[] ToolArgs = { "shot", "menushot", "robotbench", "bench", "autoplay", "balance", "play", "robotwatch", "activatewatch", "lineup",
+                                              "catalogue", "layoutdump", "pegdump", "pegview", "sandbox" };
+        bool PlainLaunch => !ToolArgs.Any(args.ContainsKey);
+
+        System.Diagnostics.Stopwatch _bootStep;
+        /// <summary>A step of the boot is done: logs its time; the caller yields so a frame is drawn.</summary>
+        void BootStep(string name)
+        {
+            Debug.Log($"[boot] {name}: {_bootStep?.ElapsedMilliseconds ?? 0} ms");
+            _bootStep = System.Diagnostics.Stopwatch.StartNew();
+        }
+
+        /// <summary>Runs a stepped build (StartWorldSteps) at once, ignoring its steps: loads and new games.</summary>
+        static void RunNow(IEnumerator e)
+        {
+            var stack = new Stack<IEnumerator>();
+            stack.Push(e);
+            while (stack.Count > 0)
+            {
+                var top = stack.Peek();
+                if (!top.MoveNext()) { stack.Pop(); continue; }
+                if (top.Current is IEnumerator inner) stack.Push(inner);
+            }
+        }
+
+        IEnumerator Start()
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             foreach (var a in Environment.GetCommandLineArgs())
@@ -95,6 +129,18 @@ namespace WorkshopWreckage
                 var kv = a.Substring(2).Split(new[] { '=' }, 2);
                 args[kv[0]] = kv.Length > 1 ? kv[1] : "1";
             }
+            Booting = true;
+            // the splash with "Loading..." first (playtest 2026-10-31: it was a white window until the game was built);
+            // two frames so it is on screen before the first long step
+            if (PlainLaunch)
+            {
+                Splash.ShowLoading();
+                if (args.TryGetValue("loadshot", out var lsDir)) StartCoroutine(LoadShots(lsDir));
+                yield return null;
+                yield return null;
+            }
+            BootStep("splash");
+            Debug.Log($"[boot] splash on screen {SinceLaunch()} ms after launch");
             // remove template scene content (camera, light, volume)
             foreach (var cam in FindObjectsByType<Camera>()) Destroy(cam.gameObject);
             foreach (var l in FindObjectsByType<Light>()) Destroy(l.gameObject);
@@ -114,16 +160,19 @@ namespace WorkshopWreckage
             Debug.Log($"[boot] preset {presetId} loaded, valid {valid} ({sw.ElapsedMilliseconds} ms)");
             if (valid && args.ContainsKey("sandbox"))   // the visual development sandbox (docs/VISUAL_SANDBOX.md): no workshop, no game systems
             {
+                Booting = false;
                 if (args.TryGetValue("skins", out var sbSkins)) ItemSkins.Enabled = sbSkins != "0";
                 WorkshopArtDirectionProfile.Load(args);
                 Sandbox.VisualSandbox.Open(this);
                 enabled = false;
-                return;
+                yield break;
             }
+            BootStep("preset");
+            if (PlainLaunch) yield return null;
             hud = new GameObject("UI").AddComponent<Hud>();
             hud.transform.SetParent(transform, false);
             hud.Init(this);
-            if (!valid) { hud.ShowFatal("The item data files are invalid:\n\n" + string.Join("\n", db.errors.Take(25))); return; }
+            if (!valid) { Booting = false; Splash.Close(); hud.ShowFatal("The item data files are invalid:\n\n" + string.Join("\n", db.errors.Take(25))); yield break; }
             workbench = new GameObject("RobotWorkbench").AddComponent<RobotWorkbench>();
             workbench.transform.SetParent(transform, false);
 
@@ -157,24 +206,32 @@ namespace WorkshopWreckage
             WorkshopArtDirectionProfile.Load(args);   // before the workshop is built: its lights, grading and colours read it
             GameLook.Init(args);                      // playtest: the sandbox's Variant B look (--look=baseline: the game's own)
             int seed = args.TryGetValue("seed", out var sd) ? (sd == "random" ? RandomSeed() : int.Parse(sd)) : NewSeed();
-            if (!StartWorld(seed, null)) return;
+            BootStep("systems");
+            if (PlainLaunch) yield return null;
+            bool built = false;
+            if (PlainLaunch) yield return StartWorldSteps(seed, null, ok => built = ok);   // the loading splash animates between the steps
+            else built = StartWorld(seed, null);
+            Booting = false;
+            if (!built) { Splash.Close(); yield break; }
             startupMs = Time.realtimeSinceStartupAsDouble * 1000;   // process start to interactive
             Debug.Log($"[boot] interactive at {startupMs:0} ms; cavity bake {CavityMask.BakeMs:0} ms over {CavityMask.Meshes} meshes");
             StartCoroutine(ProbeLater());
+            if (args.TryGetValue("robotcpu", out var rcpu)) RobotCpu.LogMs = float.Parse(rcpu, System.Globalization.CultureInfo.InvariantCulture);   // QA: log robot decisions over N ms
+            if (args.ContainsKey("nooccl")) ItemRenderer.Occlusion = false;   // QA: line of sight off (benchmark comparisons)
             if (args.TryGetValue("partshadows", out var psm)) ItemRenderer.ShadowMode = Mathf.Clamp(int.Parse(psm), 0, 2);   // QA / benchmark
             // QA: item lighting terms (1 normals, 2 ambient, 3 main light, 4 additional lights)
             if (args.TryGetValue("itemdebug", out var idm)) Shader.SetGlobalFloat("_WWItemDebug", float.Parse(idm, System.Globalization.CultureInfo.InvariantCulture));
             if (args.TryGetValue("robotview", out var rv)) RobotView(rv);
             if (args.TryGetValue("radarview", out var rdv)) RadarView(rdv);
-            if (args.TryGetValue("robotwatch", out var rwatch)) { SetState("play"); StartCoroutine(RobotWatch(rwatch)); return; }
-            if (args.TryGetValue("activatewatch", out var awatch)) { SetState("play"); StartCoroutine(ActivateWatch(awatch)); return; }
-            if (args.TryGetValue("lineup", out var lineup)) { SetState("play"); StartCoroutine(Lineup(lineup)); return; }
-            if (args.TryGetValue("catalogue", out var catDir)) { SetState("play"); StartCoroutine(CatalogueExport.Run(this, catDir)); return; }   // QA: component catalogue (read-only)
-            if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); return; }
+            if (args.TryGetValue("robotwatch", out var rwatch)) { SetState("play"); StartCoroutine(RobotWatch(rwatch)); yield break; }
+            if (args.TryGetValue("activatewatch", out var awatch)) { SetState("play"); StartCoroutine(ActivateWatch(awatch)); yield break; }
+            if (args.TryGetValue("lineup", out var lineup)) { SetState("play"); StartCoroutine(Lineup(lineup)); yield break; }
+            if (args.TryGetValue("catalogue", out var catDir)) { SetState("play"); StartCoroutine(CatalogueExport.Run(this, catDir)); yield break; }   // QA: component catalogue (read-only)
+            if (args.TryGetValue("layoutdump", out var ld)) { DumpLayout(ld); Application.Quit(); yield break; }
             if (args.TryGetValue("gallery", out var gal)) BuildGallery(gal, args.TryGetValue("lod", out var lodArg) ? int.Parse(lodArg) : MeshLibrary.LodWorld);
             if (args.TryGetValue("pegfill", out var pf) && builder.pegboard != null) builder.pegboard.PreviewFill(float.Parse(pf, System.Globalization.CultureInfo.InvariantCulture));   // QA: hang a share of the pegboard tools
-            if (args.TryGetValue("pegdump", out var pdump) && builder.pegboard != null) { System.IO.File.WriteAllText(pdump, builder.pegboard.LayoutDump()); Debug.Log("[pegboard] layout dump: " + pdump); Application.Quit(); return; }   // QA: the board's layout (tools/peg_layout.py)
-            if (args.TryGetValue("pegview", out var pv)) { SetState("play"); hud.SetHudVisible(false); Pegboard.PegboardPreview.Open(this, float.TryParse(pv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pvf) ? pvf : 1f); return; }   // the pegboard on its own (docs/PEGBOARD.md)
+            if (args.TryGetValue("pegdump", out var pdump) && builder.pegboard != null) { System.IO.File.WriteAllText(pdump, builder.pegboard.LayoutDump()); Debug.Log("[pegboard] layout dump: " + pdump); Application.Quit(); yield break; }   // QA: the board's layout (tools/peg_layout.py)
+            if (args.TryGetValue("pegview", out var pv)) { SetState("play"); hud.SetHudVisible(false); Pegboard.PegboardPreview.Open(this, float.TryParse(pv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pvf) ? pvf : 1f); yield break; }   // the pegboard on its own (docs/PEGBOARD.md)
             if (args.TryGetValue("presort", out var ps)) Presort(float.Parse(ps, System.Globalization.CultureInfo.InvariantCulture));
             if (args.ContainsKey("shot")) { SetState("play"); StartCoroutine(TakeShots()); }
             else if (args.TryGetValue("menushot", out var ms)) { SetState("menu"); if (args.TryGetValue("splash", out var sp)) { Splash.Show(() => hud.SplashBackdrop(true)); if (sp == "backdrop") Splash.Dismiss(); if (sp == "instructions") Splash.Press(); } if (args.TryGetValue("menusub", out var sub)) { var sp2 = sub.Split(':'); hud.OpenSub(sp2[0]); if (sp2.Length > 1) hud.SettingsTab(sp2[1]); } StartCoroutine(MenuShot(ms)); }   // QA: the real main menu (backdrop and blur; --splash: under the title splash)
@@ -183,7 +240,35 @@ namespace WorkshopWreckage
             else if (args.TryGetValue("autoplay", out var ap)) { SetState("play"); StartCoroutine(new Autoplay().Run(this, ap)); }
             else if (args.TryGetValue("balance", out var bal)) { SetState("play"); StartCoroutine(new BalanceSim().Run(this, bal)); }   // QA: robot-only balance run (balance_profiles)
             else if (args.ContainsKey("play")) SetState("play");
-            else { SetState("menu"); Splash.Show(() => hud.SplashBackdrop(true)); }
+            else { SetState("menu"); Splash.Ready(() => hud.SplashBackdrop(true)); }   // "Start game", then the instructions, then the menu
+        }
+
+        /// <summary>QA (--loadshot=dir, a normal launch): the loading splash while the game is built, then the Start
+        /// game button, the instructions and the menu; the dot states seen while loading are logged.</summary>
+        IEnumerator LoadShots(string dir)
+        {
+            System.IO.Directory.CreateDirectory(dir);
+            yield return null;
+            yield return Capture(System.IO.Path.Combine(dir, "1_loading.png"), 0);
+            var seen = new List<string>();
+            int frames = 0;
+            while (Booting) { frames++; var t = Splash.StatusText; if (seen.Count == 0 || seen[^1] != t) seen.Add(t); yield return null; }
+            Debug.Log($"[loadshot] {frames} frames drawn while loading; text: {string.Join(" | ", seen)}");
+            for (int i = 0; i < 30; i++) yield return null;
+            Debug.Log($"[loadshot] waiting for Start game: {Splash.IsWaitingToStart}, status '{Splash.StatusText}', state {state}");
+            yield return Capture(System.IO.Path.Combine(dir, "2_ready.png"), 0);
+            for (int i = 0; i < 5; i++) yield return null;
+            Splash.Press();
+            for (float t = 0; t < 1.5f; t += Time.unscaledDeltaTime) yield return null;
+            yield return Capture(System.IO.Path.Combine(dir, "3_instructions.png"), 0);
+            for (int i = 0; i < 5; i++) yield return null;
+            Splash.Press();
+            for (float t = 0; t < 1.5f; t += Time.unscaledDeltaTime) yield return null;
+            Debug.Log($"[loadshot] menu: backdrop {Splash.IsBackdrop}, state {state}");
+            yield return Capture(System.IO.Path.Combine(dir, "4_menu.png"), 0);
+            for (int i = 0; i < 10; i++) yield return null;
+            _leaveWithoutSaving = true;   // a QA run must not autosave over the player's Autosave
+            Application.Quit();
         }
 
         IEnumerator ProbeLater()
@@ -213,12 +298,12 @@ namespace WorkshopWreckage
 
         /// <summary>Generates the procedural workshop for the current preset and
         /// seed and (re)builds room, furniture and storage units.</summary>
-        bool BuildWorkshop(int seed)
+        IEnumerator BuildWorkshopSteps(int seed, Action<bool> done)
         {
             _lampBase.Clear();
             _machineRunning = false; _machineSpin = 0;
             var l = WorkshopLayout.Generate(db, seed);
-            if (l.placementErrors.Count > 0) { hud.ShowFatal("The workshop layout is invalid:\n\n" + string.Join("\n", l.placementErrors.Take(20))); return false; }
+            if (l.placementErrors.Count > 0) { hud.ShowFatal("The workshop layout is invalid:\n\n" + string.Join("\n", l.placementErrors.Take(20))); done(false); yield break; }
             layout = l;
             _layoutSeed = seed;
             if (builder != null) Destroy(builder.gameObject);
@@ -227,6 +312,8 @@ namespace WorkshopWreckage
             builder = new GameObject("Workshop").AddComponent<WorkshopBuilder>();
             builder.transform.SetParent(transform, false);
             Debug.Log("[boot] layout generated");
+            BootStep("layout");
+            yield return null;
             builder.Build(layout);
             GameLook.ApplyRoom(builder);
             GameSettings.ApplyWorld(builder);
@@ -236,13 +323,16 @@ namespace WorkshopWreckage
             trayTarget.AddComponent<BoxCollider>().size = new Vector3(layout.trayRect.width, 0.3f, layout.trayRect.height);
             trayTarget.AddComponent<StorageTarget>().destId = "TRAY";
             Debug.Log("[boot] workshop built");
+            BootStep("workshop");
+            yield return null;
             BuildStorage();
             _containers = null;
             Debug.Log("[boot] storage built");
             workbench.transform.position = Shared.Pos(layout.repairBayPos.x, layout.repairBayPos.y, layout.repairBayPos.z);
             workbench.transform.rotation = Shared.YRot(layout.repairBayRot);
             if (startupMs > 0) StartCoroutine(ProbeLater());
-            return true;
+            BootStep("storage");
+            done(true);
         }
 
         Transform _posters;
@@ -290,13 +380,30 @@ namespace WorkshopWreckage
 
         public bool StartWorld(int seed, Dictionary<string, object> save)
         {
+            bool ok = false;
+            RunNow(StartWorldSteps(seed, save, r => ok = r));
+            return ok;
+        }
+
+        /// <summary>Builds the world (and the workshop for a new seed) in steps: at boot the loading splash is drawn
+        /// between them (Game.Start); StartWorld runs them at once.</summary>
+        IEnumerator StartWorldSteps(int seed, Dictionary<string, object> save, Action<bool> done)
+        {
             migrationReport = "";
             migrationAdded = new List<int>();
-            if (_layoutSeed != seed && !BuildWorkshop(seed)) return false;
+            if (_layoutSeed != seed)
+            {
+                bool shop = false;
+                yield return BuildWorkshopSteps(seed, r => shop = r);
+                if (!shop) { done(false); yield break; }
+                yield return null;
+            }
             var gen = new WorldGenerator { forbidden = InsideContainerG };
             int total = db.WorldTotal;
             var w = gen.Generate(db, layout, seed, itemCount > 0 && itemCount < total ? itemCount : -1);
-            if (w == null) { hud.ShowFatal("World could not be generated:\n\n" + string.Join("\n", gen.errors.Take(20))); return false; }
+            if (w == null) { hud.ShowFatal("World could not be generated:\n\n" + string.Join("\n", gen.errors.Take(20))); done(false); yield break; }
+            BootStep("parts generated");
+            yield return null;
             Debug.Log($"[world] preset {presetId}, seed {seed}: {w.Count} items in {gen.lastGenerationMs:0} ms ({layout.piles.Count} pile sites, {layout.surfaces.Count} surfaces, {units.Count} storage units)");
             world = w;
             lastGen = gen;
@@ -338,6 +445,8 @@ namespace WorkshopWreckage
             renderer.Build(world);
             Pegboard.ScatteredTools.Attach(world, renderer);   // the board's tools in the room, merged (docs/PEGBOARD.md)
             index = new ItemSpatialIndex(world);
+            BootStep("parts drawn");
+            yield return null;
             // the previous world's simulation goes first: the settle hands its last falling parts
             // on to play, and clearing after it froze them in mid-air
             piles.Clear();
@@ -351,6 +460,8 @@ namespace WorkshopWreckage
             else if (migrationAdded.Count > 0 || !Json.Bool(save, "loose_settled"))
                 piles.DropLoose(migrationAdded.Concat(Json.Bool(save, "loose_settled") ? Enumerable.Empty<int>() : world.instances.Where(i => i.state == ItemState.InWorld && world.DefOf(i.id).IsPegboardTool).Select(i => i.id)).Distinct().ToList(),
                                 migrationAdded.ToHashSet());
+            BootStep("parts settled");
+            yield return null;
             debris = new DebrisField(world, index, Shared.Pos(layout.roomMin.x, 0, layout.roomMax.z), Shared.Pos(layout.roomMax.x, 0, layout.roomMin.z), FurnitureFootprints());
             player.debris = debris;
             interaction.ResetState();
@@ -362,6 +473,8 @@ namespace WorkshopWreckage
                 if (_posters != null) Destroy(_posters.gameObject);
                 _posters = BlueprintPosters.Build(this);
                 _postersFor = layout;
+                BootStep("posters");
+                yield return null;
             }
             if (_dressingFor != layout && !args.ContainsKey("nodressing"))   // art pass stage B; --nodressing: QA (comparison)
             {
@@ -370,6 +483,8 @@ namespace WorkshopWreckage
                 _dressing = WorkshopDressing.Build(this);
                 _dressingFor = layout;
                 Debug.Log($"[boot] art: dressing {dsw.ElapsedMilliseconds} ms, cavity bake {CavityMask.BakeMs:0} ms over {CavityMask.Meshes} meshes so far");
+                BootStep("dressing");
+                yield return null;
             }
             workbench.ResetState();
             bool rewardsSaved = pegRewards.Load(save);
@@ -427,7 +542,8 @@ namespace WorkshopWreckage
                 player.Teleport(Shared.Pos(layout.spawn.x, layout.spawn.y, layout.spawn.z));
                 player.SetView(layout.spawnYaw, -12 * Mathf.Deg2Rad);
             }
-            return true;
+            BootStep("robots and progression");
+            done(true);
         }
 
         float _lightT;
@@ -511,9 +627,11 @@ namespace WorkshopWreckage
             foreach (var (id, _) in UnreachableParts())
             {
                 index.Remove(id);
-                world.SetTransform(id, interaction.TrayMatrix(world.DefOf(id)));
+                var m = interaction.TrayMatrix(world.DefOf(id));
+                world.SetTransform(id, m);
                 world.SetState(id, ItemState.InWorld, "tray");
                 index.Insert(id);
+                interaction.FallInTray(id, m);
                 n++;
             }
             return n;
@@ -1700,9 +1818,11 @@ namespace WorkshopWreckage
                     o.Add($"{d.displayName} #{id}: {why}" + (repair ? " → sorting tray" : ""));
                     if (!repair) continue;
                     if (i.state == ItemState.Stored && i.owner.StartsWith("box:")) storage.Remove(i.owner.Substring(4), id);
-                    world.SetTransform(id, interaction.TrayMatrix(d));
+                    var m = interaction.TrayMatrix(d);
+                    world.SetTransform(id, m);
                     world.SetState(id, ItemState.InWorld, "tray");
                     index.Insert(id);
+                    interaction.FallInTray(id, m);
                 }
             }
             return o;
@@ -1826,6 +1946,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Booting) return;
             MenuBackdrop();
             if (_labelsDirty.Count > 0 && storage != null)
             {

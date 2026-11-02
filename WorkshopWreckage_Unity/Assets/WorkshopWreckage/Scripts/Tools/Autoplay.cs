@@ -275,9 +275,16 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "inventory")
+            {
+                yield return InventoryOrderChecks();   // QA: the hand is last in, first out unless scrolled (playtest 2026-10-31)
+                Finish();
+                yield break;
+            }
             if (section == "placement")
             {
                 g.progression.skillPoints += 5;
+                yield return InventoryOrderChecks();
                 yield return PlacementChecks();   // QA: placement rules 2026-10-30 (click and Automatic Storage Delivery)
                 Finish();
                 yield break;
@@ -285,6 +292,12 @@ namespace WorkshopWreckage
             if (section == "skillmigrate")
             {
                 yield return SkillMigrateChecks(g.args.GetValueOrDefault("apslot", "premig_slot1"));   // QA: migration A on a copy of an older save
+                Finish();
+                yield break;
+            }
+            if (section == "skillpanel")
+            {
+                yield return SkillPanelChecks();   // QA: the paged two-column skill panel (docs/SKILL_PANEL.md)
                 Finish();
                 yield break;
             }
@@ -315,6 +328,12 @@ namespace WorkshopWreckage
             if (section == "pile")
             {
                 yield return PileChecks();   // QA: dropped parts pile up
+                Finish();
+                yield break;
+            }
+            if (section == "traypile")
+            {
+                yield return TrayPileChecks();   // QA: parts dropped in the sorting tray fall and pile up (playtest 2026-11-02)
                 Finish();
                 yield break;
             }
@@ -1877,7 +1896,7 @@ namespace WorkshopWreckage
                 foreach (var id in shells) { Take(id); ic.DepositStation(id); }
                 yield return Frames(2);
                 var pos = wb.PoolModelPosition(shells[0]);
-                if (pos is Vector3 pp) { var stand = pp + wb.Front * 0.5f; LookFrom(new Vector3(stand.x, PlayerController.Eye, stand.z), pp); }   // standing at the tray
+                if (pos is Vector3 pp) { var stand = pp + wb.Front * 0.8f; LookFrom(new Vector3(stand.x, PlayerController.Eye, stand.z), pp); }   // standing at the bin (it is 0.5 m deep)
                 yield return Frames(2);
                 ic.UpdateTarget();
                 int aimedPart = ic.targetPoolPart;
@@ -1909,8 +1928,23 @@ namespace WorkshopWreckage
                 foreach (var id in g.inventory.items.Where(x => g.world.DefOf(x).IsRobotPart).ToList()) ic.DepositStation(id);
                 var kit = wb.PartIds(p).Where(id => g.world.instances[id].state != ItemState.Installed).Take(3).ToList();
                 foreach (var id in kit) { Take(id); ic.DepositStation(id); }
-                // LMB on the bench (carrying a part) opens workbench mode on its blueprints; the part is in the box
-                int carried = wb.PartIds(p).First(id => g.world.instances[id].state != ItemState.Installed && !kit.Contains(id));
+                // LMB on the parts bin (carrying a part) only puts it in: the workbench does not open (playtest 2026-10-31)
+                int binned = wb.PartIds(p).First(id => g.world.instances[id].state != ItemState.Installed && !kit.Contains(id) && !g.inventory.Has(id));
+                Take(binned);
+                var bp = wb.PoolPoint;
+                var binStand = bp + wb.Front * 0.75f;
+                LookFrom(new Vector3(binStand.x, PlayerController.Eye, binStand.z), bp);
+                yield return Frames(2);
+                ic.UpdateTarget();
+                bool atBin = ic.targetType == "station" && wb.AtPool(ic.targetPoint);
+                ic.Primary();
+                yield return Frames(4);
+                yield return g.Capture(Path.Combine(outDir, "parts_bin.png"), 2);
+                Check("LMB on the robot parts bin only puts the carried part in; the workbench stays closed",
+                      atBin && g.state == "play" && !g.inventory.Has(binned) && g.world.instances[binned].state == ItemState.Stored,
+                      $"aim {ic.targetType} at bin {wb.AtPool(ic.targetPoint)}, state {g.state}, part {g.world.instances[binned].state}");
+                // LMB on the bench (carrying a part) opens workbench mode on its blueprints; the part is in the bin
+                int carried = wb.PartIds(p).First(id => g.world.instances[id].state != ItemState.Installed && !kit.Contains(id) && id != binned);
                 Take(carried);
                 yield return AimAtRobot(p);
                 bool aimed = ic.targetType == "station";
@@ -1918,7 +1952,7 @@ namespace WorkshopWreckage
                 yield return Frames(4);
                 bool opened = g.state == "workbench" && !g.hud.WorkbenchOnParts && !g.inventory.Has(carried) && g.world.instances[carried].state == ItemState.Stored;
                 yield return g.Capture(Path.Combine(outDir, "ghost_bench_opened.png"), 2);
-                Check("Unibot: LMB on the Robot Workbench opens workbench mode (blueprints); the carried part goes in the parts box; no picker outside it",
+                Check("Unibot: LMB on the Robot Workbench opens workbench mode (blueprints); the carried part goes in the parts bin; no picker outside it",
                       aimed && opened && !ic.PickerActive, $"aim {ic.targetType}, state {g.state}, on parts {g.hud.WorkbenchOnParts}, part {g.world.instances[carried].state}");
                 g.hud.WorkbenchChoose(p.id);
                 yield return Frames(2);
@@ -3513,12 +3547,17 @@ namespace WorkshopWreckage
             // the skill menu
             g.SetState("paused");
             g.hud.OpenSub("skills");
+            g.hud.ShowSkillPage("player");
             yield return g.Capture(Path.Combine(outDir, "skills_menu.png"), 6);
-            var menu = string.Join(" | ", g.hud.GetComponentsInChildren<UnityEngine.UI.Text>().Select(x => x.text));
-            Check("the skill menu shows the shared points, level / max, now → next, the cost and that not everything can be maxed",
-                  menu.Contains("skill points") && menu.Contains("level 10 / 10") && menu.Contains("level 0 / 10") && menu.Contains("Next:") && menu.Contains("(1 pt)") && menu.Contains("can't max everything")
-                  && !menu.Contains("Part Radar Plans") && !menu.Contains("Part Afterglow") && !menu.Contains("Lv "),
-                  menu.Length > 400 ? menu.Substring(0, 400) : menu);
+            var rowsShown = g.hud.SkillRowsShown();
+            var senseRow = rowsShown.FindIndex(r => r.name == "Part Sense");
+            g.hud.SkillFocus(rowsShown.FindIndex(r => r.on == 0 && r.gears == 10));
+            string zeroDetail = g.hud.SkillDetailText;
+            Check("the skill menu shows the shared points, level / max as gears, now → next, the cost and that not everything can be maxed",
+                  g.hud.SkillPointsText.Contains("skill point") && g.hud.SkillSharedText.Contains("can't max everything") && senseRow >= 0 && rowsShown[senseRow].on == 10 && rowsShown[senseRow].chip == "MAX"
+                  && rowsShown.Any(r => r.on == 0 && r.gears == 10 && r.chip == "1 pt") && zeroDetail.Contains("Next level (1)") && zeroDetail.Contains("Cost")
+                  && !rowsShown.Any(r => r.name.Contains("Part Radar Plans") || r.name.Contains("Part Afterglow")),
+                  string.Join("; ", rowsShown.Select(r => $"{r.name} {r.on}/{r.gears} {r.chip}")));
             g.SetState("play");
 
             // the normal respec is closed; the dev respec (F8, debug mode) refunds everything at what it cost
@@ -3601,6 +3640,50 @@ namespace WorkshopWreckage
         /// inventory is never searched for something that fits. A click stores the part in hand only, then the hand
         /// takes the next part in the inventory order; ASD stores up to its level of the held part's kind, the held one
         /// counted, from anywhere in the inventory; Sort Inventory sets the order the hotbar shows and the hand follows.</summary>
+        /// <summary>The hand is last in, first out (playtest 2026-10-31): 7 copies of a kind, then 3 other parts picked
+        /// up and thrown away at once (the real drop) throws those 3, newest first, and the hand is back on the kind.
+        /// A part scrolled to stays chosen as its copies go; a pickup puts the new part in hand again.</summary>
+        IEnumerator InventoryOrderChecks()
+        {
+            var inv = g.inventory;
+            var it = g.interaction;
+            g.player.enabled = false;
+            it.enabledInput = false;
+            int cap = inv.capacity;
+            inv.capacity = Mathf.Max(cap, 12);
+            void Empty() { foreach (var id in inv.items.ToList()) { inv.Remove(id); g.world.SetState(id, ItemState.InWorld, "world"); g.index.Insert(id); } }
+            bool Loose(ItemInstance i) => i.state == ItemState.InWorld && !g.world.DefOf(i.id).IsRobotPart && !g.world.DefOf(i.id).IsToolItem
+                                          && !g.world.DefOf(i.id).IsPegboardTool && !g.robotReserved.Contains(i.id) && !inv.isBattery(i.id);
+            Empty();
+            var A = g.world.instances.Where(Loose).GroupBy(i => i.defId).First(gr => gr.Count() >= 9);
+            var others = g.world.instances.Where(i => Loose(i) && i.defId != A.Key).GroupBy(i => i.defId).Take(4).Select(gr => gr.First().id).ToList();
+            Check("inventory test set-up: a kind with 7+ loose copies and 3+ other parts", others.Count >= 4, $"{g.db.Get(A.Key).displayName}: {A.Count()}, others {others.Count}");
+            var a7 = A.Take(7).Select(i => i.id).ToList();
+            foreach (var id in a7) Take(id);
+            foreach (var id in others.Take(3)) Take(id);
+            Check("the part just picked up is in hand", inv.HeldId() == others[2], $"held {inv.HeldId()}, last picked {others[2]}");
+            var thrown = new List<int>();
+            for (int n = 0; n < 3; n++) { thrown.Add(inv.HeldId()); it.DropHeld(); yield return null; }
+            Check("throwing three at once throws the three just picked up, newest first", thrown.SequenceEqual(new[] { others[2], others[1], others[0] }),
+                  $"thrown {string.Join(",", thrown)}, picked {string.Join(",", others.Take(3))}");
+            Check("then the hand is back on the 7 (the last copy picked up)", inv.HeldId() == a7[^1] && inv.Count == 7, $"held {inv.HeldId()}, count {inv.Count}");
+
+            // scrolled to the kind: it stays in hand while copies go, even with a newer part behind it
+            Take(others[0]);
+            inv.SelectSlot(inv.Stacks().FindIndex(st => st.defId == A.Key));
+            it.DropHeld(); yield return null;
+            Check("a part scrolled to stays chosen: the next copy is in hand, not the newest part", inv.ChosenByPlayer && inv.heldDef == A.Key,
+                  $"chosen {inv.ChosenByPlayer}, held {g.db.Get(inv.heldDef).displayName}");
+            Take(others[3]);
+            Check("a pickup puts the new part in hand again (last in, first out)", inv.HeldId() == others[3] && !inv.ChosenByPlayer, $"held {inv.HeldId()}, chosen {inv.ChosenByPlayer}");
+
+            yield return null;
+            Empty();
+            inv.capacity = cap;
+            it.enabledInput = true;
+            g.player.enabled = true;
+        }
+
         IEnumerator PlacementChecks()
         {
             var pr = g.progression;
@@ -3698,8 +3781,8 @@ namespace WorkshopWreckage
                   $"stored {s0} -> {StoredK()}; in hand after: {(heldAfter >= 0 ? g.world.DefOf(heldAfter).displayName : "nothing")} (expected {g.db.Get(O.def).displayName})");
 
             // 5. ASD I counts the part in hand and stores one; 8. a click still works during its cooldown
-            Hold(k2);
             int k3 = NextK();
+            Hold(k2);   // chosen after the pickup: a pickup puts the new part in hand (last in, first out)
             it.UpdateTarget();
             int s5 = StoredK();
             int asd5 = t.StorageDelivery();
@@ -3988,6 +4071,149 @@ namespace WorkshopWreckage
             eye.y = Mathf.Clamp(target.y + 0.35f, 0.9f, 1.75f);
             return (eye, target);
         }
+
+        /// <summary>The skill panel (docs/SKILL_PANEL.md): pages, the shared points, gear rows, the detail column
+        /// from hover and selection, buying and refusals, robot pages (built and not), save / load.</summary>
+        IEnumerator SkillPanelChecks()
+        {
+            var pr = g.progression;
+            var wb = g.workbench;
+            var pj = wb.P("retrobot");
+            foreach (var id in wb.PartIds(pj)) { Take(id); g.interaction.DepositStation(id); }
+            wb.InstallAll(pj);
+            wb.RobotOf(pj).SetOperational();
+            pr.skillPoints = 3;   // QA: a few points to spend in the panel
+            g.SetState("paused");
+            g.hud.OpenSub("skills");
+            yield return Frames(3);
+            var pages = g.hud.SkillPages();
+            var robotTypes = pr.robotUpgrades.Select(u => u.robot).Distinct().ToList();
+            Check("1 pages: PLAYER first, then one page per robot type with upgrades, in the agreed order",
+                  pages[0] == "player" && pages.Count == robotTypes.Count + 1 && robotTypes.All(pages.Contains)
+                  && pages.Skip(1).Take(6).SequenceEqual(new[] { "retrobot", "unibot", "caterpillarbot", "spiderbot", "hoverbot", "sorting_arm" }.Where(robotTypes.Contains)),
+                  string.Join(", ", pages));
+            Check("2 it opens on PLAYER SKILLS with the back arrow muted and the next arrow live",
+                  g.hud.SkillPageIndex == 0 && g.hud.SkillPageTitle == "PLAYER SKILLS" && !g.hud.SkillPrevEnabled && g.hud.SkillNextEnabled,
+                  $"page {g.hud.SkillPageIndex} '{g.hud.SkillPageTitle}', prev {g.hud.SkillPrevEnabled}, next {g.hud.SkillNextEnabled}");
+            Check("3 the shared-points message and the available points are shown",
+                  g.hud.SkillSharedText.Contains("Skill points are shared between player skills and robot upgrades.") && g.hud.SkillPointsText.Contains("<b>3</b> skill points"),
+                  g.hud.SkillPointsText);
+            yield return g.Capture(Path.Combine(outDir, "skillpanel_player.png"), 6);
+
+            // the player rows: one per skill, a gear per level, black = bought
+            int levels = pr.skills.Count(s => !s.Retired);
+            var rows = g.hud.SkillRowsShown();
+            int pockets = rows.FindIndex(r => r.name == "Deeper Pockets");
+            Check("4 player rows: every skill once (a gear per skill level in all ; 10 for ten-level skills, fewer otherwise), none bought yet",
+                  rows.Sum(r => r.gears) == levels && rows.Select(r => r.name).Distinct().Count() == rows.Count && pockets >= 0 && rows[pockets].gears == 10 && rows.Any(r => r.gears == 1) && rows.All(r => r.on == 0) && rows.All(r => r.level.StartsWith("0 / ")),
+                  string.Join("; ", rows.Select(r => $"{r.name} {r.on}/{r.gears} {r.chip}")));
+
+            // hover and keyboard selection drive the detail column; values come from the game data
+            UnityEngine.EventSystems.ExecuteEvents.Execute(g.hud.SkillRowObject(pockets), new UnityEngine.EventSystems.PointerEventData(UnityEngine.EventSystems.EventSystem.current), UnityEngine.EventSystems.ExecuteEvents.pointerEnterHandler);
+            string d = g.hud.SkillDetailText;
+            int cap = g.inventory.capacity, step = (int)pr.Skill("pockets_1").effects["inventory_capacity"];
+            Check("5 hovering a row shows its name, level, current and next effect and cost (from the data)",
+                  g.hud.SkillFocusRow == pockets && d.Contains("DEEPER POCKETS") && d.Contains("Level 0 / 10") && d.Contains("Not learned yet") && d.Contains($"Carries {cap + step} parts") && d.Contains("1 skill point"),
+                  d);
+            int sel = rows.FindIndex(r => r.name == "Part Sense");
+            UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(g.hud.SkillRowObject(sel));
+            yield return Frames(1);
+            d = g.hud.SkillDetailText;
+            Check("6 selecting a row with keyboard / controller shows its detail too (Part Sense: range, parts, cooldown)",
+                  g.hud.SkillFocusRow == sel && d.Contains("PART SENSE") && d.Contains($"Range: {PlayerTools.Tuned("part_sense", "range_m", 1, 0):0} m") && d.Contains($"Cooldown: {PlayerTools.Tuned("part_sense", "cooldown_s", 1, 0):0} s"),
+                  d);
+
+            // buying: points, gears, level and detail update at once
+            g.hud.SkillRowClick(pockets);
+            yield return Frames(1);
+            rows = g.hud.SkillRowsShown();
+            d = g.hud.SkillDetailText;
+            Check("7 clicking buys the next level: 1 point spent, a gear turns black, the detail and points update, success is said",
+                  pr.unlocked.Contains("pockets_1") && pr.skillPoints == 2 && rows[pockets].on == 1 && rows[pockets].level == "1 / 10" && g.inventory.capacity == cap + step
+                  && d.Contains("Level 1 / 10") && d.Contains($"Carries {cap + step} parts") && d.Contains($"Carries {cap + 2 * step} parts") && g.hud.SkillPointsText.Contains("<b>2</b>") && g.hud.SkillStatusText.Contains("Learned"),
+                  $"points {pr.skillPoints}; row {rows[pockets]}; status '{g.hud.SkillStatusText}'; {d}");
+
+            // locked: Supermagnet needs Magnetic Glove II
+            int sup = rows.FindIndex(r => r.name.StartsWith("Supermagnet"));
+            g.hud.SkillRowClick(sup);
+            Check("8 a locked skill says LOCKED and why; clicking buys nothing",
+                  sup >= 0 && g.hud.SkillRowsShown()[sup].chip == "LOCKED" && !pr.unlocked.Contains("supermagnet") && pr.skillPoints == 2 && g.hud.SkillStatusText.Contains("locked") && g.hud.SkillDetailText.Contains("locked: Requires"),
+                  $"{(sup >= 0 ? g.hud.SkillRowsShown()[sup].ToString() : "no Supermagnet row")}; '{g.hud.SkillStatusText}'");
+
+            // not enough points
+            pr.skillPoints = 0;
+            g.hud.SkillRowClick(pockets);
+            Check("9 without points: the cost shows as unaffordable and a click says so, nothing bought",
+                  !pr.unlocked.Contains("pockets_2") && g.hud.SkillStatusText.Contains("Not enough skill points") && g.hud.SkillRowsShown()[pockets].chip == "1 pt" && g.hud.SkillDetailText.Contains("not enough skill points"),
+                  $"'{g.hud.SkillStatusText}'");
+
+            // max level
+            int belt = rows.FindIndex(r => r.name == "Tool Belt");
+            pr.skillPoints = 1;
+            g.hud.SkillRowClick(belt);
+            g.hud.SkillFocus(belt);
+            Check("10 a maxed skill: all gears black, MAX, MAX LEVEL REACHED, and a click says so",
+                  pr.unlocked.Contains("tool_belt") && g.hud.SkillRowsShown()[belt].chip == "MAX" && g.hud.SkillRowsShown()[belt].on == g.hud.SkillRowsShown()[belt].gears && g.hud.SkillDetailText.Contains("MAX LEVEL REACHED"),
+                  g.hud.SkillDetailText);
+            g.hud.SkillRowClick(belt);
+            bool maxSaid = g.hud.SkillStatusText.Contains("max level reached");
+
+            // page turning with the arrows, and the end stop
+            g.hud.SkillArrow(1).onClick.Invoke();
+            yield return Frames(1);
+            Check("11 the next arrow turns to RETROBOT UPGRADES; only Retrobot's upgrades, a gear per rank",
+                  maxSaid && g.hud.SkillPageTitle == "RETROBOT UPGRADES" && g.hud.SkillPrevEnabled
+                  && g.hud.SkillRowsShown().Select(r => r.name).SequenceEqual(pr.robotUpgrades.Where(u => u.robot == "retrobot").Select(u => u.name))
+                  && g.hud.SkillRowsShown().Select(r => r.gears).SequenceEqual(pr.robotUpgrades.Where(u => u.robot == "retrobot").Select(u => u.maxRank)),
+                  $"max said {maxSaid}; '{g.hud.SkillPageTitle}': {string.Join("; ", g.hud.SkillRowsShown().Select(r => $"{r.name} {r.gears}"))}");
+            Check("12 the shared-points message stays on robot pages", g.hud.SkillSharedText.Contains("shared between player skills and robot upgrades") && g.hud.SkillPointsText.Contains("<b>0</b>"), g.hud.SkillPointsText);
+            yield return g.Capture(Path.Combine(outDir, "skillpanel_retrobot.png"), 6);
+
+            // a built robot: buy a rank from the same pool
+            pr.skillPoints = 2;
+            var first = pr.robotUpgrades.First(u => u.robot == "retrobot");
+            g.hud.SkillFocus(0);
+            string rd = g.hud.SkillDetailText;
+            g.hud.SkillRowClick(0);
+            Check("13 a robot upgrade is bought from the shared pool: rank 1, a black gear, current and next stat lines",
+                  pr.RankOf(first.id) == 1 && pr.skillPoints == 2 - first.CostOf(0) && g.hud.SkillRowsShown()[0].on == 1 && rd.Contains("Rank 0 / ") && rd.Contains("Next rank (1)") && g.hud.SkillDetailText.Contains("Rank 1 / "),
+                  $"{first.id} rank {pr.RankOf(first.id)}, points {pr.skillPoints}; before: {rd}");
+
+            // an unbuilt robot: listed for planning, cannot be bought
+            var unbuilt = pages.Skip(1).FirstOrDefault(t => !g.robots.Any(r => r.type == t && r.Operational));
+            g.hud.ShowSkillPage(unbuilt);
+            int before = pr.skillPoints;
+            g.hud.SkillRowClick(0);
+            yield return g.Capture(Path.Combine(outDir, "skillpanel_unbuilt.png"), 6);
+            Check("14 an unbuilt robot's page lists its upgrades with a not-built note; buying is refused with the reason",
+                  unbuilt != null && g.hud.SkillNoteText.Contains("not built yet") && g.hud.SkillRowsShown().All(r => r.chip == "LOCKED") && pr.skillPoints == before
+                  && pr.robotUpgrades.Where(u => u.robot == unbuilt).All(u => pr.RankOf(u.id) == 0) && g.hud.SkillStatusText.Contains("Build the robot first"),
+                  $"{unbuilt}: note '{g.hud.SkillNoteText}', status '{g.hud.SkillStatusText}'");
+
+            for (int i = 0; i < pages.Count + 2; i++) g.hud.SkillPageStep(1);
+            bool atEnd = g.hud.SkillPageIndex == pages.Count - 1 && !g.hud.SkillNextEnabled && g.hud.SkillPrevEnabled;
+            for (int i = 0; i < pages.Count + 2; i++) g.hud.SkillPageStep(-1);
+            Check("15 paging stops at both ends (arrows muted there)", atEnd && g.hud.SkillPageIndex == 0 && !g.hud.SkillPrevEnabled, $"end ok {atEnd}, back to {g.hud.SkillPageIndex}");
+
+            // save / load keeps what was bought; the panel shows it again
+            int pts = pr.skillPoints;
+            g.SetState("play");
+            g.SaveGame("autotest_skillpanel");
+            g.LoadGame("autotest_skillpanel");
+            yield return Frames(5);
+            pr = g.progression;
+            g.SetState("paused");
+            g.hud.OpenSub("skills");
+            g.hud.ShowSkillPage("player");
+            var after = g.hud.SkillRowsShown();
+            g.hud.ShowSkillPage("retrobot");
+            var afterRobot = g.hud.SkillRowsShown();
+            Check("16 after save and load the panel shows the same levels, ranks and points",
+                  after[pockets].on == 1 && after[belt].chip == "MAX" && afterRobot[0].on == 1 && pr.skillPoints == pts && g.hud.SkillPointsText.Contains($"<b>{pts}</b>"),
+                  $"pockets {after[pockets]}, belt {after[belt]}, {afterRobot[0]}, points {pr.skillPoints}/{pts}");
+            g.SetState("play");
+        }
+
 
         IEnumerator RespecChecks()
         {
@@ -5081,6 +5307,36 @@ namespace WorkshopWreckage
         }
 
         /// <summary>Parts dropped on one spot pile up: no two share space (playtest 2026-10-25).</summary>
+        /// <summary>Parts dropped in the sorting tray fall like any dropped part (playtest 2026-11-02: "gravity is a
+        /// constant in the entire world"): they pile up from the tray's floor, inside the rim, nothing in mid-air.
+        /// The robots are paused so the pile stays for the picture.</summary>
+        IEnumerator TrayPileChecks()
+        {
+            for (float t = 0; t < 15 && g.piles.Settling; t += Time.deltaTime) yield return null;
+            foreach (var r in g.robots) r.paused = true;
+            var tc = g.TrayCenter;
+            var parts = g.world.instances.Where(i => i.state == ItemState.InWorld && !g.InTray(i.Position) && !g.world.DefOf(i.id).IsRobotPart && !g.world.DefOf(i.id).IsPegboardTool
+                                                     && !g.robotReserved.Contains(i.id) && !g.interaction.busy.Contains(i.id) && i.Position.y < 0.5f)
+                .OrderBy(i => (i.Position - tc).sqrMagnitude).Take(30).Select(i => i.id).ToList();
+            g.player.Teleport(tc + new Vector3(0, 0, 1.2f));
+            yield return Frames(2);
+            int put = 0;
+            foreach (var id in parts) { Take(id); if (g.interaction.DropInTray(id, false)) put++; yield return new WaitForSeconds(0.08f); }
+            yield return new WaitForSeconds(0.4f);
+            for (float t = 0; t < 15 && g.piles.Settling; t += Time.deltaTime) yield return null;
+            var inTray = parts.Where(id => g.world.instances[id].state == ItemState.InWorld && g.InTray(g.world.instances[id].Position)).ToList();
+            var air = inTray.Where(id => !g.piles.Contact(id).supported).Select(id => $"{g.world.DefOf(id).displayName} at {g.world.instances[id].Position}").ToList();
+            float low = inTray.Count > 0 ? inTray.Min(id => g.index.WorldBounds(id).min.y) : -1;
+            float high = inTray.Count > 0 ? inTray.Max(id => g.index.WorldBounds(id).max.y) : -1;
+            Check("parts dropped in the sorting tray stay in it", put == parts.Count && inTray.Count >= put - 1, $"{put} dropped, {inTray.Count} in the tray");
+            Check("parts in the sorting tray rest on its floor or on each other (nothing in mid-air)", air.Count == 0,
+                  $"in the air: {air.Count}{(air.Count > 0 ? " (" + string.Join("; ", air.Take(3)) + ")" : "")}; lowest bottom {low:0.000} m, highest top {high:0.000} m; {g.piles.lastInfo}");
+            Check("the tray's pile starts at its floor", inTray.Count > 0 && low < WorkshopLayout.TrayFloor + 0.02f, $"lowest bottom {low:0.000} m (floor {WorkshopLayout.TrayFloor})");
+            LookFrom(tc + new Vector3(0.6f, 1.0f, 1.1f), tc);
+            yield return g.Capture(Path.Combine(outDir, "tray_pile.png"), 3);
+            foreach (var r in g.robots) r.paused = false;
+        }
+
         IEnumerator PileChecks()
         {
             // a new world: the generated heaps have fallen into place, nothing hangs in the air

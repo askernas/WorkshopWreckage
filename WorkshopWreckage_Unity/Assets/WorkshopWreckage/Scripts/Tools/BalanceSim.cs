@@ -137,6 +137,7 @@ namespace WorkshopWreckage
                 ["sorted_in_run"] = (double)(g.progress.sortedTotal - sorted0), ["level_end"] = (double)pr.level,
                 ["bought"] = bought, ["not_bought"] = skipped, ["robots"] = per, ["samples"] = samples,
                 ["wall_s"] = System.Math.Round(wall.Elapsed.TotalSeconds, 1),
+                ["robot_cpu"] = RobotCpu.Summary(),
             };
             File.WriteAllText(outPath, Json.Write(res));
             Debug.Log($"[balance] {profileName} @ {stageName}: {res["completed_in_run"]} destinations completed, {res["sorted_in_run"]} parts sorted in {seconds:0} s game time ({res["wall_s"]} s wall) -> {outPath}");

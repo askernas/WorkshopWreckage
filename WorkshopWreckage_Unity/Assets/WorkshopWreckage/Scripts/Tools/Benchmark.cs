@@ -128,6 +128,7 @@ namespace WorkshopWreckage
                 e["pick_max_us"] = pick.max;
                 e["pick_hit_rate"] = pick.hit;
                 e["visible_items"] = (double)g.renderer.VisibleCount;
+                e["item_batches"] = new List<object> { (double)g.renderer.DrawnBatches, (double)g.renderer.NearBatches, (double)g.renderer.CulledBatches, (double)g.renderer.OccludedBatches };   // drawn, of them detailed, skipped, of them hidden behind something
                 e["robots_cpu_ms_per_frame"] = System.Math.Round(Robot.cpuMs / System.Math.Max(1, n), 3);
                 e["robot_worst_update_ms"] = System.Math.Round(Robot.worstMs, 1);
                 e["robot_worst_update"] = Robot.worstWhat;

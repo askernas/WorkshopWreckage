@@ -213,6 +213,7 @@ namespace WorkshopWreckage
 
         void LateUpdate()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (_oldRows.Count > 0) CommitRows();
         }
 
@@ -373,12 +374,7 @@ namespace WorkshopWreckage
 
             BuildSaveScreens();
 
-            var sk = Screen("skills", 1000);
-            Title(sk, "SKILLS");
-            _skillHeader = Para(sk, "", 18, Brass, 28);
-            _skillList = Rect("List", sk, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            Stack(_skillList);
-            MakeButton(sk, "Back", () => ShowScreenRaw(_backTo));
+            BuildSkillScreen();   // HudSkills.cs
 
             BuildRobotScreens();
 
@@ -741,7 +737,7 @@ namespace WorkshopWreckage
             foreach (var kv in _screens) kv.Value.gameObject.SetActive(kv.Key == name);
             _status.text = "";
             if (name == "save" || name == "load") RefreshSlots();
-            if (name == "skills") RefreshSkills();
+            if (name == "skills") OpenSkillPanel();
             if (name == "robots") RefreshRobots();
             if (name == "workbench") RefreshWorkbench();
             else if (name == "modify") RefreshModify();
@@ -962,9 +958,6 @@ namespace WorkshopWreckage
             return row == null ? null : string.Join(" | ", row.GetComponentsInChildren<Text>().Select(x => x.text));
         }
 
-        Text _skillHeader;
-        RectTransform _skillList;
-
         /// <summary>Set when a save was migrated to the new skill system (Game.MigrateSkills): the skill menu says so.</summary>
         public bool migrationNotice;
 
@@ -973,57 +966,6 @@ namespace WorkshopWreckage
         {
             if (_screen == "skills") RefreshSkills();
             else if (_screen == "robots") RefreshRobots();
-        }
-
-        /// <summary>Skill menu (skill revamp 2026-10-30, docs/SKILL_REVAMP.md): the shared points, and per skill its
-        /// level / max, what it does now and at the next level, and the cost. Nothing has a level requirement; the
-        /// levels of a skill are bought in order. Retired skills are not listed; planned ones are, but cannot be bought.</summary>
-        void RefreshSkills()
-        {
-            var pr = _g.progression;
-            if (pr == null) return;
-            _skillHeader.text = $"{pr.LevelText}   ·   <b>{pr.skillPoints} skill point{(pr.skillPoints == 1 ? "" : "s")}</b> (shared with robot upgrades)";
-            foreach (Transform c in _skillList) Destroy(c.gameObject);
-            Para(_skillList, $"Each level-up gives 1 point; each skill level costs 1. A whole playthrough gives about {pr.PointBudget} points for {pr.BuyableSteps} skill levels and robot upgrades, "
-                             + "so you can't max everything: choose. (Preliminary balance.)", 14, Muted, 40);
-            if (migrationNotice) Para(_skillList, "Your save was moved to the new skill system: level recomputed from completed storage places, all points back to spend.", 14, GoodC, 40);
-            foreach (var chain in SkillChains(pr.skills.Where(s => !s.Retired).ToList()))
-            {
-                int have = chain.TakeWhile(s => pr.unlocked.Contains(s.id)).Count();
-                var next = have < chain.Count ? chain[have] : null;
-                string why = next == null ? "" : pr.CanUnlock(next.id);
-                string name = RankBase(chain[0].name);
-                string state = next == null ? "MAX" : why == "" ? $"{(have == 0 ? "learn" : "upgrade")} ({next.cost} pt)" : why;
-                var b = MakeButton(_skillList, $"{name}   ·   level {have} / {chain.Count}   —   {state}", () => { if (next != null && _g.UnlockSkill(next.id)) RefreshSkills(); });
-                b.interactable = next != null && why == "";
-                b.GetComponent<LayoutElement>().preferredHeight = 30;
-                string now = have == 0 ? "not learned" : SkillEffect(chain, have);
-                var d = Para(_skillList, $"Now: {now}" + (next != null ? $"   →   <color={Hex(GoodC)}>Next: {SkillEffect(chain, have + 1)}</color>" : ""), 13, Muted, 18);
-                d.alignment = TextAnchor.UpperLeft;
-            }
-        }
-
-        /// <summary>What a skill does at `level` (1-based), for the skill menu.</summary>
-        string SkillEffect(List<SkillDef> chain, int level)
-        {
-            string Cd(string id) => $"every {PlayerTools.Tuned(id, "cooldown_s", level, 0):0} s";
-            var s = chain[Mathf.Clamp(level, 1, chain.Count) - 1];
-            if (s.effects.ContainsKey("part_sense"))
-            {
-                int n = (int)PlayerTools.Tuned("part_sense", "parts", level, 1);
-                return $"{PlayerTools.Tuned("part_sense", "range_m", level, 2):0} m, {n} part{(n == 1 ? "" : "s")} glow{(n == 1 ? "s" : "")} {PlayerTools.Tuned("part_sense", "duration_s", level, 2):0} s, {Cd("part_sense")}";
-            }
-            if (s.effects.ContainsKey("inventory_capacity")) return $"carry {Game.BaseInventory + chain.Take(level).Sum(x => (int)x.effects["inventory_capacity"])} parts";
-            if (s.effects.ContainsKey("sort_inventory")) return $"sort the inventory by storage area, {Cd("sort_inventory")}";
-            if (s.effects.ContainsKey("storage_delivery"))
-            {
-                int n = (int)PlayerTools.Tuned("storage_delivery", "max_items", level, level);
-                return $"store up to {n} matching part{(n == 1 ? "" : "s")} into the storage place you aim at, {Cd("storage_delivery")}";
-            }
-            if (s.effects.ContainsKey("magnet_level"))
-                return $"pulls up to {PlayerTools.Tuned("magnetic_glove", "pull_items", level, level):0} part(s) within {PlayerTools.Tuned("magnetic_glove", "range_m", level, 1.5f):0.0} m, {Cd("magnetic_glove")}";
-            if (s.effects.ContainsKey("battery_pockets")) return $"+{s.effects["battery_pockets"]:0} battery pockets";
-            return SkillBlurb(s);
         }
 
         /// <summary>A one-line description of a single skill (its data description, else its effects).</summary>
@@ -1204,6 +1146,8 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
+            if (_screen == "skills") UpdateSkillKeys();
             if (_screen == "robots" && (_robotRefreshT -= Time.unscaledDeltaTime) <= 0) { _robotRefreshT = 1; RefreshRobots(); }
             if (_screen == "workbench" && (_wbRefreshT -= Time.unscaledDeltaTime) <= 0) { _wbRefreshT = 1; RefreshWorkbench(); }
             if (_screen == "modify" && (_mdRefreshT -= Time.unscaledDeltaTime) <= 0) { _mdRefreshT = 0.5f; RefreshModify(); }

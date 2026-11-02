@@ -112,6 +112,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (game == null || game.world == null) return;
             DrawAfterglow();
             var kb = Keyboard.current;
@@ -221,7 +222,8 @@ namespace WorkshopWreckage
                 if (st != null && st.station)
                 {
                     targetType = "station";
-                    targetPoint = game.workbench.BenchPoint(o, dir, hit.Value.point);
+                    // at the parts bin, the point hit; on the bench, where the ray meets its top
+                    targetPoint = st.destId == RobotWorkbench.BinTarget ? hit.Value.point : game.workbench.BenchPoint(o, dir, hit.Value.point);
                     if (game.workbench.AtPool(targetPoint)) targetPoolPart = game.workbench.PoolPartAt(o, dir);
                 }
                 else if (st != null && st.destId == "TRAY") targetType = "tray";
@@ -449,13 +451,18 @@ namespace WorkshopWreckage
                     int fitted = wb.FittedIds(p).Count;
                     string sub = $"{p.name}: {RobotWorkbench.StatusText(wb.StatusOf(p))}  ·  {wb.InstalledCount(p)}/{wb.Required(p)} installed"
                         + (fitted > 0 ? $" ({fitted} fitted, not committed)" : "") + (wb.Unlocked(p) ? "" : $"  ·  {wb.LockReason(p)}");
-                    // playtest 2026-10-28: LMB anywhere on the bench opens workbench mode (blueprints, then the parts);
-                    // what you carry for the robots goes into the parts box first, so it is there to fit
-                    string open = "[LMB] Open the Robot Workbench" + (parts.Count > 0 ? $" (puts the {parts.Count} part{(parts.Count == 1 ? "" : "s")} you carry in the parts box)" : "");
+                    // playtest 2026-10-28: LMB on the bench opens workbench mode (blueprints, then the parts); what you
+                    // carry for the robots goes into the parts bin first, so it is there to fit. Playtest 2026-10-31: LMB
+                    // on the parts bin only puts the parts in.
+                    string carried = $"{parts.Count} part{(parts.Count == 1 ? "" : "s")} you carry";
+                    string open = "[LMB] Open the Robot Workbench" + (parts.Count > 0 ? $" (puts the {carried} in the parts bin)" : "");
                     if (wb.AtPool(targetPoint))
+                    {
+                        string put = parts.Count > 0 ? $"[LMB] Put the {carried} in the bin" : "Bring robot parts here    ·    [LMB] on the bench to build";
                         return targetPoolPart >= 0
-                            ? new TargetInfo { title = World.DefOf(targetPoolPart).displayName, sub = $"In the parts box  ·  {wb.FitsText(targetPoolPart)}", hint = open, tone = 1 }
-                            : new TargetInfo { title = "Robot Workbench  ·  parts box", sub = sub, hint = open, tone = 1 };
+                            ? new TargetInfo { title = World.DefOf(targetPoolPart).displayName, sub = $"In the robot parts bin  ·  {wb.FitsText(targetPoolPart)}", hint = put, tone = 1 }
+                            : new TargetInfo { title = "Robot parts bin", sub = $"{wb.PoolContents().Count} part(s) in it", hint = put, tone = 1 };
+                    }
                     string look = wb.RobotOf(p) is Robot r && r.mode == Robot.Mode.Assembling && r.gameObject.activeSelf ? "    [F] Pick up and look" : "";
                     return new TargetInfo { title = "Robot Workbench", sub = sub, hint = open + look, tone = 1 };
                 }
@@ -493,8 +500,16 @@ namespace WorkshopWreckage
                 {
                     var wb = game.workbench;
                     // playtest 2026-10-28: a click on the bench opens workbench mode; robots are changed only there.
-                    // Carried robot parts, materials and batteries go into the parts box first.
+                    // Carried robot parts, materials and batteries go into the parts bin first. A click on the bin itself
+                    // only puts them in (playtest 2026-10-31).
                     if (repeat) break;
+                    if (wb.AtPool(targetPoint))
+                    {
+                        int put = StationParts().Count(DepositStation);
+                        if (put == 0) Feedback?.Invoke("Nothing to put in the bin: bring robot parts here (click the bench to build)", false);
+                        else if (put > 1) Feedback?.Invoke($"{put} parts in the robot parts bin", true);
+                        break;
+                    }
                     DepositAll();
                     game.OpenWorkbench(wb.ActiveOnMat(MatAt(targetPoint)).id);
                     break;
@@ -596,16 +611,28 @@ namespace WorkshopWreckage
         /// <summary>Puts a carried part into the sorting tray: it lies there unsorted
         /// until a robot picks it up (robots take tray parts first).</summary>
         /// <summary>Where a part lands in the sorting tray: on its bottom, or on the parts already there.</summary>
+        /// <summary>Where a part is let go over the sorting tray: a random spot inside the rim, just above whatever
+        /// already lies there, turned at random. It then falls and tumbles like a part dropped on the floor (Drop to
+        /// PileSim, which has the tray's floor and rim): parts pile up from the bottom (playtest 2026-11-02).</summary>
         public Matrix4x4 TrayMatrix(ItemDefinition def)
         {
             var r = game.TrayRectU;
-            var p = new Vector3(UnityEngine.Random.Range(r.xMin + 0.1f, r.xMax - 0.1f), 0, UnityEngine.Random.Range(r.yMin + 0.1f, r.yMax - 0.1f));
-            var e = ItemDatabase.Extents(def);
-            float rest = WorkshopLayout.TrayFloor;
-            foreach (var o in game.index.QuerySphere(p + Vector3.up * 0.1f, Mathf.Max(e[0], e[1]) * 0.5f + 0.05f))
-                if (World.instances[o].state == ItemState.InWorld && !busy.Contains(o)) rest = Mathf.Max(rest, game.index.WorldBounds(o).max.y);
-            return Matrix4x4.TRS(new Vector3(p.x, rest + e[2] * 0.5f + 0.003f, p.z),
-                Quaternion.Euler(UnityEngine.Random.Range(-10f, 10f) + (def.restMode == RestMode.Side ? 90 : 0), UnityEngine.Random.Range(0, 360f), def.restMode == RestMode.Long ? 90 : 0), Vector3.one * def.worldScale);
+            var b = MeshLibrary.UnitBounds(def.geometryKey).size * def.worldScale;
+            float half = Mathf.Min(Mathf.Max(b.x, b.z) * 0.5f, 0.3f), mx = Mathf.Min(0.02f + half, r.width / 2 - 0.01f), mz = Mathf.Min(0.02f + half, r.height / 2 - 0.01f);
+            var p = new Vector3(UnityEngine.Random.Range(r.xMin + mx, r.xMax - mx), WorkshopLayout.TrayFloor, UnityEngine.Random.Range(r.yMin + mz, r.yMax - mz));
+            var rot = Quaternion.Euler(0, UnityEngine.Random.value * 360, 0);
+            if (def.restMode == RestMode.Long) rot *= Quaternion.Euler(0, 0, 90);
+            else if (def.restMode == RestMode.Side) rot *= Quaternion.Euler(90, 0, 0);
+            rot = Quaternion.Euler(UnityEngine.Random.Range(-20f, 20f), 0, UnityEngine.Random.Range(-20f, 20f)) * rot;
+            float top = Mathf.Max(p.y, game.piles.TopAt(p, Mathf.Max(b.x, b.z) * 0.5f));
+            return Matrix4x4.TRS(new Vector3(p.x, top + Mathf.Max(b.x, b.y, b.z) * 0.5f + 0.02f, p.z), rot, Vector3.one * def.worldScale);
+        }
+
+        /// <summary>A part just put at its TrayMatrix falls into the tray (once it is there: not taken meanwhile).</summary>
+        public void FallInTray(int id, Matrix4x4 m)
+        {
+            var i = World.instances[id];
+            if (i.state == ItemState.InWorld && i.owner == "tray" && i.transform == m) game.piles.Drop(id);
         }
 
         /// <summary>Hangs a carried board tool in its own slot (only the player hangs tools; it can only go
@@ -649,7 +676,7 @@ namespace WorkshopWreckage
             game.index.Insert(id);
             busy.Add(id);
             game.renderer.SetHidden(id, true);
-            StartCoroutine(Fly(id, from, m, 0.25f, () => { busy.Remove(id); game.renderer.SetHidden(id, false); }));
+            StartCoroutine(Fly(id, from, m, 0.25f, () => { busy.Remove(id); game.renderer.SetHidden(id, false); FallInTray(id, m); }));
             Sfx.Play("drop_floor", p, -6);
             if (feedback) Feedback?.Invoke($"In the sorting tray: {def.displayName}", true);
             return true;
@@ -877,7 +904,7 @@ namespace WorkshopWreckage
         // ---------------------------------------------------------------- helpers
 
         /// <summary>Tool pulls (magnet, Supermagnet, sweep) leave a glowing trail.</summary>
-        public void StartFly(int id, Matrix4x4 from, Matrix4x4 to, float dur) => StartCoroutine(Fly(id, from, to, dur, null, true));
+        public void StartFly(int id, Matrix4x4 from, Matrix4x4 to, float dur, Action done = null) => StartCoroutine(Fly(id, from, to, dur, done, true));
 
         static Material _trailMat;
 
@@ -1131,6 +1158,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             _t += Time.deltaTime;
             if (_inspect != null || _object != null)
             {

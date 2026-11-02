@@ -333,6 +333,7 @@ namespace WorkshopWreckage
 
         void LateUpdate()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             _sw.Restart();
             LateUpdateInner();
             cpuMs += _sw.Elapsed.TotalMilliseconds;

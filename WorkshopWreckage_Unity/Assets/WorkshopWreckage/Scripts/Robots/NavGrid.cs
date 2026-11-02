@@ -100,24 +100,29 @@ namespace WorkshopWreckage
             var t = CellOf(b);
             if (Blocked(t)) return null;
             int n = w * h, si = s.y * w + s.x, ti = t.y * w + t.x;
-            var g = new float[n];
-            var from = new int[n];
-            var closed = new bool[n];
-            for (int i = 0; i < n; i++) { g[i] = float.MaxValue; from[i] = -1; }
-            g[si] = 0;
-            var open = new SortedSet<(float f, int i)>(Comparer<(float f, int i)>.Create((p, q) => p.f != q.f ? p.f.CompareTo(q.f) : p.i.CompareTo(q.i)));
-            open.Add((H(si, ti), si));
+            // search state reused between searches: a cell is fresh unless stamped with this search's number
+            // (performance pass 2026-11-01: the arrays were allocated and the open set kept sorted per search)
+            if (_seen == null) { _seen = new int[n]; _g = new float[n]; _from = new int[n]; _closed = new int[n]; }
+            if (++_search == int.MaxValue) { System.Array.Clear(_seen, 0, n); System.Array.Clear(_closed, 0, n); _search = 1; }
+            int stamp = _search;
+            var g = _g; var from = _from;
+            float G(int i) => _seen[i] == stamp ? g[i] : float.MaxValue;
+            g[si] = 0; from[si] = -1; _seen[si] = stamp;
+            // open list: a binary heap ordered by (f, cell) like the sorted set it replaces, so the cells are
+            // expanded in the same order; an entry made stale by a cheaper one is skipped when it comes up
+            _open.Clear();
+            Push((H(si, ti), si));
             // an unreachable target would otherwise flood the whole floor (seconds on Massive):
             // give up after a bounded search, the robot then treats the part as unreachable
             int expanded = 0, maxExpand = Mathf.Min(n, 6000);
-            while (open.Count > 0)
+            while (_open.Count > 0)
             {
-                var cur = open.Min;
-                open.Remove(cur);
+                var cur = Pop();
                 int ci = cur.i;
                 if (ci == ti) break;
-                if (closed[ci]) continue;
-                closed[ci] = true;
+                if (_closed[ci] == stamp) continue;
+                if (cur.f > G(ci) + H(ci, ti) + 1e-4f) continue;   // stale: a cheaper way here was found later
+                _closed[ci] = stamp;
                 if (++expanded > maxExpand) return null;
                 int cx = ci % w, cz = ci / w;
                 for (int dz = -1; dz <= 1; dz++)
@@ -127,17 +132,17 @@ namespace WorkshopWreckage
                         int nx = cx + dx, nz = cz + dz;
                         if (nx < 0 || nz < 0 || nx >= w || nz >= h) continue;
                         int ni = nz * w + nx;
-                        if (_blocked[ni] || closed[ni]) continue;
+                        if (_blocked[ni] || _closed[ni] == stamp) continue;
                         if (dx != 0 && dz != 0 && (_blocked[cz * w + nx] || _blocked[nz * w + cx])) continue;   // no corner cutting
                         float ng = g[ci] + (dx != 0 && dz != 0 ? 1.4142f : 1f);
-                        if (ng >= g[ni]) continue;
-                        if (g[ni] < float.MaxValue) open.Remove((g[ni] + H(ni, ti), ni));
+                        if (ng >= G(ni)) continue;
                         g[ni] = ng;
                         from[ni] = ci;
-                        open.Add((ng + H(ni, ti), ni));
+                        _seen[ni] = stamp;
+                        Push((ng + H(ni, ti), ni));
                     }
             }
-            if (from[ti] < 0 && si != ti) return null;
+            if (si != ti && (_seen[ti] != stamp || from[ti] < 0)) return null;
             var cells = new List<int>();
             for (int i = ti; i >= 0; i = i == si ? -1 : from[i]) cells.Add(i);
             cells.Reverse();
@@ -149,6 +154,45 @@ namespace WorkshopWreckage
                 if (!LineClear(cells[anchor], cells[k])) { anchor = k - 1; pts.Add(CellCenter(cells[anchor] % w, cells[anchor] / w)); }
             pts.Add(b);
             return pts;
+        }
+
+        int[] _seen, _closed, _from;
+        float[] _g;
+        int _search;
+        readonly List<(float f, int i)> _open = new();
+
+        static bool Before((float f, int i) p, (float f, int i) q) => p.f != q.f ? p.f < q.f : p.i < q.i;
+
+        void Push((float f, int i) e)
+        {
+            _open.Add(e);
+            int k = _open.Count - 1;
+            while (k > 0)
+            {
+                int up = (k - 1) / 2;
+                if (!Before(_open[k], _open[up])) break;
+                (_open[k], _open[up]) = (_open[up], _open[k]);
+                k = up;
+            }
+        }
+
+        (float f, int i) Pop()
+        {
+            var top = _open[0];
+            int last = _open.Count - 1;
+            _open[0] = _open[last];
+            _open.RemoveAt(last);
+            int k = 0, n = _open.Count;
+            while (true)
+            {
+                int l = 2 * k + 1, r = l + 1, m = k;
+                if (l < n && Before(_open[l], _open[m])) m = l;
+                if (r < n && Before(_open[r], _open[m])) m = r;
+                if (m == k) break;
+                (_open[k], _open[m]) = (_open[m], _open[k]);
+                k = m;
+            }
+            return top;
         }
 
         float H(int a, int b)

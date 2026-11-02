@@ -184,14 +184,19 @@ namespace WorkshopWreckage
         public int TotalSpawn() => order.Sum(id => definitions[id].spawnCount);
 
         /// <summary>World extents of a definition's model, largest first (needs meshes loaded).</summary>
+        /// <summary>The part's sides, longest first (metres). Cached per definition and scale: the robots ask for
+        /// every candidate part (performance pass 2026-11-01). Callers only read the array.</summary>
         public static float[] Extents(ItemDefinition def)
         {
+            if (_extents.TryGetValue(def, out var c) && c.scale == def.worldScale) return c.e;
             var s = MeshLibrary.UnitBounds(def.geometryKey).size * def.worldScale;
             var a = new[] { s.x, s.y, s.z };
             System.Array.Sort(a);
             System.Array.Reverse(a);
+            _extents[def] = (def.worldScale, a);
             return a;
         }
+        static readonly Dictionary<ItemDefinition, (float scale, float[] e)> _extents = new();
 
         public bool Fits(ItemDefinition def, string boxId)
         {

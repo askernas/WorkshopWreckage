@@ -180,7 +180,7 @@ namespace WorkshopWreckage
             g.world.SetState(id, ItemState.InWorld, "tray");
             g.index.Insert(id);
             _toSettle.Add((from, def));
-            g.interaction.StartFly(id, from, m, flyTime);
+            g.interaction.StartFly(id, from, m, flyTime, () => g.interaction.FallInTray(id, m));
         }
 
         /// <summary>How many of `ids` fit in the pockets (the rest go to the tray).</summary>
@@ -194,6 +194,7 @@ namespace WorkshopWreckage
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (g == null || g.world == null || P == null || g.state != "play" || g.interaction.inspecting || g.Automated) return;
             var kb = Keyboard.current;
             if (kb == null) return;
@@ -205,7 +206,7 @@ namespace WorkshopWreckage
             }
         }
 
-        void LateUpdate() { DrawScan(); DrawSense(); }
+        void LateUpdate() { if (Game.Booting) return; DrawScan(); DrawSense(); }
 
         // ---------------------------------------------------------------- robot part sense
 

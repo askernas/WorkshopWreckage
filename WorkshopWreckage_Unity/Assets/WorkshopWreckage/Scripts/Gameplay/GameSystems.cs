@@ -66,7 +66,8 @@ namespace WorkshopWreckage
     /// <summary>What the player carries, in the order it was picked up (Sort Inventory re-orders it). The hotbar
     /// shows exactly that order; copies of a part lying next to each other share one slot (×n), which never moves
     /// anything (placement rules 2026-10-30, docs/SKILL_REVAMP.md §1.6; the Parts Organiser purchase is retired).
-    /// The hand always holds one instance.</summary>
+    /// The hand always holds one instance: the last part picked up (last in, first out: what was just picked up is
+    /// what goes out first), unless the player has scrolled to another slot (playtest 2026-10-31).</summary>
     public class Inventory
     {
         public readonly ItemWorld world;
@@ -74,6 +75,10 @@ namespace WorkshopWreckage
         public readonly List<int> items = new();
         public int heldDef = -1;
         int _heldSlot = -1;   // the held instance
+        /// <summary>The player scrolled to the part in hand (wheel / slot): the hand stays with that choice. Picking
+        /// up a part ends it: the new part is in hand again, last in, first out.</summary>
+        bool _chosen;
+        public bool ChosenByPlayer => _chosen;
         public event Action Changed;
 
         /// <summary>Battery pockets (playtest 2026-10-26): Part Radar batteries ride in their own pockets
@@ -96,15 +101,17 @@ namespace WorkshopWreckage
             if (!HasRoomFor(id) || Has(id)) return false;
             if (isBattery(id)) { batteries.Add(id); Changed?.Invoke(); return true; }
             items.Add(id);
-            if (HeldId() < 0) { heldDef = world.instances[id].defId; _heldSlot = id; }
+            heldDef = world.instances[id].defId; _heldSlot = id;   // the part just picked up is in hand (last in, first out)
+            _chosen = false;
             Changed?.Invoke();
             return true;
         }
 
-        /// <summary>Takes a part out. If it was the one in hand, the hand takes the next part in the inventory
-        /// order, whatever its kind (the part that moved up into its place; after the last, the first): placement
-        /// never skips ahead to a part that fits (placement rules 2026-10-30). In a slot of several copies that is
-        /// the next copy, so the slot is worked through before the next one comes up.</summary>
+        /// <summary>Takes a part out. If it was the one in hand, the hand takes the part picked up before it (the
+        /// last one in the inventory order: last in, first out), whatever its kind. If the player had scrolled to it,
+        /// the hand takes the next part in the inventory order instead (the part that moved up into its place; after
+        /// the last, the first), so a chosen slot of several copies is worked through. Placement never skips ahead to
+        /// a part that fits (placement rules 2026-10-30).</summary>
         public void Remove(int id)
         {
             if (batteries.Remove(id)) { Changed?.Invoke(); return; }
@@ -113,8 +120,8 @@ namespace WorkshopWreckage
             items.RemoveAt(at);
             if (_heldSlot == id)
             {
-                if (items.Count == 0) { heldDef = -1; _heldSlot = -1; }
-                else { _heldSlot = items[at < items.Count ? at : 0]; heldDef = world.instances[_heldSlot].defId; }
+                if (items.Count == 0) { heldDef = -1; _heldSlot = -1; _chosen = false; }
+                else { _heldSlot = _chosen ? items[at < items.Count ? at : 0] : items[^1]; heldDef = world.instances[_heldSlot].defId; }
             }
             Changed?.Invoke();
         }
@@ -165,6 +172,7 @@ namespace WorkshopWreckage
             if (k < 0 || k >= s.Count) return;
             heldDef = s[k].defId;
             _heldSlot = s[k].ids[0];
+            _chosen = true;
             Changed?.Invoke();
         }
 

@@ -38,6 +38,7 @@ namespace WorkshopWreckage.Pegboard
 
         void LateUpdate()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (_ids == null) return;
             bool changed = false;
             for (int k = 0; k < _ids.Length; k++) if (Shows(_ids[k]) != _shown[k]) { changed = true; break; }

@@ -196,6 +196,7 @@ namespace WorkshopWreckage.Pegboard
 
         void Update()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             UpdateSigns();
             if (_highlightRenderer != null && _highlightMat != null)
             {
@@ -206,6 +207,7 @@ namespace WorkshopWreckage.Pegboard
 
         void LateUpdate()
         {
+            if (Game.Booting) return;   // the game is still being built (loading splash)
             if (!_dirty) return;
             _dirty = false;
             RebuildTools();

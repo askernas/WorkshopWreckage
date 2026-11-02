@@ -1,0 +1,24 @@
+// Hi-Z for item occlusion (ItemOcclusion): the camera's depth reduced to a coarse grid, each cell holding the
+// FARTHEST linear eye depth seen in it. A box whose nearest point lies beyond that in every cell it covers is hidden.
+#pragma kernel Reduce
+
+Texture2D<float> _Depth;
+RWStructuredBuffer<float> _Out;
+uint4 _Dims;     // depth width, height; grid width, height
+float4 _ZB;      // eye depth = 1 / (_ZB.x * raw + _ZB.y)
+
+[numthreads(8, 8, 1)]
+void Reduce(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Dims.z || id.y >= _Dims.w) return;
+    uint x0 = id.x * _Dims.x / _Dims.z, x1 = max(x0 + 1, (id.x + 1) * _Dims.x / _Dims.z);
+    uint y0 = id.y * _Dims.y / _Dims.w, y1 = max(y0 + 1, (id.y + 1) * _Dims.y / _Dims.w);
+    float far = 0;
+    for (uint y = y0; y < y1; y++)
+        for (uint x = x0; x < x1; x++)
+        {
+            float raw = _Depth.Load(int3(x, y, 0));
+            far = max(far, 1.0 / (_ZB.x * raw + _ZB.y));
+        }
+    _Out[id.y * _Dims.z + id.x] = far;
+}
