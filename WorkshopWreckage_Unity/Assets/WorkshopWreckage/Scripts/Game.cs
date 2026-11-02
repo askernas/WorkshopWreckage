@@ -244,7 +244,8 @@ namespace WorkshopWreckage
         }
 
         /// <summary>QA (--loadshot=dir, a normal launch): the loading splash while the game is built, then the Start
-        /// game button, the instructions and the menu; the dot states seen while loading are logged.</summary>
+        /// game button, the instructions and the menu, then into the game and back to the menu; the dot states seen
+        /// while loading are logged.</summary>
         IEnumerator LoadShots(string dir)
         {
             System.IO.Directory.CreateDirectory(dir);
@@ -266,6 +267,17 @@ namespace WorkshopWreckage
             for (float t = 0; t < 1.5f; t += Time.unscaledDeltaTime) yield return null;
             Debug.Log($"[loadshot] menu: backdrop {Splash.IsBackdrop}, state {state}");
             yield return Capture(System.IO.Path.Combine(dir, "4_menu.png"), 0);
+            // into the game, then back to the main menu as the pause menu's Main Menu does (no autosave in QA):
+            // the menu over the splash again (playtest 2026-11-02)
+            SetState("play");
+            for (float t = 0; t < 2f; t += Time.unscaledDeltaTime) yield return null;
+            yield return Capture(System.IO.Path.Combine(dir, "5_play.png"), 0);
+            SetState("paused");
+            for (int i = 0; i < 5; i++) yield return null;
+            SetState("menu");
+            for (float t = 0; t < 1f; t += Time.unscaledDeltaTime) yield return null;
+            Debug.Log($"[loadshot] back to the menu: backdrop {Splash.IsBackdrop}, state {state}");
+            yield return Capture(System.IO.Path.Combine(dir, "6_back_to_menu.png"), 0);
             for (int i = 0; i < 10; i++) yield return null;
             _leaveWithoutSaving = true;   // a QA run must not autosave over the player's Autosave
             Application.Quit();
@@ -2073,6 +2085,12 @@ namespace WorkshopWreckage
                 Splash.Close();
                 hud.SplashBackdrop(false);
                 Splash.FadeIn();
+            }
+            // back to the main menu from a game: the menu over the splash again, as at launch (playtest 2026-11-02)
+            if (s == "menu" && state != "menu" && !Automated)
+            {
+                Splash.ShowBackdrop();
+                hud.SplashBackdrop(true);
             }
             state = s;
             bool playing = s == "play";

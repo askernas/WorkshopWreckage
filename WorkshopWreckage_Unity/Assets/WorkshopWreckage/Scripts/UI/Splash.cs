@@ -115,6 +115,19 @@ namespace WorkshopWreckage
             Ready(onDismiss);
         }
 
+        /// <summary>Back to the main menu from a game (playtest 2026-11-02: "when you exit the game to main menu,
+        /// you should have the main menu over the splash screen"): the splash straight up as the menu's backdrop,
+        /// without Loading, the Start game button or the instructions.</summary>
+        public static void ShowBackdrop()
+        {
+            ShowLoading();
+            var s = _current;
+            s._ready = s._skip = s._dismissed = true;
+            s._loading.transform.parent.gameObject.SetActive(false);   // the plaque
+            s._canvas.sortingOrder = BackdropOrder;
+            s.GetComponent<CanvasGroup>().blocksRaycasts = false;
+        }
+
         /// <summary>The game begins (or a test or tool needs no splash): the splash goes.</summary>
         public static void Close()
         {

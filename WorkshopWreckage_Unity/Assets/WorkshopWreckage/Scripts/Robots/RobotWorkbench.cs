@@ -63,6 +63,10 @@ namespace WorkshopWreckage
         readonly HashSet<string> _announced = new();
         Game _g;
         Transform _pool;
+        BinPile _binPile;
+        /// <summary>QA: is anything in the parts bin still falling or settling?</summary>
+        public bool BinSettling => _binPile != null && _binPile.Settling;
+        public (int n, int asleep, int air, float low, float high, bool inside) BinReport() => _binPile.Report(Bin.x / 2, Bin.z / 2);
         TextAtlas _labels;
         Renderer[] _boards = new Renderer[Types.Length];
         public event System.Action Changed;
@@ -1150,6 +1154,8 @@ namespace WorkshopWreckage
             _pool = new GameObject("PartsPool").transform;
             _pool.SetParent(transform, false);
             _pool.localPosition = Batch.G(bx, BinFloor, BinZ);
+            _binPile = _pool.gameObject.AddComponent<BinPile>();
+            _binPile.Init(Bin.x / 2, Bin.z / 2, Bin.y);
             _labels = new TextAtlas(Types.Length, new Vector2Int(200, 80), new Color(0.3f, 0.2f, 0.13f));
             var lm = EnvMaterials.Atlas(_labels.texture);
             float w = Bench.x / Types.Length;
@@ -1205,16 +1211,14 @@ namespace WorkshopWreckage
                 _labels.Set(i, code, p.name.ToUpper(), word, s != Status.AwaitingBlueprint);
                 if (_boards[i] != null) _boards[i].sharedMaterial = EnvMaterials.Blueprint(Unlocked(p) ? 1 : 2);
             }
-            // the parts bin: every part tossed onto one untidy heap, highest in the middle (spent radar batteries are
-            // disposed of, not shown). Each part lands where its id says, so the heap stays put between refreshes.
+            // the parts bin: every part tossed in falls onto the heap under gravity (BinPile; spent radar batteries
+            // are disposed of, not shown). Its body stays between refreshes, so the heap stays put.
             foreach (Transform c in _pool) Destroy(c.gameObject);
             _poolModels.Clear();
             var ids = PoolContents().Where(id => !_g.world.DefOf(id).IsRadarBattery).OrderBy(id => id).ToList();
-            // the heap: a height per 4 cm square of the bin's floor
-            const float cell = 0.04f;
+            _binPile.Keep(ids.ToHashSet());
+            bool loading = Game.Booting || ids.Count(id => !_binPile.Has(id)) > 3;   // a loaded game's bin: settled at once, not shown falling
             float half = Bin.x / 2 - 0.01f, inner = Bin.z / 2 - 0.01f;
-            int cells = Mathf.Max(1, Mathf.FloorToInt(2 * half / cell)), rows = Mathf.Max(1, Mathf.FloorToInt(2 * inner / cell));
-            var heap = new float[cells, rows];
             static float H(int id, int salt) { uint h = (uint)(id * 73856093) ^ (uint)(salt * 19349663); h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15; return (h & 0xffffff) / (float)0x1000000; }
             for (int k = 0; k < ids.Count; k++)
             {
@@ -1224,6 +1228,7 @@ namespace WorkshopWreckage
                 mi.transform.SetParent(_pool, false);
                 _poolModels.Add((id, mi.transform));
                 mi.transform.localScale = Vector3.one * def.worldScale;   // full size: the bin is deep enough (the old tray showed them at 55 %)
+                if (_binPile.Has(id)) { _binPile.Bind(id, mi.transform); continue; }
                 // tossed in, lying any which way, but turned so it fits between the bin's walls
                 // (long parts lie nearly flat: a tipped rod would stand up out of the box)
                 var lay = def.restMode == RestMode.Long ? Quaternion.Euler(0, 0, -90) : Quaternion.identity;
@@ -1242,20 +1247,14 @@ namespace WorkshopWreckage
                 }
                 mi.transform.localRotation = Quaternion.Euler(0, yaw0 + best, 0) * tilt;
                 var ext = LocalExtent(mi.transform);
-                // where it lands: around the middle (two throws averaged), inside the walls, on top of what is there
+                // let go around the middle (two throws averaged), inside the walls, just above the heap: it falls
                 float hx = Mathf.Min(ext.extents.x, half), hz = Mathf.Min(ext.extents.z, inner);
                 float x = Mathf.Clamp(((H(id, 4) + H(id, 5)) / 2f - 0.5f) * 2.4f * half, -half + hx, half - hx);
                 float z = Mathf.Clamp(((H(id, 6) + H(id, 7)) / 2f - 0.5f) * 2.4f * inner, -inner + hz, inner - hz);
-                int c0 = Mathf.Clamp(Mathf.FloorToInt((x - hx + half) / cell), 0, cells - 1), c1 = Mathf.Clamp(Mathf.FloorToInt((x + hx + half) / cell), 0, cells - 1);
-                int r0 = Mathf.Clamp(Mathf.FloorToInt((z - hz + inner) / cell), 0, rows - 1), r1 = Mathf.Clamp(Mathf.FloorToInt((z + hz + inner) / cell), 0, rows - 1);
-                float floor = 0;
-                for (int c = c0; c <= c1; c++) for (int r = r0; r <= r1; r++) floor = Mathf.Max(floor, heap[c, r]);
-                // settles a little into the gaps of what is under it
-                float bottom = floor * 0.7f;
-                mi.transform.localPosition = new Vector3(x - ext.center.x, bottom - ext.min.y, z - ext.center.z);   // the bin's own space (as LocalExtent)
-                float top = bottom + ext.size.y;
-                for (int c = c0; c <= c1; c++) for (int r = r0; r <= r1; r++) heap[c, r] = Mathf.Max(heap[c, r], top);
+                var pos = new Vector3(x - ext.center.x, _binPile.Top() + 0.03f - ext.min.y, z - ext.center.z);   // the bin's own space (as LocalExtent)
+                _binPile.Add(id, def, mi.transform, pos, mi.transform.localRotation);
             }
+            if (loading) _binPile.SettleNow();
             _labels.Redraw();
             Changed?.Invoke();
         }

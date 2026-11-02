@@ -331,6 +331,12 @@ namespace WorkshopWreckage
                 Finish();
                 yield break;
             }
+            if (section == "binpile")
+            {
+                yield return BinPileChecks();   // QA: parts put in the robot parts bin fall and pile up (playtest 2026-11-02)
+                Finish();
+                yield break;
+            }
             if (section == "traypile")
             {
                 yield return TrayPileChecks();   // QA: parts dropped in the sorting tray fall and pile up (playtest 2026-11-02)
@@ -1895,6 +1901,7 @@ namespace WorkshopWreckage
                 }
                 foreach (var id in shells) { Take(id); ic.DepositStation(id); }
                 yield return Frames(2);
+                for (float t = 0; t < 8 && wb.BinSettling; t += Time.deltaTime) yield return null;   // it falls onto the heap first
                 var pos = wb.PoolModelPosition(shells[0]);
                 if (pos is Vector3 pp) { var stand = pp + wb.Front * 0.8f; LookFrom(new Vector3(stand.x, PlayerController.Eye, stand.z), pp); }   // standing at the bin (it is 0.5 m deep)
                 yield return Frames(2);
@@ -5334,6 +5341,40 @@ namespace WorkshopWreckage
             Check("the tray's pile starts at its floor", inTray.Count > 0 && low < WorkshopLayout.TrayFloor + 0.02f, $"lowest bottom {low:0.000} m (floor {WorkshopLayout.TrayFloor})");
             LookFrom(tc + new Vector3(0.6f, 1.0f, 1.1f), tc);
             yield return g.Capture(Path.Combine(outDir, "tray_pile.png"), 3);
+            foreach (var r in g.robots) r.paused = false;
+        }
+
+        /// <summary>Parts put in the robot parts bin fall onto the heap (playtest 2026-11-02: "items placed in the
+        /// robot parts bin needs to be affected by gravity ... cannot float in mid air"): one by one into the bin,
+        /// then a few taken out again; each time the heap comes to rest on the bin's floor or on each other.</summary>
+        IEnumerator BinPileChecks()
+        {
+            for (float t = 0; t < 15 && g.piles.Settling; t += Time.deltaTime) yield return null;
+            foreach (var r in g.robots) r.paused = true;
+            var wb = g.workbench;
+            var ic = g.interaction;
+            var parts = RobotWorkbench.Types.SelectMany(t => wb.PartIds(wb.P(t))).Where(id => g.world.instances[id].state == ItemState.InWorld && !g.robotReserved.Contains(id)).Take(24).ToList();
+            int put = 0;
+            foreach (var id in parts) { Take(id); if (ic.DepositStation(id)) put++; else g.inventory.Remove(id); yield return new WaitForSeconds(0.12f); }
+            yield return Frames(3);
+            var falling = wb.BinReport();
+            for (float t = 0; t < 10 && wb.BinSettling; t += Time.deltaTime) yield return null;
+            var r1 = wb.BinReport();
+            Check("parts put in the robot parts bin fall into it", put >= 10 && r1.n >= put && r1.inside, $"{put} of {parts.Count} put in; {r1.n} in the bin; all inside {r1.inside}");
+            Check("the bin's heap comes to rest on its floor or on other parts (nothing in mid-air)", r1.asleep == r1.n && r1.air == 0 && r1.low < 0.01f,
+                  $"at rest {r1.asleep}/{r1.n}, in the air {r1.air}, lowest bottom {r1.low:0.000} m, top {r1.high:0.000} m (rim {RobotWorkbench.Bin.y}); just after: in the air {falling.air}");
+            var bin = wb.transform.TransformPoint(Batch.G(RobotWorkbench.BinX, RobotWorkbench.BinFloor, RobotWorkbench.BinZ));
+            LookFrom(bin + wb.Front * 0.45f + Vector3.up * 0.75f, bin + Vector3.up * 0.05f);   // looking down into it
+            yield return g.Capture(Path.Combine(outDir, "bin_pile.png"), 3);
+            // three taken out: the rest settle into the gaps
+            var taken = wb.PoolContents().Where(id => g.world.DefOf(id).IsRobotPart).OrderByDescending(id => id).Take(3).ToList();
+            foreach (var id in taken) wb.TakeFromPool(id);
+            yield return Frames(2);
+            for (float t = 0; t < 10 && wb.BinSettling; t += Time.deltaTime) yield return null;
+            var r2 = wb.BinReport();
+            Check("after parts are taken out of the bin, the rest settle (nothing left hanging)", r2.n == r1.n - taken.Count && r2.asleep == r2.n && r2.air == 0,
+                  $"{taken.Count} taken; {r2.n} left, at rest {r2.asleep}, in the air {r2.air}");
+            yield return g.Capture(Path.Combine(outDir, "bin_pile_after_take.png"), 3);
             foreach (var r in g.robots) r.paused = false;
         }
 
