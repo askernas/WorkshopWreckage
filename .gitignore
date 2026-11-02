@@ -1,9 +1,16 @@
-.claude/
-# Godot
-.godot/
-*.import.tmp
-export_presets.cfg.bak
-# Unity
+# Only the source code and files needed to build the game are in git (2026-11-02):
+# the Unity project and the game data it copies into the build (shared/data, shared/meshes).
+# Everything else (docs, HISTORY, CLAUDE.md, reference images, tools, the old Godot project, QA output) stays on disk only.
+/*
+!/.gitignore
+!/.gitattributes
+!/WorkshopWreckage_Unity/
+!/shared/
+/shared/*
+!/shared/data/
+!/shared/meshes/
+
+# Unity: generated, local or build output
 WorkshopWreckage_Unity/[Ll]ibrary/
 WorkshopWreckage_Unity/[Tt]emp/
 WorkshopWreckage_Unity/[Oo]bj/
@@ -11,30 +18,11 @@ WorkshopWreckage_Unity/[Bb]uild/
 WorkshopWreckage_Unity/[Bb]uilds/
 WorkshopWreckage_Unity/[Ll]ogs/
 WorkshopWreckage_Unity/[Uu]ser[Ss]ettings/
+WorkshopWreckage_Unity/.vs/
+WorkshopWreckage_Unity/Assets/StreamingAssets/
+WorkshopWreckage_Unity/Assets/StreamingAssets.meta
 *.csproj
 *.sln
-# local benchmark scratch
-bench_out/
-
-# engine builds
-Builds/
 *.slnx
-WorkshopWreckage_Unity/.vs/
-
-# large generated QA/reference images (local only)
-part audit/
-sheets/
-
-# work images and logs kept on disk only (2026-11-02 clean-up; nothing in the game or tools reads them)
-robots/
-graphic rework/
-docs/component_catalogue/images/
-docs/component_catalogue/contact_sheets/
-docs/comparison/
-docs/screenshots/
-docs/retrobot_polish/
-docs/component_rescale/
-docs/component_rescale_1p5/
-Logs/
 __pycache__/
 *.pyc
