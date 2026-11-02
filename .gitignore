@@ -19,6 +19,7 @@ WorkshopWreckage_Unity/[Bb]uilds/
 WorkshopWreckage_Unity/[Ll]ogs/
 WorkshopWreckage_Unity/[Uu]ser[Ss]ettings/
 WorkshopWreckage_Unity/.vs/
+WorkshopWreckage_Unity/.vscode/
 WorkshopWreckage_Unity/Assets/StreamingAssets/
 WorkshopWreckage_Unity/Assets/StreamingAssets.meta
 *.csproj

@@ -8,13 +8,15 @@ using UnityEngine;
 
 namespace WorkshopWreckage.EditorTools
 {
-    /// <summary>Windows build for the engine comparison. Shared data is copied into
+    /// <summary>Windows and macOS builds for the engine comparison. Shared data is copied into
     /// StreamingAssets/ww only for the duration of the build (no duplicate in git).
     /// CLI: Unity.exe -batchmode -quit -projectPath . -executeMethod WorkshopWreckage.EditorTools.WWBuild.BuildWindows</summary>
     public static class WWBuild
     {
         public const string Output = "Builds/Windows/WorkshopWreckage.exe";
         public const string ReleaseOutput = "Builds/Release/WorkshopWreckage.exe";
+        public const string MacOutput = "Builds/macOS/WorkshopWreckage.app";
+        public const string MacReleaseOutput = "Builds/Release/WorkshopWreckage.app";
         /// <summary>CLI -wwOutput=Builds/Art/WorkshopWreckage.exe: build elsewhere (Builds/Windows may be busy running a test).</summary>
         static string OutputOverride => System.Environment.GetCommandLineArgs().Where(x => x.StartsWith("-wwOutput=")).Select(x => x.Substring(10)).FirstOrDefault();
 
@@ -23,16 +25,27 @@ namespace WorkshopWreckage.EditorTools
         public static bool Release { get; private set; }
 
         [MenuItem("Workshop Wreckage/Build Windows Player")]
-        public static void BuildWindows() => Build(false);
+        public static void BuildWindows() => Build(false, BuildTarget.StandaloneWindows64);
 
         /// <summary>Release: the unlock levels from shared/data/unlocks.json are compiled into
         /// the player (define WW_RELEASE), external unlocks.json copies are ignored and
         /// debug mode is removed. Output Builds/Release/.
         /// CLI: ... -executeMethod WorkshopWreckage.EditorTools.WWBuild.BuildWindowsRelease</summary>
         [MenuItem("Workshop Wreckage/Build Windows Player (Release)")]
-        public static void BuildWindowsRelease() => Build(true);
+        public static void BuildWindowsRelease() => Build(true, BuildTarget.StandaloneWindows64);
 
-        static void Build(bool release)
+        /// <summary>One .app holding a universal binary, so the same build runs on Intel Macs and
+        /// Apple silicon. Must run on a macOS editor: the architecture switch lives in the
+        /// OSXStandalone module. Output Builds/macOS/.
+        /// CLI: Unity -batchmode -quit -projectPath . -executeMethod WorkshopWreckage.EditorTools.WWBuild.BuildMac</summary>
+        [MenuItem("Workshop Wreckage/Build macOS Player")]
+        public static void BuildMac() => Build(false, BuildTarget.StandaloneOSX);
+
+        /// <summary>macOS counterpart of BuildWindowsRelease. Output Builds/Release/.</summary>
+        [MenuItem("Workshop Wreckage/Build macOS Player (Release)")]
+        public static void BuildMacRelease() => Build(true, BuildTarget.StandaloneOSX);
+
+        static void Build(bool release, BuildTarget target)
         {
             Release = release;
             if (release)
@@ -43,7 +56,7 @@ namespace WorkshopWreckage.EditorTools
                 AssetDatabase.ImportAsset(BakedUnlocks);
             }
             bool ok = false;
-            try { ok = BuildPlayer(release); }
+            try { ok = BuildPlayer(release, target); }
             finally
             {
                 if (release) { AssetDatabase.DeleteAsset(BakedUnlocks); Release = false; }
@@ -51,8 +64,9 @@ namespace WorkshopWreckage.EditorTools
             if (Application.isBatchMode) EditorApplication.Exit(ok ? 0 : 1);
         }
 
-        static bool BuildPlayer(bool release)
+        static bool BuildPlayer(bool release, BuildTarget target)
         {
+            bool mac = target == BuildTarget.StandaloneOSX;
             PlayerSettings.enableFrameTimingStats = true;
             PlayerSettings.runInBackground = true;
             PlayerSettings.visibleInBackground = true;
@@ -63,22 +77,41 @@ namespace WorkshopWreckage.EditorTools
             PlayerSettings.SplashScreen.show = false;
             PlayerSettings.companyName = "Workshop Wreckage";
             PlayerSettings.productName = "Workshop Wreckage";
+            if (mac) ConfigureMac();
             var sw = Stopwatch.StartNew();
             var opts = new BuildPlayerOptions
             {
                 scenes = new[] { "Assets/Scenes/SampleScene.unity" },
-                locationPathName = release ? ReleaseOutput : OutputOverride ?? Output,
-                target = BuildTarget.StandaloneWindows64,
+                locationPathName = mac
+                    ? (release ? MacReleaseOutput : OutputOverride ?? MacOutput)
+                    : (release ? ReleaseOutput : OutputOverride ?? Output),
+                target = target,
                 // QA profiling: WW_DEV_BUILD=1 makes a development build (profiler markers readable by --bench)
                 options = System.Environment.GetEnvironmentVariable("WW_DEV_BUILD") == "1" ? BuildOptions.Development : BuildOptions.None,
                 extraScriptingDefines = release ? new[] { "WW_RELEASE" } : null,
             };
             var report = BuildPipeline.BuildPlayer(opts);
             var s = report.summary;
-            var line = $"[build]{(release ? " release" : "")} {s.result} in {sw.Elapsed.TotalSeconds:0.0} s, size {s.totalSize / 1048576.0:0.0} MB, errors {s.totalErrors}, warnings {s.totalWarnings}";
+            var line = $"[build]{(release ? " release" : "")} {target} {s.result} in {sw.Elapsed.TotalSeconds:0.0} s, size {s.totalSize / 1048576.0:0.0} MB, errors {s.totalErrors}, warnings {s.totalWarnings}";
             UnityEngine.Debug.Log(line);
+            Directory.CreateDirectory("Builds");   // a build that fails before writing anything leaves no Builds/
             File.WriteAllText("Builds/last_build.txt", line + "\n");
             return s.result == BuildResult.Succeeded;
+        }
+
+        /// <summary>x64 + arm64 in one binary. The bundle identifier is set here because the project
+        /// still carries the URP template's, which macOS would use for the app's identity.</summary>
+        static void ConfigureMac()
+        {
+            PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Standalone, "com.askernas.workshopwreckage");
+#if UNITY_EDITOR_OSX
+            // OSArchitecture, not the OSXStandalone module's own MacOSArchitecture: the property takes
+            // UnityEditor.Build.OSArchitecture, and the two enums are separate types.
+            UnityEditor.OSXStandalone.UserBuildSettings.architecture = OSArchitecture.x64ARM64;
+            UnityEditor.OSXStandalone.UserBuildSettings.createXcodeProject = false;
+#else
+            UnityEngine.Debug.LogError("[build] a macOS universal build needs a macOS editor; the architecture stays at the project default.");
+#endif
         }
     }
 
