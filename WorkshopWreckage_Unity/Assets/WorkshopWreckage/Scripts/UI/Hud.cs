@@ -15,6 +15,10 @@ namespace WorkshopWreckage
     {
         static readonly Color Bg = new(0.11f, 0.08f, 0.06f, 0.94f), Brass = new(0.82f, 0.63f, 0.32f), BrassDim = new(0.55f, 0.42f, 0.22f),
             Cream = new(0.96f, 0.91f, 0.8f), Muted = new(0.72f, 0.66f, 0.56f), GoodC = new(0.55f, 0.85f, 0.45f), BadC = new(0.95f, 0.42f, 0.32f);
+        /// <summary>The target box has no panel behind it, so its sub line sits straight on the world.
+        /// Muted washes out on a light surface (the lathe, a chrome heap); this keeps it below the
+        /// title without disappearing.</summary>
+        static readonly Color MutedOnWorld = new(0.85f, 0.80f, 0.70f);
 
         Game _g;
         Canvas _canvas;
@@ -95,7 +99,9 @@ namespace WorkshopWreckage
             return img;
         }
 
-        static Text Label(Transform parent, string name, int size, Color c, TextAnchor anchor, Vector2 aMin, Vector2 aMax, Vector2 offMin, Vector2 offMax, bool display = false)
+        /// <summary>onWorld: text with no panel behind it. A drop shadow only darkens one side and
+        /// vanishes against a light background, so those labels get an outline on all four instead.</summary>
+        static Text Label(Transform parent, string name, int size, Color c, TextAnchor anchor, Vector2 aMin, Vector2 aMax, Vector2 offMin, Vector2 offMax, bool display = false, bool onWorld = false)
         {
             var r = Rect(name, parent, aMin, aMax, offMin, offMax);
             var t = r.gameObject.AddComponent<Text>();
@@ -106,9 +112,18 @@ namespace WorkshopWreckage
             t.horizontalOverflow = HorizontalWrapMode.Wrap;
             t.verticalOverflow = VerticalWrapMode.Overflow;
             t.raycastTarget = false;
-            var sh = r.gameObject.AddComponent<Shadow>();
-            sh.effectColor = new Color(0, 0, 0, 0.75f);
-            sh.effectDistance = new Vector2(1.5f, -1.5f);
+            if (onWorld)
+            {
+                var ol = r.gameObject.AddComponent<Outline>();
+                ol.effectColor = new Color(0, 0, 0, 0.9f);
+                ol.effectDistance = new Vector2(1.4f, 1.4f);   // thin enough that 16 pt glyphs stay open
+            }
+            else
+            {
+                var sh = r.gameObject.AddComponent<Shadow>();
+                sh.effectColor = new Color(0, 0, 0, 0.75f);
+                sh.effectDistance = new Vector2(1.5f, -1.5f);
+            }
             return t;
         }
 
@@ -121,9 +136,9 @@ namespace WorkshopWreckage
             _cross = cross.gameObject.AddComponent<Image>();
             _cross.color = Cream;
             var tbox = At("Target", _hud, new Vector2(0.5f, 0.5f), new Vector2(-400, 34), new Vector2(800, 110));
-            _title = Label(tbox, "title", 22, Cream, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -32), Vector2.zero);
-            _sub = Label(tbox, "sub", 16, Muted, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -56), new Vector2(0, -32));
-            _hint = Label(tbox, "hint", 18, Brass, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -84), new Vector2(0, -56));
+            _title = Label(tbox, "title", 22, Cream, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -32), Vector2.zero, false, true);
+            _sub = Label(tbox, "sub", 16, MutedOnWorld, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -56), new Vector2(0, -32), false, true);
+            _hint = Label(tbox, "hint", 18, Brass, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -84), new Vector2(0, -56), false, true);
             var fb = At("Feedback", _hud, new Vector2(0.5f, 0.5f), new Vector2(-500, -90), new Vector2(1000, 40));
             _feedback = Fill(fb, "t", 22, GoodC, TextAnchor.MiddleCenter);
             _toasts = At("Log", _hud, Vector2.zero, new Vector2(20, 18), new Vector2(640, 220));
