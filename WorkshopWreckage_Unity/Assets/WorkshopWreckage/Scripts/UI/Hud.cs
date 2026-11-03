@@ -135,10 +135,14 @@ namespace WorkshopWreckage
             var cross = At("Cross", _hud, new Vector2(0.5f, 0.5f), new Vector2(-3, -3), new Vector2(6, 6));
             _cross = cross.gameObject.AddComponent<Image>();
             _cross.color = Cream;
-            var tbox = At("Target", _hud, new Vector2(0.5f, 0.5f), new Vector2(-400, 34), new Vector2(800, 110));
+            var tbox = At("Target", _hud, new Vector2(0.5f, 0.5f), new Vector2(-620, 34), new Vector2(1240, 110));
             _title = Label(tbox, "title", 22, Cream, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -32), Vector2.zero, false, true);
             _sub = Label(tbox, "sub", 16, MutedOnWorld, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -56), new Vector2(0, -32), false, true);
             _hint = Label(tbox, "hint", 18, Brass, TextAnchor.UpperCenter, new Vector2(0, 1), Vector2.one, new Vector2(0, -84), new Vector2(0, -56), false, true);
+            // Each line owns a fixed band, so a wrapped second line overflows onto the line below:
+            // a long destination title landed on top of "N / M stored". They stay on one line and
+            // grow sideways instead, which there is room for — the box is centred on screen.
+            _title.horizontalOverflow = _sub.horizontalOverflow = HorizontalWrapMode.Overflow;
             var fb = At("Feedback", _hud, new Vector2(0.5f, 0.5f), new Vector2(-500, -90), new Vector2(1000, 40));
             _feedback = Fill(fb, "t", 22, GoodC, TextAnchor.MiddleCenter);
             _toasts = At("Log", _hud, Vector2.zero, new Vector2(20, 18), new Vector2(640, 220));
@@ -358,7 +362,7 @@ namespace WorkshopWreckage
                 _seed.text = _g.NewSeed().ToString();   // the next new game: a fresh seed (Game.FixedSeed off)
                 _g.SetState("play");
             });
-            MakeButton(ng, "Back", () => ShowScreenRaw(_backTo));
+            MakeButton(ng, "Back", BackOut);
 
             var p = Screen("pause", 460);
             Title(p, "PAUSED");
@@ -625,7 +629,7 @@ namespace WorkshopWreckage
                 PlayerPrefs.Save();
                 RefreshSettings();
             });
-            MakeButton(bottom, "Back", () => ShowScreenRaw(_backTo));
+            MakeButton(bottom, "Back", BackOut);
             _settingsTab("Graphics");
         }
 
@@ -746,6 +750,15 @@ namespace WorkshopWreckage
         public string DirectScreen => _direct != null && _screen == _direct ? _direct : null;
         public void OpenDirect(string name) { _backTo = "pause"; ShowScreenRaw(name); _direct = name; }
 
+        /// <summary>What every Back button does. A screen opened straight from play with its own key
+        /// returns to the game: the pause menu it would otherwise fall back to was never on screen,
+        /// so landing there is a detour. Escape already does this (Game reads DirectScreen).</summary>
+        void BackOut()
+        {
+            if (DirectScreen != null) _g.SetState("play");
+            else ShowScreenRaw(_backTo);
+        }
+
         void ShowScreenRaw(string name)
         {
             _screen = name;
@@ -769,7 +782,7 @@ namespace WorkshopWreckage
 
         public bool BackFromSubScreen()
         {
-            if (_screen == "save" || _screen == "load" || _screen == "settings" || _screen == "skills" || _screen == "robots" || _screen == "newgame") { ShowScreenRaw(_backTo); return true; }
+            if (_screen == "save" || _screen == "load" || _screen == "settings" || _screen == "skills" || _screen == "robots" || _screen == "newgame") { BackOut(); return true; }
             if (_screen == "modify") { ShowScreenRaw("workbench"); return true; }
             return false;
         }
@@ -806,7 +819,7 @@ namespace WorkshopWreckage
             Fixed(_saveNew, 230);
             Para(s, "Your saves", 16, Muted, 22);
             _saveList = ScrollList(s, 380);
-            MakeButton(s, "Back", () => ShowScreenRaw(_backTo));
+            MakeButton(s, "Back", BackOut);
 
             var l = Screen("load", 980);
             Title(l, "LOAD GAME");
@@ -815,7 +828,7 @@ namespace WorkshopWreckage
             Para(l, "Deleted saves are kept in the saves\\deleted folder. Your game is autosaved every 5 minutes, before loading and on quitting.", 13, Muted, 20);
             var lrow = HRow(l, 44);
             MakeButton(lrow, "Open saves folder", () => { System.IO.Directory.CreateDirectory(SaveSystem.Dir); Application.OpenURL("file:///" + SaveSystem.Dir.Replace('\\', '/')); }).GetComponent<LayoutElement>().flexibleWidth = 1;
-            MakeButton(lrow, "Back", () => ShowScreenRaw(_backTo)).GetComponent<LayoutElement>().flexibleWidth = 1;
+            MakeButton(lrow, "Back", BackOut).GetComponent<LayoutElement>().flexibleWidth = 1;
         }
 
         RectTransform HRow(Transform parent, float height)

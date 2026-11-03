@@ -93,7 +93,7 @@ namespace WorkshopWreckage
             _rbUpgrades.SetParent(up, false);
             Stack(_rbUpgrades);
             _rbActions = Row(rs, 46, 10);
-            MakeButton(rs, "Back", () => ShowScreenRaw(_backTo));
+            MakeButton(rs, "Back", BackOut);
             BuildModifyScreen();
         }
 

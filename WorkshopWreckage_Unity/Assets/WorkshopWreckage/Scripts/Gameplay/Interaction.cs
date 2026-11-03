@@ -470,11 +470,17 @@ namespace WorkshopWreckage
             return new TargetInfo();
         }
 
+        /// <summary>The kinds a destination takes. Capped: this ends up in the crosshair title, which
+        /// is one line, and a slot with several kinds used to make it long enough to wrap over the
+        /// line below it. The full list is on the destination's own screen.</summary>
         string AssignedName(string dest)
         {
+            const int Shown = 2;
             var names = game.db.order.Where(id => game.db.definitions[id].storageBox == dest)
                 .Select(id => game.progress.IsDiscovered(id) ? game.db.definitions[id].displayName : "unidentified part").ToList();
-            return names.Count > 0 ? string.Join(", ", names) : "empty slot";
+            if (names.Count == 0) return "empty slot";
+            return names.Count <= Shown ? string.Join(", ", names)
+                : string.Join(", ", names.Take(Shown)) + $" +{names.Count - Shown} more";
         }
 
         // ---------------------------------------------------------------- actions

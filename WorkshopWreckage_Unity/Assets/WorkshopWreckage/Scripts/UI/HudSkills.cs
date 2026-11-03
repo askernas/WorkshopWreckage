@@ -102,7 +102,7 @@ namespace WorkshopWreckage
             _skDetail.GetComponent<LayoutElement>().flexibleHeight = 1;
 
             _skStatus = Para(sk, "", 19, GoodC, 28);
-            MakeButton(sk, "Back", () => ShowScreenRaw(_backTo));
+            MakeButton(sk, "Back", BackOut);
         }
 
         RectTransform HBox(string name, Transform parent, float height, float spacing)
