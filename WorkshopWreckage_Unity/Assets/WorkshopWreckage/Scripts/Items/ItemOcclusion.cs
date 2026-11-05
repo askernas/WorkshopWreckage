@@ -14,6 +14,14 @@ namespace WorkshopWreckage
     public class ItemOcclusion
     {
         public const int GridW = 160, GridH = 90;
+        /// <summary>The held item sits 0.46 m from the camera and the inspect model 0.38 m
+        /// (HeldView.HandPos, InspectPos), and both write their own depth into the camera's depth
+        /// texture. A cell whose farthest depth is this near is covered by the player's own hand,
+        /// not by the world, and says nothing about what lies behind it. Measured: holding a part
+        /// put 15% of the grid (peaks of 37%) at 0.25-0.46 m, swinging frame to frame, so batches
+        /// along the hand's silhouette blinked. Closer than the character controller's 0.28 m
+        /// radius lets the camera get to a wall, so no real surface is lost by ignoring it.</summary>
+        const float FirstPersonDepth = 0.6f;
 
         readonly ComputeShader _cs;
         readonly int _kernel;
@@ -187,7 +195,10 @@ namespace WorkshopWreckage
             {
                 int row = FlipY ? GridH - 1 - y : y;
                 for (int x = x0; x <= x1; x++)
-                    if (_grid[row * GridW + x] >= nearest) return false;
+                {
+                    float d = _grid[row * GridW + x];
+                    if (d >= nearest || d < FirstPersonDepth) return false;   // seen, or the hand is in the way: no data
+                }
             }
             return true;
         }
